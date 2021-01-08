@@ -1,0 +1,13 @@
+$echo hello
+
+# How to set/access a string variable
+$string name Fred
+$echo Hello $name
+
+# How to set/use an array variable
+#$array names args Fred Lisa Joey
+#$echo Hello $expand.names
+
+# Run a program and return it's output as a string
+$string arch ($oneline uname -m)
+$echo $arch
