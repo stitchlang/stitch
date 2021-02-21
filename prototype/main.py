@@ -213,7 +213,7 @@ class Builtin:
 
 class Obj:
     pass
-class ObjBuiltinFunc:
+class ObjBuiltin:
     def __init__(self, name):
         self.name = name
     def __repr__(self):
@@ -224,13 +224,13 @@ class ObjString:
 
 builtin_objects = {
     "_": ObjString(" "),
-    "note": ObjBuiltinFunc("note"),
-    "echo": ObjBuiltinFunc("echo"),
-    "set": ObjBuiltinFunc("set"),
-    "setarray": ObjBuiltinFunc("setarray"),
-    "oneline": ObjBuiltinFunc("oneline"),
-    "captureexitcode": ObjBuiltinFunc("captureexitcode"),
-    "call": ObjBuiltinFunc("call"),
+    "note": ObjBuiltin("note"),
+    "echo": ObjBuiltin("echo"),
+    "set": ObjBuiltin("set"),
+    "setarray": ObjBuiltin("setarray"),
+    "oneline": ObjBuiltin("oneline"),
+    "captureexitcode": ObjBuiltin("captureexitcode"),
+    "call": ObjBuiltin("call"),
 }
 
 def which(name):
@@ -242,7 +242,7 @@ def which(name):
 
 # escape the argument in a way that it could be re-used in another script
 def execNodeToScriptSource(arg):
-    if type(arg) == ObjBuiltinFunc:
+    if type(arg) == ObjBuiltin:
         return str(arg)
     assert(type(arg) == str)
     if (not special_regex.match(arg)) and (not " " in arg):
@@ -277,7 +277,7 @@ def runCommandExpandedNoFail(exec_nodes, script_vars, capture_stdout, log_cmd):
         # check args
         for node in exec_nodes[1:]:
             if type(node) != str:
-                sys.exit("The builtin function '{}' cannot be passed to an external program!".format(node))
+                sys.exit("The builtin '{}' cannot be passed to an external program!".format(node))
 
         if "/" in prog:
             args = exec_nodes
@@ -295,7 +295,7 @@ def runCommandExpandedNoFail(exec_nodes, script_vars, capture_stdout, log_cmd):
             if result.stdout:
                 stdout = result.stdout.decode("utf8")
         return result.returncode, stdout
-    elif type(prog) == ObjBuiltinFunc:
+    elif type(prog) == ObjBuiltin:
         return 0, getattr(Builtin, prog.name)(exec_nodes[1:], script_vars, capture_stdout)
     else:
         sys.exit("type is {}".format(type(prog)))
@@ -312,9 +312,10 @@ def lookupVar(name, script_vars):
 def concatPartAsString(part):
     if type(part) == str:
         return part
-    sys.exit("Error: can only concatenate strings but got a function '${}'".format(part))
+    assert(type(part) is ObjBuiltin)
+    sys.exit("Error: can only concatenate strings but got a builtin '${}'".format(part))
 
-# returns an array of strings and builtin-function objects
+# returns an array of strings and builtin objects
 def expandNodes(nodes, script_vars):
     exec_nodes = []
     for node in nodes:
@@ -326,7 +327,7 @@ def expandNodes(nodes, script_vars):
                 sys.exit("${} is undefined".format(node.id))
             if type(obj) is ObjString:
                 exec_nodes.append(obj.value)
-            elif type(obj) is ObjBuiltinFunc:
+            elif type(obj) is ObjBuiltin:
                 exec_nodes.append(obj)
             else:
                 sys.exit("not impl, expand object ${} of type {}".format(node.id, type(obj)))

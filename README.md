@@ -26,7 +26,7 @@ Char | Description
 `(`  | start a command substitution, escape with `$(`
 `)`  | ends a command substitution, escape with `$)`
 
-> NOTE: Say a line starts with `$foo`, if foo is a string, then it's expanded and it's interpreted as a program. If it's function (like $echo), then it's interpreted as that builtin function.
+> NOTE: Say a line starts with `$foo`, if foo is a string, then it's expanded and it's interpreted as a program. If it's a builtin (like $echo), then it's interpreted as that builtin program.
 
 > IDEA: maybe a script or line should be able to change their special symbol from `$` to something else?  For example, you could have something like this `$->! !echo your balance is $1.25`.
 
@@ -214,7 +214,7 @@ tar xf $target$.tar.xz
 $set env.PATH $pwd/$target/bin:$env.PATH
 ```
 
-## Builtin Functions/Programs
+## Builtin Programs
 
 #### $oneline PROG ARGS...
 
