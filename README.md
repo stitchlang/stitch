@@ -9,7 +9,7 @@ program args...
 
 The "program" string can be:
 
-* a builtin program (if it starts with the `$` character, like `$echo`)
+* a builtin program (like `$echo`)
 * a filename (if it contains any slash `/` characters)
 * otherwise, it is a program name (a file in one of the `PATH` directories)
 
