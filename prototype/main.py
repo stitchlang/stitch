@@ -222,6 +222,7 @@ class ObjString:
     def __init__(self, value):
         self.value = value
 
+# builtin objects that do not change and are the same for all scripts
 builtin_objects = {
     "_": ObjString(" "),
     "note": ObjBuiltin("note"),
