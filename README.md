@@ -28,16 +28,16 @@ Char | Description
 ```
 $echo hello
 
-$# How to set/access a string variable
-$string name Fred
+$# How to set/access a regular variable
+$set name Fred
 $echo Hello $name
 
 $# How to set/use an array variable
-$array names args Fred Lisa Joey
+$setarray names args Fred Lisa Joey
 $echo Hello $expand.names
 
 $# Run a program and return it's output as a string
-$string arch ($oneline uname -m)
+$set arch ($oneline uname -m)
 ```
 
 > NOTE: $echolines is just like $echo except it prints a newline after each argument
@@ -96,16 +96,16 @@ $# Variables
 
 ```
 $#
-$# $string [SCOPE.]VARNAME VALUE
+$# $set [SCOPE.]VARNAME VALUE
 $#
-$string msg Hello, my name is Fred
+$set msg Hello, my name is Fred
 $echo $msg
 $# prints "Hello, my name is Fred"
 
 $echo $g.msg
 $# still prints "Hello, my name is Fred", "g" is a special scope through which user variables can be accessed.  This should be used for variables that may conflict with predefined variables (i.e. $g.echo instead of $echo). (Note: `$g.g` is not the same as `$g`, it would be a user script variable named `g`).
 
-$string cpu_count ($oneline nproc)
+$set cpu_count ($oneline nproc)
 
 $echo You have $cpu_count cpus
 $echo Expand cpu count with a suffix is $cpu_count$cpus
@@ -131,14 +131,14 @@ expand | Scope to expand arrays through.
 
 ```
 $#
-$# $array [SCOPE.]VARNAME splitlines VALUE
-$# $array [SCOPE.]VARNAME args ARGS...
+$# $setarray [SCOPE.]VARNAME splitlines VALUE
+$# $setarray [SCOPE.]VARNAME args ARGS...
 $#
 $# TODO: splitwhitespace?
 $#
 $# Example:
 
-$array mounts splitlines (cat /proc/mounts)
+$setarray mounts splitlines (cat /proc/mounts)
 
 $# now the "mounts" variable is an array of all the mounts
 
@@ -162,7 +162,7 @@ Environment variables are accessed in the `env` scope.
 ```
 $env.VAR
 
-$string env.VAR VALUE
+$set env.VAR VALUE
 ```
 
 ## Command Substitution
@@ -171,10 +171,10 @@ $string env.VAR VALUE
 $# run command and return it's output as a string
 (PROG ARGS...)
 
-$string myfile_content (cat myfile)
+$set myfile_content (cat myfile)
 
 $# you can use the $oneline builtin to enforce that the command only prints one line and it will also trim the trailing newline
-$string lsfile ($oneline which ls)
+$set lsfile ($oneline which ls)
 
 $# TODO: maybe have a $firstline/$lastline?
 
@@ -193,23 +193,23 @@ $echo Hello World
 ### Read input and print it
 
 ```
-$string input (read)
+$set input (read)
 $echo You entered: $input
 ```
 
 ### Random
 
 ```
-$string pwd ($oneline pwd)
-$string arch ($oneline uname -m)
-$string target $arch$-linux-musl
-$string prefix $env.HOME/$target
-$string jobs -j(nproc)
+$set pwd ($oneline pwd)
+$set arch ($oneline uname -m)
+$set target $arch$-linux-musl
+$set prefix $env.HOME/$target
+$set jobs -j(nproc)
 
 wget example.come/$target$.tar.xz
 tar xf $target$.tar.xz
 
-$string env.PATH $pwd/$target/bin:$env.PATH
+$set env.PATH $pwd/$target/bin:$env.PATH
 ```
 
 ## Builtin Functions/Programs
