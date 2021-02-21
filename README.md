@@ -1,16 +1,21 @@
-An exploration on a scripting language.  The basic syntax is:
+A scripting language to make it easy to write programs that are correct.  This is an attempt to create a better alternative to languages like BASH.
+
+The purpose of this language is to create programs by "stitching" together other programs (maybe "stitch" is a good name for the language?).  For programs that mainly implement new logic rather than calling other programs, another langauge like Python is better suited. Given this, the basic syntax of the language is:
 
 ```
 program args...
 program args...
 ```
 
-> NOTE: this is a scripting language, not a shell language, so the term "script" will be used instead "shell"
+The "program" string can be:
 
-* how to interpret the program string
-    - if it contains slashes, it is a file path
-    - otherwise, it is a program in one of the PATH directories (NOTE: need builtin to resolve this, like $findprog)
-* if a command argument looks like one argument, it should be
+* a builtin program (if it starts with the `$` character, like `$echo`)
+* a filename (if it contains any slash `/` characters)
+* otherwise, it is a program name (a file in one of the `PATH` directories)
+
+> NOTE: need a builtin to resolve program names like `$findprog NAME`
+
+Also note that when looking at a script, if something looks like a single argument, it should be.  For example, `$myfile` should always be a single argument whether or not it contains whitespace.  This is achieved by performing variable expansion after program arguments have been separated.  To create mutiple arguments from a variable, array expansion is required.
 
 Special characters:
 
@@ -319,3 +324,9 @@ $run $foo
 ./script --dump-commands-to script2
 ./script2
 ```
+
+# Thoughts
+
+This scripting language is meant to represent coherent programs that live inside files rather than individual commands typed by a user.  For this reason the term "script" will be used rather than "shell".
+
+One thing I've learned is that if you want to make it easy to write something correctly, you should avoid cases where something works "some of the time".  Working "some of the time" usually means it works in the test environment but then fails when it gets to the customer.  With this in mind, it's better to make features that either "fail all of the time" or "work all of the time"; working only "some of the time" is the space where bugs thrive.
