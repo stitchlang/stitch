@@ -83,6 +83,36 @@ $set f $scriptdir/scratch
 $set dir $f
 ls $dir
 
+$note --------------------------------------------------------------------------------
+$note $@'Bash Pitfall #6: [ "$foo" = bar && "$bar" = foo ]'
+$note --------------------------------------------------------------------------------
+# this scripting language currently doesn't have an equivalent of "&&" so this one
+# can't happen, however, I also don't have a good alternative for "&&" at this point.
+# Here is the corrected BASH example:
+#
+#     [ $foo = bar ] && [ $bar = foo ]
+#
+$set foo bar
+$set bar foo
+
+# TODO: how to represent this?
+#[ $foo = bar ] && [ $bar = foo ]
+$set test1 ($captureexitcode [ $foo = bar ])
+$set test2 ($captureexitcode [ $bar = foo ])
+$echo test1 is $test1, test2 is $test2
+
+$note --------------------------------------------------------------------------------
+$note $@'Bash Pitfall #7: [[ $foo > 7 ]]'
+$note --------------------------------------------------------------------------------
+# this one looks like a problem with the '[[' program rather than with BASH itself
+
+$note --------------------------------------------------------------------------------
+$note $@'Bash Pitfall #8: grep foo bar | while read -r; do ((count++)); done'
+$note --------------------------------------------------------------------------------
+# we don't have loops yet, but the underlying problem is that `count++` is
+# executed in a subshell, however, this script doesn't do that so it shouldn't
+# be a pitfall
+
 
 
 $note cleaning up
