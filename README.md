@@ -87,7 +87,7 @@ arg 2
 arg 3
 
 # awk is a good example to demonstrate because it also makes use of $
-> awk $!"{print $1 $2}"
+> awk $@"{print $1 $2}"
 
 ```
 
