@@ -1,4 +1,4 @@
-#! /bin/les
+#!/usr/bin/env this-scripting-language
 #
 # This is the ldd script that I'm translating from the one I happened to have on my
 # NixOS machine at the time.
@@ -12,14 +12,14 @@
 $set env.TEXTDOMAIN libc
 $set env.TEXTDOMAINDIR /nix/store/xg6ilb9g9zhi2zg1dpi4zcp288rhnvns-glibc-2.30/share/locale
 
-$set env.RTLDLIST /nix/store/xg6ilb9g9zhi2zg1dpi4zcp288rhnvns-glibc-2.30/lib/ld-linux.so.2$_/nix/store/xg6ilb9g9zhi2zg1dpi4zcp288rhnvns-glibc-2.30/lib64/ld-linux-x86-64.so.2$_/nix/store/xg6ilb9g9zhi2zg1dpi4zcp288rhnvns-glibc-2.30/libx32/ld-linux-x32.so.2
+$set env.RTLDLIST $@"/nix/store/xg6ilb9g9zhi2zg1dpi4zcp288rhnvns-glibc-2.30/lib/ld-linux.so.2 /nix/store/xg6ilb9g9zhi2zg1dpi4zcp288rhnvns-glibc-2.30/lib64/ld-linux-x86-64.so.2 /nix/store/xg6ilb9g9zhi2zg1dpi4zcp288rhnvns-glibc-2.30/libx32/ld-linux-x32.so.2"
 
 #warn=
-$set warn 0
+$set warn $@""
 #bind_now=
-$set bind_now 0
+$set bind_now $@""
 #verbose=
-$set verbose 0
+$set verbose $@""
 
 #while test $# -gt 0; do
 #  case "$1" in
@@ -90,9 +90,10 @@ $set verbose 0
 #  return 1;
 #}
 
-$set add_env LD_TRACE_LOADED_OBJECTS=1$_$LD_WARN=$warn$$_$LD_BIND_NOW=$bind_now
-$set add_env $add_env$$_$LD_LIBRARY_VERSION=$$verify_out
-$set add_env $add_env$$_$LD_VERBOSE=$verbose
+$set add_env ($echo LD_TRACE_LOADED_OBJECTS=1 LD_WARN=warn LD_BIND_NOW=$bind_now)
+$set add_env ($echo $add_env LD_LIBRARY_VERSION=$$verify_out)
+$set add_env ($echo $add_env LD_VERBOSE=$verbose)
+$echo $add_env
 #if test "$unused" = yes; then
 #  add_env="$add_env LD_DEBUG=\"$LD_DEBUG${LD_DEBUG:+,}unused\""
 #fi
