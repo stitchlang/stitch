@@ -91,9 +91,6 @@ arg 3
 
 ```
 
-> NOTE: I don't really like using "$ " to escape a space, because then the argument doesn't look like one argument.  This could also make the implementation a bit more complicated because the parser wouldn't be able to split arguments using whitespace before expansion.
-> TODO: should I support quoted arguments?  I'll leave them out for now since they aren't necessary for scripts to be funcationally complete.
-
 # Variables
 
 ```
