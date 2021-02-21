@@ -93,90 +93,91 @@ $set verbose 0
 $set add_env LD_TRACE_LOADED_OBJECTS=1$_$LD_WARN=$warn$$_$LD_BIND_NOW=$bind_now
 $set add_env $add_env$$_$LD_LIBRARY_VERSION=$$verify_out
 $set add_env $add_env$$_$LD_VERBOSE=$verbose
-if test "$unused" = yes; then
-  add_env="$add_env LD_DEBUG=\"$LD_DEBUG${LD_DEBUG:+,}unused\""
-fi
-
-# The following command substitution is needed to make ldd work in SELinux
-# environments where the RTLD might not have permission to write to the
-# terminal.  The extra "x" character prevents the shell from trimming trailing
-# newlines from command substitution results.  This function is defined as a
-# subshell compound list (using "(...)") to prevent parameter assignments from
-# affecting the calling shell execution environment.
-try_trace() (
-  output=$(eval $add_env '"$@"' 2>&1; rc=$?; printf 'x'; exit $rc)
-  rc=$?
-  printf '%s' "${output%x}"
-  return $rc
-)
-
-case $# in
-0)
-  echo >&2 'ldd:' $"missing file arguments"
-  echo >&2 $"Try \`ldd --help' for more information."
-  exit 1
-  ;;
-1)
-  single_file=t
-  ;;
-*)
-  single_file=f
-  ;;
-esac
-
-result=0
-for file do
-  # We don't list the file name when there is only one.
-  test $single_file = t || echo "${file}:"
-  case $file in
-  */*) :
-       ;;
-  *) file=./$file
-     ;;
-  esac
-  if test ! -e "$file"; then
-    echo "ldd: ${file}:" $"No such file or directory" >&2
-    result=1
-  elif test ! -f "$file"; then
-    echo "ldd: ${file}:" $"not regular file" >&2
-    result=1
-  elif test -r "$file"; then
-    test -x "$file" || echo 'ldd:' $"\
-warning: you do not have execution permission for" "\`$file'" >&2
-    RTLD=
-    ret=1
-    for rtld in ${RTLDLIST}; do
-      if test -x $rtld; then
-	verify_out=`${rtld} --verify "$file"`
-	ret=$?
-	case $ret in
-	[02]) RTLD=${rtld}; break;;
-	esac
-      fi
-    done
-    case $ret in
-    1)
-      # This can be a non-ELF binary or no binary at all.
-      nonelf "$file" || {
-	echo $"	not a dynamic executable"
-	result=1
-      }
-      ;;
-    0|2)
-      try_trace "$RTLD" "$file" || result=1
-      ;;
-    *)
-      echo 'ldd:' ${RTLD} $"exited with unknown exit code" "($ret)" >&2
-      exit 1
-      ;;
-    esac
-  else
-    echo 'ldd:' $"error: you do not have read permission for" "\`$file'" >&2
-    result=1
-  fi
-done
-
-exit $result
-# Local Variables:
-#  mode:ksh
-# End:
+#if test "$unused" = yes; then
+#  add_env="$add_env LD_DEBUG=\"$LD_DEBUG${LD_DEBUG:+,}unused\""
+#fi
+#
+## The following command substitution is needed to make ldd work in SELinux
+## environments where the RTLD might not have permission to write to the
+## terminal.  The extra "x" character prevents the shell from trimming trailing
+## newlines from command substitution results.  This function is defined as a
+## subshell compound list (using "(...)") to prevent parameter assignments from
+## affecting the calling shell execution environment.
+#try_trace() (
+#  output=$(eval $add_env '"$@"' 2>&1; rc=$?; printf 'x'; exit $rc)
+#  rc=$?
+#  printf '%s' "${output%x}"
+#  return $rc
+#)
+#
+#case $# in
+#0)
+#  echo >&2 'ldd:' $"missing file arguments"
+#  echo >&2 $"Try \`ldd --help' for more information."
+#  exit 1
+#  ;;
+#1)
+#  single_file=t
+#  ;;
+#*)
+#  single_file=f
+#  ;;
+#esac
+#
+#result=0
+#for file do
+#  # We don't list the file name when there is only one.
+#  test $single_file = t || echo "${file}:"
+#  case $file in
+#  */*) :
+#       ;;
+#  *) file=./$file
+#     ;;
+#  esac
+#  if test ! -e "$file"; then
+#    echo "ldd: ${file}:" $"No such file or directory" >&2
+#    result=1
+#  elif test ! -f "$file"; then
+#    echo "ldd: ${file}:" $"not regular file" >&2
+#    result=1
+#  elif test -r "$file"; then
+#    test -x "$file" || echo 'ldd:' $"\
+#warning: you do not have execution permission for" "\`$file'" >&2
+#    RTLD=
+#    ret=1
+#    for rtld in ${RTLDLIST}; do
+#      if test -x $rtld; then
+#	verify_out=`${rtld} --verify "$file"`
+#	ret=$?
+#	case $ret in
+#	[02]) RTLD=${rtld}; break;;
+#	esac
+#      fi
+#    done
+#    case $ret in
+#    1)
+#      # This can be a non-ELF binary or no binary at all.
+#      nonelf "$file" || {
+#	echo $"	not a dynamic executable"
+#	result=1
+#      }
+#      ;;
+#    0|2)
+#      try_trace "$RTLD" "$file" || result=1
+#      ;;
+#    *)
+#      echo 'ldd:' ${RTLD} $"exited with unknown exit code" "($ret)" >&2
+#      exit 1
+#      ;;
+#    esac
+#  else
+#    echo 'ldd:' $"error: you do not have read permission for" "\`$file'" >&2
+#    result=1
+#  fi
+#done
+#
+#exit $result
+## Local Variables:
+##  mode:ksh
+## End:
+#

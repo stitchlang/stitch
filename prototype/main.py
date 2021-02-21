@@ -203,6 +203,13 @@ class Builtin:
         returncode, stdout = runCommandExpandedNoFail(args, script_vars, capture_stdout=False, log_cmd=False)
         assert(stdout == None)
         return str(returncode)
+    def call(args, script_vars, capture_stdout):
+        if len(args) == 0:
+            sys.exit("Error: the $call builtin requires at least one argument")
+        program_file = args[0]
+        if len(args) > 1:
+            sys.exit("Error: $call with more than just a program not implemented")
+        return runFile(program_file, capture_stdout)
 
 class Obj:
     pass
@@ -223,6 +230,7 @@ builtin_objects = {
     "setarray": ObjBuiltinFunc("setarray"),
     "oneline": ObjBuiltinFunc("oneline"),
     "captureexitcode": ObjBuiltinFunc("captureexitcode"),
+    "call": ObjBuiltinFunc("call"),
 }
 
 def which(name):
@@ -334,8 +342,9 @@ def expandNodes(nodes, script_vars):
     return exec_nodes
 
 
-def runFile(filename):
+def runFile(filename, capture_stdout):
     script_vars = {}
+    output = ""
     with open(filename, "r") as file:
         while True:
             line = file.readline()
@@ -348,9 +357,18 @@ def runFile(filename):
             # Note: it seems like it might be better to just print the
             #       line in its source form rather than the expanded form
             #       definitly should have an option for this
-            print("+ {}".format(line))
-            result = runCommandNodes(nodes, script_vars, capture_stdout=False)
-            assert(result == None)
+            msg = "+ {}".format(line)
+            if capture_stdout:
+                output += msg + "\n"
+            else:
+                print(msg)
+            result = runCommandNodes(nodes, script_vars, capture_stdout=capture_stdout)
+            if capture_stdout:
+                assert(type(result) == str)
+                output += result + "\n"
+            else:
+                assert(result == None)
+    return output if capture_stdout else None
 
 def main():
     cmd_args = sys.argv[1:]
@@ -359,6 +377,6 @@ def main():
     if len(cmd_args) != 1:
         sys.exit("Error: too many command-line arguments")
     filename = cmd_args[0]
-    runFile(filename)
+    runFile(filename, capture_stdout=False)
 
 main()
