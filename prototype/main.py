@@ -8,11 +8,6 @@ special_regex = re.compile("$()")
 
 class Node:
     pass
-class NodeComment(Node):
-    def __init__(self):
-        pass
-    def __repr__(self):
-        return "Comment"
 class NodeRawString(Node):
     def __init__(self, s):
         self.s = s
@@ -79,14 +74,14 @@ def parseDollarExpr(src, i):
         # TODO: add test for this error
         sys.exit("Error: got a '$' with nothing after it")
     c_ord = ord(src[i])
+    if c_ord == ord("#"):
+        return NodeRawString("#"), i+1
     if c_ord == ord("$"):
         return NodeRawString("$"), i+1
     if c_ord == ord("("):
         return NodeRawString("("), i+1
     if c_ord == ord(")"):
         return NodeRawString(")"), i+1
-    if c_ord == ord("#"):
-        return NodeComment(), len(src)
     if c_ord == ord("@"):
         return parseRawString(src, i+1)
     if not isIdOrd(c_ord):
@@ -119,8 +114,6 @@ def parseNode(src, i):
             dollar_node, dollar_str_limit = parseDollarExpr(src, i+1)
             mark = dollar_str_limit
             i = dollar_str_limit
-            if isinstance(dollar_node, NodeComment):
-                break
             node = combineNodes(node, dollar_node)
             continue
         if c_ord == ord("("):
@@ -135,7 +128,7 @@ def parseNode(src, i):
             mark = cmd_subst_limit + 1
             i = cmd_subst_limit + 1
             continue
-        if isspaceOrd(c_ord) or c_ord == ord(")"):
+        if isspaceOrd(c_ord) or c_ord == ord("#") or c_ord == ord(")"):
             break
         i += 1
     if i > mark:
@@ -149,7 +142,7 @@ def parseCommand(src, i):
         if i == len(src):
             break
         next_ord = ord(src[i])
-        if next_ord == ord(")") or (next_ord == '$' and (i+1 < len(src) and ord(src[i+1]) == '#')):
+        if next_ord == ord("#") or next_ord == ord(")"):
             break
         node, i = parseNode(src, i)
         if not node:
@@ -268,9 +261,9 @@ def runCommandExpandedNoFail(exec_nodes, script_vars, capture_stdout, log_cmd):
     # I suppose this could happen if the whole command is just an expanded array that expands to nothing
     if len(exec_nodes) == 0:
         return 0, ("" if capture_stdout else None)
-    # NOTE: I may not want to log the expanded command
-    if log_cmd:
-        print("+ {}".format(" ".join([execNodeToScriptSource(n) for n in exec_nodes])))
+    ## NOTE: I may not want to log the expanded command
+    #if log_cmd:
+    #    print("+ {}".format(" ".join([execNodeToScriptSource(n) for n in exec_nodes])))
     prog = exec_nodes[0]
     if type(prog) == str:
         # check args
@@ -341,27 +334,23 @@ def expandNodes(nodes, script_vars):
     return exec_nodes
 
 
-def runLine(filename, script_vars, line):
-    line = line.rstrip()
-    nodes = parseTopLevelCommand(line)
-    if len(nodes) == 0:
-        return
-    result = runCommandNodes(nodes, script_vars, capture_stdout=False)
-    assert(result == None)
-
 def runFile(filename):
     script_vars = {}
     with open(filename, "r") as file:
-        # read first line, to handle shebang line
-        firstline = file.readline()
-        if firstline:
-            if not firstline.startswith("#"):
-                runLine(filename, script_vars, firstline)
-            while True:
-                line = file.readline()
-                if not line:
-                    break
-                runLine(filename, script_vars, line)
+        while True:
+            line = file.readline()
+            if not line:
+                break
+            line = line.rstrip()
+            nodes = parseTopLevelCommand(line)
+            if len(nodes) == 0:
+                continue
+            # Note: it seems like it might be better to just print the
+            #       line in its source form rather than the expanded form
+            #       definitly should have an option for this
+            print("+ {}".format(line))
+            result = runCommandNodes(nodes, script_vars, capture_stdout=False)
+            assert(result == None)
 
 def main():
     cmd_args = sys.argv[1:]

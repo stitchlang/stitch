@@ -1,39 +1,39 @@
-$#
-$#
-$##!/usr/bin/env bash
-$#set -euo pipefail
-$#
-$#if [ $# != 2 ]; then
-$#    cat <<USAGE
-$#Usage: ${0} <old_ref> <new_ref>
-$#
-$#  Generate a markdown formatted git change set between the given range.
-$#USAGE
-$#    exit 1
-$#fi
+#
+#
+##!/usr/bin/env bash
+#set -euo pipefail
+#
+#if [ $# != 2 ]; then
+#    cat <<USAGE
+#Usage: ${0} <old_ref> <new_ref>
+#
+#  Generate a markdown formatted git change set between the given range.
+#USAGE
+#    exit 1
+#fi
 
-$# TODO: get these from command-line
+# TODO: get these from command-line
 $set oldref HEAD~1
 $set newref HEAD
-$#$set oldref ($oneline git rev-parse HEAD~2)
-$#$set newref ($oneline git rev-parse HEAD)
+#$set oldref ($oneline git rev-parse HEAD~2)
+#$set newref ($oneline git rev-parse HEAD)
 
-$#gitcmd=(git log --no-merges --pretty=oneline --abbrev-commit "${1}..${2}")
+#gitcmd=(git log --no-merges --pretty=oneline --abbrev-commit "${1}..${2}")
 $set gitcmd (git log --no-merges --pretty=oneline --abbrev-commit $oldref$..$newref)
 
 
-$#repo="$(git config --get remote.origin.url | \
-$#        sed -r -e 's,^(https://github.*\.azc\.ext\.hp\.com/|git@github.*\.azc\.ext\.hp\.com:)(.*),\2,' -e 's/.git$//')"
-$#$set repo (git config --get remote.origin.url $out sed -r -e s,^$(https://github.*\.azc\.ext\.hp\.com/|git@github.*\.azc\.ext\.hp\.com:$)$(.*$),\2, -e s/.git$//')
-$#
-$## ensure git command succeeds via 'set -e' before constructing output
-$#output=$("${gitcmd[@]}") 
-$#
-$#echo "$output" | \
-$#sed -r 's,^(.*)\((#[0-9]+)\)$,\1\('"$repo"'\2\),gm' | \
-$#awk -v gitcmd="${gitcmd[*]}" \
-$#    'BEGIN{print "`"gitcmd"`\n";
-$#           print "| commit | oneline |";
-$#           print "| ------ | ------- |"};
-$#     {printf "|`"$1"`|"};
-$#     {$1=""; print $0"|"}'
+#repo="$(git config --get remote.origin.url | \
+#        sed -r -e 's,^(https://github.*\.azc\.ext\.hp\.com/|git@github.*\.azc\.ext\.hp\.com:)(.*),\2,' -e 's/.git$//')"
+#$set repo (git config --get remote.origin.url $out sed -r -e s,^$(https://github.*\.azc\.ext\.hp\.com/|git@github.*\.azc\.ext\.hp\.com:$)$(.*$),\2, -e s/.git$//')
+#
+## ensure git command succeeds via 'set -e' before constructing output
+#output=$("${gitcmd[@]}")
+#
+#echo "$output" | \
+#sed -r 's,^(.*)\((#[0-9]+)\)$,\1\('"$repo"'\2\),gm' | \
+#awk -v gitcmd="${gitcmd[*]}" \
+#    'BEGIN{print "`"gitcmd"`\n";
+#           print "| commit | oneline |";
+#           print "| ------ | ------- |"};
+#     {printf "|`"$1"`|"};
+#     {$1=""; print $0"|"}'

@@ -21,11 +21,10 @@ Special characters:
 
 Char | Description
 -----|-------------
+`#`  | a single-line comment, escape with `$#`
 `$`  | starts an expression, escape with `$$`
 `(`  | start a command substitution, escape with `$(`
 `)`  | ends a command substitution, escape with `$)`
-
-> NOTE: instead of using `#` as a comment, the sequence `$#` can be used.  This reduces the number of special characters for which different modes would need to accomodate.  One thing to note is `$#` is processed earlier than other kinds of `$` escaping, that may be confusing.  Not sure if this is worth it or not.
 
 > NOTE: Say a line starts with `$foo`, if foo is a string, then it's expanded and it's interpreted as a program. If it's function (like $echo), then it's interpreted as that builtin function.
 
@@ -34,19 +33,19 @@ Char | Description
 ## Sample
 
 ```
-$# this is a comment
+# this is a comment
 
 $echo hello
 
-$# varibles
+# varibles
 $set name Fred
 $echo Hello $name
 
-$# arrays
+# arrays
 $setarray names args Fred Lisa Joey
 $echo Hello $expand.names
 
-$# command substitution
+# command substitution
 $set arch ($oneline uname -m)
 ```
 
@@ -75,19 +74,19 @@ arg 1
 arg 2
 arg 3
 
-$# NOTE: maybe I could make space be something like $_ or $-, whatever I pick, note that no other symbol could start with it
-$#       $- might be better because some would probably expect $_foo to work
+# NOTE: maybe I could make space be something like $_ or $-, whatever I pick, note that no other symbol could start with it
+#       $- might be better because some would probably expect $_foo to work
 > $echolines arg$-1 arg$-2 arg$-3
 > $echolines arg$_1 arg$_2 arg$_3
 > $echolines arg$,1 arg$,2 arg$,3
 
-$# NOTE: I can use command substituion to include spaces in a string like this
+# NOTE: I can use command substituion to include spaces in a string like this
 > $echolines ($echo arg 1) ($echo arg 2) ($echo arg 3)
 arg 1
 arg 2
 arg 3
 
-$# awk is a good example to demonstrate because it also makes use of $
+# awk is a good example to demonstrate because it also makes use of $
 > awk $!"{print $1 $2}"
 
 ```
@@ -95,18 +94,18 @@ $# awk is a good example to demonstrate because it also makes use of $
 > NOTE: I don't really like using "$ " to escape a space, because then the argument doesn't look like one argument.  This could also make the implementation a bit more complicated because the parser wouldn't be able to split arguments using whitespace before expansion.
 > TODO: should I support quoted arguments?  I'll leave them out for now since they aren't necessary for scripts to be funcationally complete.
 
-$# Variables
+# Variables
 
 ```
-$#
-$# $set [SCOPE.]VARNAME VALUE
-$#
+#
+# $set [SCOPE.]VARNAME VALUE
+#
 $set msg Hello, my name is Fred
 $echo $msg
-$# prints "Hello, my name is Fred"
+# prints "Hello, my name is Fred"
 
 $echo $g.msg
-$# still prints "Hello, my name is Fred", "g" is a special scope through which user variables can be accessed.  This should be used for variables that may conflict with predefined variables (i.e. $g.echo instead of $echo). (Note: `$g.g` is not the same as `$g`, it would be a user script variable named `g`).
+# still prints "Hello, my name is Fred", "g" is a special scope through which user variables can be accessed.  This should be used for variables that may conflict with predefined variables (i.e. $g.echo instead of $echo). (Note: `$g.g` is not the same as `$g`, it would be a user script variable named `g`).
 
 $set cpu_count ($oneline nproc)
 
@@ -137,23 +136,23 @@ expand | Scope to expand arrays through.
 Arrays are important because they provide a way to represent one or more strings without requiring them to be delimited.  Not having an array type and requiring a delimiter instead is the source of many pitfalls with other scripting languages.
 
 ```
-$#
-$# $setarray [SCOPE.]VARNAME splitlines VALUE
-$# $setarray [SCOPE.]VARNAME args ARGS...
-$#
-$# TODO: splitwhitespace?
-$#
-$# Example:
+#
+# $setarray [SCOPE.]VARNAME splitlines VALUE
+# $setarray [SCOPE.]VARNAME args ARGS...
+#
+# TODO: splitwhitespace?
+#
+# Example:
 $setarray mounts splitlines (cat /proc/mounts)
 
-$# now the "mounts" variable is an array of all the mounts
+# now the "mounts" variable is an array of all the mounts
 
-$# How to use the array in a command?
+# How to use the array in a command?
 $args-to-lines $expand.mounts
 
-$# Not using $expand.VAR will cause an error
+# Not using $expand.VAR will cause an error
 $args-to-lines $mounts
-$# Error: mounts is an array, you must expand it with $expand.mounts
+# Error: mounts is an array, you must expand it with $expand.mounts
 ```
 
 Note that arrays cannot be used within another string.  They must be expanded on their own.  The reason for using the `expand` scope to expand arrays, is so that it's immediately apparent that an array is being expanded into 0 or more arguments.
@@ -174,17 +173,17 @@ $set env.VAR VALUE
 ## Command Substitution
 
 ```
-$# run command and return it's output as a string
+# run command and return it's output as a string
 (PROG ARGS...)
 
 $set myfile_content (cat myfile)
 
-$# you can use the $oneline builtin to enforce that the command only prints one line and it will also trim the trailing newline
+# you can use the $oneline builtin to enforce that the command only prints one line and it will also trim the trailing newline
 $set lsfile ($oneline which ls)
 
-$# TODO: maybe have a $firstline/$lastline?
+# TODO: maybe have a $firstline/$lastline?
 
-$# Example
+# Example
 make -j(nproc)
 ```
 
@@ -265,12 +264,12 @@ DollarExpr ::= '(' Command ')' | [a-zA-Z_.]* '$'?
 
 How to handle return code and stdout/stderr?  I could have a CommandResult type of object.
 ```
-$#
-$# $captureouts PROG ARGS...
-$# $captureall     PROG ARGS...
-$#
-$# the $capture* builtins will run the program/args that follow, and instead of just returning stdout, it will return
-$# an object.  $capturestreams will capture stdout and stderr via the "out" and "err" fields.  $captureall will also capture
+#
+# $captureouts PROG ARGS...
+# $captureall     PROG ARGS...
+#
+# the $capture* builtins will run the program/args that follow, and instead of just returning stdout, it will return
+# an object.  $capturestreams will capture stdout and stderr via the "out" and "err" fields.  $captureall will also capture
 $ the exit code in the field `code`, note that this overrides the default behavior of exiting on a non-zero exit code.
 
 $set some_program_result ($captureouts some-program)
@@ -298,19 +297,19 @@ foo $out bar
 foo $err bar
 foo $outerr bar
 
-$# How to pipe stdout and stderr to different places?
+# How to pipe stdout and stderr to different places?
 
-$# the following won't work because $err could belong to the previous command
+# the following won't work because $err could belong to the previous command
 foo $out COMMAND... $err COMMAND...
 
 
-$# to redirect the output of "foo" to a file "myfile", use $in2file
+# to redirect the output of "foo" to a file "myfile", use $in2file
 foo $out $in2file myfile
 
-$# to forward out/err to different places, could do multiple lines like this
+# to forward out/err to different places, could do multiple lines like this
 $set foo $stage foo args...
-$# the $stage COMMAND... builtin will create create a process that has not been started yet
-$# now $myprogram.out and $myprogram.err are open file handles
+# the $stage COMMAND... builtin will create create a process that has not been started yet
+# now $myprogram.out and $myprogram.err are open file handles
 $attach $foo.out bar
 $attach $foo.err baz
 $run $foo

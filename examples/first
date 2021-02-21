@@ -1,15 +1,15 @@
-$# this is a comment
+# this is a comment
 
 $echo hello
 
-$# varibles
+# varibles
 $set name Fred
 $echo Hello $name
 
-$# arrays
-$# NOT IMPLEMENTED $setarray names args Fred Lisa Joey
-$# NOT IMPLEMENTED $echo Hello $expand.names
+# arrays
+# NOT IMPLEMENTED $setarray names args Fred Lisa Joey
+# NOT IMPLEMENTED $echo Hello $expand.names
 
-$# command substitution
+# command substitution
 $set arch ($oneline uname -m)
 $echo $arch
