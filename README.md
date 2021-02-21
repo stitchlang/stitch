@@ -5,6 +5,7 @@ program args...
 program args...
 ```
 
+> NOTE: this is a scripting language, not a shell language, so the term "script" will be used instead "shell"
 
 * how to interpret the program string
     - if it contains slashes, it is a file path
