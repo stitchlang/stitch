@@ -13,18 +13,18 @@
 #fi
 
 # TODO: get these from command-line
-$string oldref HEAD~1
-$string newref HEAD
-#$string oldref ($oneline git rev-parse HEAD~2)
-#$string newref ($oneline git rev-parse HEAD)
+$set oldref HEAD~1
+$set newref HEAD
+#$set oldref ($oneline git rev-parse HEAD~2)
+#$set newref ($oneline git rev-parse HEAD)
 
 #gitcmd=(git log --no-merges --pretty=oneline --abbrev-commit "${1}..${2}")
-$string gitcmd (git log --no-merges --pretty=oneline --abbrev-commit $oldref$..$newref)
+$set gitcmd (git log --no-merges --pretty=oneline --abbrev-commit $oldref$..$newref)
 
 
 #repo="$(git config --get remote.origin.url | \
 #        sed -r -e 's,^(https://github.*\.azc\.ext\.hp\.com/|git@github.*\.azc\.ext\.hp\.com:)(.*),\2,' -e 's/.git$//')"
-#$string repo (git config --get remote.origin.url $out sed -r -e s,^$(https://github.*\.azc\.ext\.hp\.com/|git@github.*\.azc\.ext\.hp\.com:$)$(.*$),\2, -e s/.git$//')
+#$set repo (git config --get remote.origin.url $out sed -r -e s,^$(https://github.*\.azc\.ext\.hp\.com/|git@github.*\.azc\.ext\.hp\.com:$)$(.*$),\2, -e s/.git$//')
 #
 ## ensure git command succeeds via 'set -e' before constructing output
 #output=$("${gitcmd[@]}") 

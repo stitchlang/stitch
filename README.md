@@ -25,18 +25,22 @@ Char | Description
 
 > IDEA: maybe a script or a line should be able to change their special symbol from `$` to something else?  For example, you could have something like this `$->! !echo your balance is $1.25`.
 
+## Sample
+
 ```
+$# this is a comment
+
 $echo hello
 
-$# How to set/access a regular variable
+$# varibles
 $set name Fred
 $echo Hello $name
 
-$# How to set/use an array variable
+$# arrays
 $setarray names args Fred Lisa Joey
 $echo Hello $expand.names
 
-$# Run a program and return it's output as a string
+$# command substitution
 $set arch ($oneline uname -m)
 ```
 
@@ -129,6 +133,10 @@ expand | Scope to expand arrays through.
 
 > NOTE: maybe support $XX$ to insert arbitrary hex characters?  So a space could be $20$?
 
+## Arrays
+
+Arrays are important because they provide a way to represent one or more strings without requiring them to be delimited.  Not having an array type and requiring a delimiter instead is the source of many pitfalls with other scripting languages.
+
 ```
 $#
 $# $setarray [SCOPE.]VARNAME splitlines VALUE
@@ -137,7 +145,6 @@ $#
 $# TODO: splitwhitespace?
 $#
 $# Example:
-
 $setarray mounts splitlines (cat /proc/mounts)
 
 $# now the "mounts" variable is an array of all the mounts

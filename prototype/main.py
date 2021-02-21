@@ -5,6 +5,11 @@ import subprocess
 
 class Node:
     pass
+class NodeComment(Node):
+    def __init__(self):
+        pass
+    def __repr__(self):
+        return "Comment"
 class NodeRawString(Node):
     def __init__(self, s):
         self.s = s
@@ -64,7 +69,7 @@ def parseDollarExpr(src, i):
     if c_ord == ord(")"):
         return NodeRawString(")"), i+1
     if c_ord == ord("#"):
-        return NodeRawString("#"), i+1
+        return NodeComment(), len(src)
     if not isIdOrd(c_ord):
         sys.exit("Error: expected [a-zA-Z0-9_.$] after '$' but got '{}'".format(chr(c_ord)))
     id_start = i
@@ -93,9 +98,11 @@ def parseNode(src, i):
             if i > mark:
                 node = combineNodes(node, NodeRawString(src[mark:i]))
             dollar_node, dollar_str_limit = parseDollarExpr(src, i+1)
-            node = combineNodes(node, dollar_node)
             mark = dollar_str_limit
             i = dollar_str_limit
+            if isinstance(dollar_node, NodeComment):
+                break
+            node = combineNodes(node, dollar_node)
             continue
         if c_ord == ord("("):
             if i > mark:
@@ -123,7 +130,7 @@ def parseCommand(src, i):
         if i == len(src):
             break
         next_ord = ord(src[i])
-        if next_ord == ord("#") or next_ord== ord(")"):
+        if next_ord == ord(")") or (next_ord == '$' and (i+1 < len(src) and ord(src[i+1]) == '#')):
             break
         node, i = parseNode(src, i)
         if not node:
@@ -147,16 +154,16 @@ class Builtin:
         output = " ".join(args)
         print(output)
         return output
-    def string(args, script_vars):
+    def set(args, script_vars):
         if len(args) == 0:
-            sys.exit("Error: the $string builtin requires at least one argument")
+            sys.exit("Error: the $set builtin requires at least one argument")
         varname = args[0]
         if len(args) > 2:
-            sys.exit("Error: the $string builtin can only accept 2 arguments but got {}".format(len(args)))
+            sys.exit("Error: the $set builtin can only accept 2 arguments but got {}".format(len(args)))
         value = args[1]
-        print("DEBUG: setting string variable '{}' to '{}'".format(varname, value))
+        print("DEBUG: setting variable '{}' to '{}'".format(varname, value))
         script_vars[varname] = ObjString(value)
-        # NOTE: not returning the value here? Why? because the $string builtin doesn't output it.  Also, if
+        # NOTE: not returning the value here? Why? because the $set builtin doesn't output it.  Also, if
         #       a script wants the value, they can now acces it through the variable that is being set.
         return ""
     def oneline(args, script_vars):
@@ -185,7 +192,7 @@ class ObjString:
 builtin_objects = {
     "_": ObjString(" "),
     "echo": ObjBuiltinFunc("echo"),
-    "string": ObjBuiltinFunc("string"),
+    "set": ObjBuiltinFunc("set"),
     "array": ObjBuiltinFunc("array"),
     "oneline": ObjBuiltinFunc("oneline"),
 }
