@@ -262,7 +262,7 @@ def runCommandNodes(ast_nodes, script_vars, capture_stdout):
 def runCommandExpanded(exec_nodes, script_vars, capture_stdout, log_cmd):
     returncode, stdout = runCommandExpandedNoFail(exec_nodes, script_vars, capture_stdout=capture_stdout, log_cmd=log_cmd)
     if returncode != 0:
-        sys.exit("Error: program '{}' exited with code {}".format(prog, result.returncode))
+        sys.exit("Error: program '{}' exited with code {}".format(exec_nodes[0], returncode))
     return stdout
 
 def runCommandExpandedNoFail(exec_nodes, script_vars, capture_stdout, log_cmd):
@@ -344,7 +344,9 @@ def expandNodes(nodes, script_vars):
 
 
 def runFile(filename, capture_stdout):
-    script_vars = {}
+    script_vars = {
+        "scriptfile": ObjString(filename),
+    }
     output = ""
     with open(filename, "r") as file:
         while True:
@@ -378,6 +380,13 @@ def main():
     if len(cmd_args) != 1:
         sys.exit("Error: too many command-line arguments")
     filename = cmd_args[0]
-    runFile(filename, capture_stdout=False)
+    full_filename = os.path.abspath(filename)
+
+    # try to get rid of CWD state by going to a temporary readonly directory
+    if not os.path.exists("/tmp/script-sandbox"):
+        os.mkdir("/tmp/script-sandbox")
+        os.chdir("/tmp/script-sandbox")
+
+    runFile(full_filename, capture_stdout=False)
 
 main()

@@ -312,6 +312,20 @@ $attach $foo.err baz
 $run $foo
 ```
 
+# The Current Working Directory
+
+Having a current working directory as hidden state that affects all relative path names may be more trouble than it's worth.  One alterative is to use absolute path names.  However, some programs use the current working directory as an important input, in which case there needs to be a way to set it.  Here's a way we could set this and make it excplicit:
+
+```
+$cwd DIR PROG ARGS...
+
+# example
+$cwd $scriptdir git status
+
+# here's the same example not using CWD, if the program supports it, then this is probably preferred
+git -C $scriptdir status
+```
+
 # TODO:
 
 * as a test, I should run a script, output all the commands that were run to another script, then run that script a second time and it should still work.  Assuming there is a `--dump-commands-to FILE` command-line option:
