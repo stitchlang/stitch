@@ -57,6 +57,20 @@ def skipWhitespace(src, i):
         i += 1
     return i
 
+def parseRawString(src, i):
+    if i == len(src):
+        sys.exit("Error: got '$@' with nothing after it")
+    sentinel_char = src[i]
+    sentinel_ord = ord(sentinel_char)
+    i += 1
+    start = i
+    while True:
+        if i == len(src):
+            sys.exit("Error: got '$@{}' is missing the terminating '{}' character".format(sentinel_char, sentinel_char))
+        if ord(src[i]) == sentinel_ord:
+            return NodeRawString(src[start:i]), i+1
+        i += 1
+
 def parseDollarExpr(src, i):
     if i == len(src):
         # TODO: add test for this error
@@ -70,6 +84,8 @@ def parseDollarExpr(src, i):
         return NodeRawString(")"), i+1
     if c_ord == ord("#"):
         return NodeComment(), len(src)
+    if c_ord == ord("@"):
+        return parseRawString(src, i+1)
     if not isIdOrd(c_ord):
         sys.exit("Error: expected [a-zA-Z0-9_.$] after '$' but got '{}'".format(chr(c_ord)))
     id_start = i
@@ -116,7 +132,7 @@ def parseNode(src, i):
             mark = cmd_subst_limit + 1
             i = cmd_subst_limit + 1
             continue
-        if isspaceOrd(c_ord) or c_ord == ord("#") or c_ord == ord(")"):
+        if isspaceOrd(c_ord) or c_ord == ord(")"):
             break
         i += 1
     if i > mark:
@@ -150,6 +166,8 @@ def stripNewline(s):
     return s
 
 class Builtin:
+    def note(args, script_vars):
+        return ""
     def echo(args, script_vars):
         output = " ".join(args)
         print(output)
@@ -191,6 +209,7 @@ class ObjString:
 
 builtin_objects = {
     "_": ObjString(" "),
+    "note": ObjBuiltinFunc("note"),
     "echo": ObjBuiltinFunc("echo"),
     "set": ObjBuiltinFunc("set"),
     "array": ObjBuiltinFunc("array"),

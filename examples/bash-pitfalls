@@ -1,0 +1,33 @@
+$#
+$# An example script that enumerates BASH pitfalls and how they would
+$# compare to this scripting language:
+$#
+$# These pitfalls are taken from https://mywiki.wooledge.org/BashPitfalls
+$#
+
+$note --------------------------------------------------------------------------------
+$note $@"Bash Pitfall #1: for f in $(ls *.mp3)"
+$note --------------------------------------------------------------------------------
+$note Have not implemented any looping yet
+$note --------------------------------------------------------------------------------
+$note $@"Bash Pitfall #2: cp $file $target"
+$note --------------------------------------------------------------------------------
+$#
+$# This examples is correct in this scripting language because:
+$#     - variables can have whitespace
+$#     - there's no $IFS
+$#     - variables can have wildcards
+$#     - there's no wordsplitting
+$#     - there's no pathname expansion
+$#
+rm -rf scratch
+mkdir scratch
+$set file ($echo scratch/file with crazy characters like *[{}]<>)
+$set target ($echo scratch/the target file)
+touch $file
+
+cp $file $target
+
+
+$note cleaning up
+rm -rf scratch

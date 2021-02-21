@@ -23,7 +23,7 @@ Char | Description
 
 > NOTE: Say a line starts with `$foo`, if foo is a string, then it's expanded and it's interpreted as a program. If it's function (like $echo), then it's interpreted as that builtin function.
 
-> IDEA: maybe a script or a line should be able to change their special symbol from `$` to something else?  For example, you could have something like this `$->! !echo your balance is $1.25`.
+> IDEA: maybe a script or line should be able to change their special symbol from `$` to something else?  For example, you could have something like this `$->! !echo your balance is $1.25`.
 
 ## Sample
 
@@ -59,6 +59,11 @@ arg
 arg
 3
 
+> $echolines $@"arg 1" $@"arg 2" $@"arg 3"
+arg 1
+arg 2
+arg 3
+
 > $echolines arg$space$1 arg$space$2 arg$space$3
 arg 1
 arg 2
@@ -76,21 +81,9 @@ arg 1
 arg 2
 arg 3
 
+$# awk is a good example to demonstrate because it also makes use of $
+> awk $!"{print $1 $2}"
 
-$# NOTE: even with $echo, there may be cases where we want to include `$` characters without escaping them.  In this case, maybe I should include a HERDOC style?  (an example of this is calling awk)  I could support something a number of delimiters such as
-> $echolines $(arg 1) $[arg 2] $"arg 3" $'arg 4' $<arg 5> ${arg 6} $|arg 7|
-
-> awk $"{print $1 $2}"
-
-$# NOTE: I suppose these modes would disable `$` expansion?  Or maybe we want some modes to enable it?  Something to ponder on.
-$# Not sure if I should support this many styles?  I will probably also want to have some sort of multiline
-$# style of HERDOC, this one can take more characters.
-
-$echo $delimited EOF
-This is a raw multi-line
-string that does not end
-until it sees...
-EOF
 ```
 
 > NOTE: I don't really like using "$ " to escape a space, because then the argument doesn't look like one argument.  This could also make the implementation a bit more complicated because the parser wouldn't be able to split arguments using whitespace before expansion.
@@ -224,6 +217,30 @@ $set env.PATH $pwd/$target/bin:$env.PATH
 #### $oneline PROG ARGS...
 
 Runs the given program, enforces it only outputs one line and trims the trailing newline if it exists.
+
+## Raw String Mode
+
+I think there is value WYSIWYG strings. They are easier for humans to verify and make it easy to copy strings to and from your script. This means we need a way to disable our special characters `$` and `(` `)`.
+
+We can reserve a special character to appear after `$` to enter this "raw string mode".  Note that once in this mode, we will also need a way to escape it, however, we don't want to tie ourselves to one character to escape this mode because the string being represented may need that chatacter.  We solve this by including the sentinel character as well. For example, if we chose `@` to enable raw string mode, then we could do this:
+
+```
+$echo $@" I can use $, ( and ) in here but not a double-quote "
+$echo $@' I can use $, (, ) and " but not single-quote '
+$echo $@| I can use $, (, ), " and ' but not a pipe character in here '
+```
+
+As a shorthand, I could also just reserve multiple characters for this, like:
+```
+$echo $" example 1 "
+$echo $' example 1 '
+$echo $< example 1 >
+
+# probably don't do $( ... ) because that could easily get confused with command-substitution
+# maybe just $"..." and $'...'
+```
+
+Note that the same reasoning that applies to WYSIWYG strings would also apply to HEREDOC strings.  Also, we may raw and processed multiline strings.  A special dollar keyword could start a heredoc, tell if it is raw or processed, then specify the sentinel delimiter.
 
 # Grammar
 
