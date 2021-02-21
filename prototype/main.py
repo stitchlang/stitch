@@ -2,6 +2,9 @@
 import sys
 import os
 import subprocess
+import re
+
+special_regex = re.compile("$()")
 
 class Node:
     pass
@@ -228,13 +231,28 @@ def which(name):
             return filename
     return None
 
+# escape the argument in a way that it could be re-used in another script
+def execNodeToScriptSource(arg):
+    if type(arg) == ObjBuiltinFunc:
+        return str(arg)
+    assert(type(arg) == str)
+    if (not special_regex.match(arg)) and (not " " in arg):
+        return arg
+    delimiter = None
+    for delimiter_option in ('"', "'", '|'):
+        if not delimiter_option in arg:
+            delimiter = delimiter_option
+            break
+    if not delimiter:
+        sys.exit("TODO: implement more delimiter options for this string '{}'".format(arg))
+    return "$@{}{}{}".format(delimiter, arg, delimiter)
 
 def runCommandExpanded(exec_nodes, script_vars, log_cmd):
     # I suppose this could happen if the whole command is just and expanded array that expands to nothing
     if len(exec_nodes) == 0:
         return ""
     if log_cmd:
-        print("+ {}".format(" ".join([str(n) for n in exec_nodes])))
+        print("+ {}".format(" ".join([execNodeToScriptSource(n) for n in exec_nodes])))
     prog = exec_nodes[0]
     if type(prog) == str:
         # check args

@@ -309,3 +309,12 @@ $attach $foo.out bar
 $attach $foo.err baz
 $run $foo
 ```
+
+# TODO:
+
+* as a test, I should run a script, output all the commands that were run to another script, then run that script a second time and it should still work.  Assuming there is a `--dump-commands-to FILE` command-line option:
+
+```
+./script --dump-commands-to script2
+./script2
+```
