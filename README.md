@@ -170,7 +170,7 @@ $set env.VAR VALUE
 ## Command Substitution
 
 ```
-# run command and return it's output as a string
+# run command and return its output as a string
 (PROG ARGS...)
 
 $set myfile_content (cat myfile)
