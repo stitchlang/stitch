@@ -22,7 +22,7 @@ $#     - there's no pathname expansion
 $#
 rm -rf scratch
 mkdir scratch
-$set file ($echo scratch/file with crazy characters like *[{}]<>)
+$set file ($echo scratch/file with crazy characters like *[{}]<>")
 $set target ($echo scratch/the target file)
 touch $file
 
