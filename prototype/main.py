@@ -168,36 +168,48 @@ def stripNewline(s):
         return s[:-1]
     return s
 
-class Builtin:
-    def note(args, script_vars):
-        return ""
-    def echo(args, script_vars):
-        output = " ".join(args)
-        print(output)
+def handleBuiltinOutput(output, capture_stdout):
+    if capture_stdout:
         return output
-    def set(args, script_vars):
+    if len(output) > 0:
+        print(output)
+    return None
+
+class Builtin:
+    def note(args, script_vars, capture_stdout):
+        return handleBuiltinOutput("", capture_stdout)
+    def echo(args, script_vars, capture_stdout):
+        return handleBuiltinOutput(" ".join(args), capture_stdout)
+    def set(args, script_vars, capture_stdout):
         if len(args) == 0:
             sys.exit("Error: the $set builtin requires at least one argument")
         varname = args[0]
         if len(args) > 2:
             sys.exit("Error: the $set builtin can only accept 2 arguments but got {}".format(len(args)))
         value = args[1]
-        print("DEBUG: setting variable '{}' to '{}'".format(varname, value))
+        #print("DEBUG: setting variable '{}' to '{}'".format(varname, value))
         script_vars[varname] = ObjString(value)
         # NOTE: not returning the value here? Why? because the $set builtin doesn't output it.  Also, if
         #       a script wants the value, they can now acces it through the variable that is being set.
-        return ""
-    def oneline(args, script_vars):
+        return handleBuiltinOutput("", capture_stdout)
+    def oneline(args, script_vars, capture_stdout):
         if len(args) == 0:
             sys.exit("Error: the $oneline builtin requires at least one argument")
-        s = runCommandExpanded(args, script_vars, False)
+        s = runCommandExpanded(args, script_vars, capture_stdout=True, log_cmd=False)
         lines = s.splitlines()
         if len(lines) == 0:
-            return ""
+            return handleBuiltinOutput("", capture_stdout)
         if len(lines) == 1:
-            return stripNewline(lines[0])
+            return handleBuiltinOutput(stripNewline(lines[0]), capture_stdout)
         sys.exit("Error: program '{}' returned {} lines, but expected 1".format(str(args[0]), len(lines)))
-
+    def captureexitcode(args, script_vars, capture_stdout):
+        if not capture_stdout:
+            sys.exit("Error: $captureexitcode must be used in in a command-substitution")
+        if len(args) == 0:
+            sys.exit("Error: the $captureexitcode builtin requires at least one argument")
+        returncode, stdout = runCommandExpandedNoFail(args, script_vars, capture_stdout=False, log_cmd=False)
+        assert(stdout == None)
+        return str(returncode)
 
 class Obj:
     pass
@@ -215,14 +227,10 @@ builtin_objects = {
     "note": ObjBuiltinFunc("note"),
     "echo": ObjBuiltinFunc("echo"),
     "set": ObjBuiltinFunc("set"),
-    "array": ObjBuiltinFunc("array"),
+    "setarray": ObjBuiltinFunc("setarray"),
     "oneline": ObjBuiltinFunc("oneline"),
+    "captureexitcode": ObjBuiltinFunc("captureexitcode"),
 }
-
-def runCommandNodes(ast_nodes, script_vars):
-    #print("DEBUG: {}".format("  --  ".join([str(n) for n in nodes])))
-    return runCommandExpanded(expandNodes(ast_nodes, script_vars), script_vars, True)
-
 
 def which(name):
     for path in os.environ["PATH"].split(os.pathsep):
@@ -247,10 +255,20 @@ def execNodeToScriptSource(arg):
         sys.exit("TODO: implement more delimiter options for this string '{}'".format(arg))
     return "$@{}{}{}".format(delimiter, arg, delimiter)
 
-def runCommandExpanded(exec_nodes, script_vars, log_cmd):
-    # I suppose this could happen if the whole command is just and expanded array that expands to nothing
+def runCommandNodes(ast_nodes, script_vars, capture_stdout):
+    return runCommandExpanded(expandNodes(ast_nodes, script_vars), script_vars, capture_stdout=capture_stdout, log_cmd=True)
+
+def runCommandExpanded(exec_nodes, script_vars, capture_stdout, log_cmd):
+    returncode, stdout = runCommandExpandedNoFail(exec_nodes, script_vars, capture_stdout=capture_stdout, log_cmd=log_cmd)
+    if returncode != 0:
+        sys.exit("Error: program '{}' exited with code {}".format(prog, result.returncode))
+    return stdout
+
+def runCommandExpandedNoFail(exec_nodes, script_vars, capture_stdout, log_cmd):
+    # I suppose this could happen if the whole command is just an expanded array that expands to nothing
     if len(exec_nodes) == 0:
-        return ""
+        return 0, ("" if capture_stdout else None)
+    # NOTE: I may not want to log the expanded command
     if log_cmd:
         print("+ {}".format(" ".join([execNodeToScriptSource(n) for n in exec_nodes])))
     prog = exec_nodes[0]
@@ -268,15 +286,16 @@ def runCommandExpanded(exec_nodes, script_vars, log_cmd):
                 sys.exit("Error: cannot find program '{}'".format(prog))
             args = [prog_filename] + exec_nodes[1:]
         # TODO: don't capture stderr
-        result = subprocess.run(args, capture_output=True)
-        if result.returncode != 0:
-            sys.exit("Error: program '{}' exited with code {}".format(prog, result.returncode))
+        result = subprocess.run(args, capture_output=capture_stdout)
         # TODO: what to do with stderr?
-        if result.stdout:
-            return result.stdout.decode("utf8")
-        return ""
+        stdout = None
+        if capture_stdout:
+            stdout = ""
+            if result.stdout:
+                stdout = result.stdout.decode("utf8")
+        return result.returncode, stdout
     elif type(prog) == ObjBuiltinFunc:
-        return getattr(Builtin, prog.name)(exec_nodes[1:], script_vars)
+        return 0, getattr(Builtin, prog.name)(exec_nodes[1:], script_vars, capture_stdout)
     else:
         sys.exit("type is {}".format(type(prog)))
 
@@ -311,7 +330,9 @@ def expandNodes(nodes, script_vars):
             else:
                 sys.exit("not impl, expand object ${} of type {}".format(node.id, type(obj)))
         elif type(node) is NodeCommandSub:
-            exec_nodes.append(runCommandNodes(node.nodes, script_vars))
+            result = runCommandNodes(node.nodes, script_vars, capture_stdout=True)
+            assert(type(result) == str)
+            exec_nodes.append(result)
         elif type(node) is NodeMultiple:
             sub_exec_nodes = expandNodes(node.nodes, script_vars)
             exec_nodes.append("".join([concatPartAsString(n) for n in sub_exec_nodes]))
@@ -319,18 +340,28 @@ def expandNodes(nodes, script_vars):
             raise Exception("codebug, unhandled node type {}".format(type(node)))
     return exec_nodes
 
+
+def runLine(filename, script_vars, line):
+    line = line.rstrip()
+    nodes = parseTopLevelCommand(line)
+    if len(nodes) == 0:
+        return
+    result = runCommandNodes(nodes, script_vars, capture_stdout=False)
+    assert(result == None)
+
 def runFile(filename):
     script_vars = {}
     with open(filename, "r") as file:
-        while True:
-            line = file.readline()
-            if not line:
-                break
-            line = line.rstrip()
-            nodes = parseTopLevelCommand(line)
-            if len(nodes) == 0:
-                continue
-            _ = runCommandNodes(nodes, script_vars)
+        # read first line, to handle shebang line
+        firstline = file.readline()
+        if firstline:
+            if not firstline.startswith("#"):
+                runLine(filename, script_vars, firstline)
+            while True:
+                line = file.readline()
+                if not line:
+                    break
+                runLine(filename, script_vars, line)
 
 def main():
     cmd_args = sys.argv[1:]

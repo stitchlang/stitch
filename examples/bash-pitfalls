@@ -9,12 +9,13 @@ $note --------------------------------------------------------------------------
 $note $@"Bash Pitfall #1: for f in $(ls *.mp3)"
 $note --------------------------------------------------------------------------------
 $note Have not implemented any looping yet
+
 $note --------------------------------------------------------------------------------
 $note $@"Bash Pitfall #2: cp $file $target"
 $note --------------------------------------------------------------------------------
 $#
 $# This examples is correct in this scripting language because:
-$#     - variables can have whitespace
+$#     - variables can have whitespace and are still treated as a single argument
 $#     - there's no $IFS
 $#     - variables can have wildcards
 $#     - there's no wordsplitting
@@ -28,6 +29,32 @@ touch $file
 
 cp $file $target
 
+$note --------------------------------------------------------------------------------
+$note Bash Pitfall #3: Filenames with leading dashes
+$note --------------------------------------------------------------------------------
+$note this isn't a problem with Bash, it's just a problem with command-line interfaces
+$note in general that scripting languages are vulnerable to.
+
+$note --------------------------------------------------------------------------------
+$note $@"Bash Pitfall #4: [ $foo = "bar" ]
+$note --------------------------------------------------------------------------------
+$#
+$# In this scripting language, the correct usage is
+$#     [ $foo = bar ]
+$#
+$# We avoid the pitfalls because:
+$#     - we don't have quoted variable semantics
+$#     - if 'foo' does not exist then a "foo is undefined" error will be asserted rather than evaluating it as [ = "bar" ]
+$#     - variables can have whitespace and are still treated as a single argument
+$#     - there's no $IFS
+$#     - variables can have wildcards
+$#     - there's no wordsplitting
+$#     - there's no pathname expansion
+$#
+$set foo bar
+[ $foo = bar ]
+$set foo notbar
+[ 1 = ($captureexitcode [ $foo = bar ]) ]
 
 $note cleaning up
 rm -rf scratch
