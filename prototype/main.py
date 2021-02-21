@@ -196,13 +196,11 @@ class Builtin:
             return handleBuiltinOutput(stripNewline(lines[0]), capture_stdout)
         sys.exit("Error: program '{}' returned {} lines, but expected 1".format(str(args[0]), len(lines)))
     def captureexitcode(args, script_vars, capture_stdout):
-        if not capture_stdout:
-            sys.exit("Error: $captureexitcode must be used in in a command-substitution")
         if len(args) == 0:
             sys.exit("Error: the $captureexitcode builtin requires at least one argument")
         returncode, stdout = runCommandExpandedNoFail(args, script_vars, capture_stdout=False, log_cmd=False)
         assert(stdout == None)
-        return str(returncode)
+        return handleBuiltinOutput(str(returncode), capture_stdout)
     def call(args, script_vars, capture_stdout):
         if len(args) == 0:
             sys.exit("Error: the $call builtin requires at least one argument")
