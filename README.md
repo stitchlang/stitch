@@ -181,8 +181,11 @@ $set lsfile ($oneline which ls)
 # TODO: maybe have a $firstline/$lastline?
 
 # Example
-make -j(nproc)
+make -j($oneline nproc)
 ```
+
+I should consider whether to change the default behavior of command-substitution.  Command substitution is commonly used to set strings that don't intend to contain newline characters.  I could make the `($oneline COMMAND...)` behavior the default, and require something like `($multiline COMMAND..)` to support multiple lines.  This might make it easier to write correct programs, since it might be making the more common use case the default.  However, this would make command-substitution more complicated. All it does now is forward the string from stdout without modification. Also note that if this were changed, conceptually this would be introducing a new Type because the `$multiline` builtin would have to take the command output and wrap it in a type that signals to command-substituion that multiple lines are ok.  Using `$multiline` outside command-substition would also be an error I think.
+
 
 # Examples
 
