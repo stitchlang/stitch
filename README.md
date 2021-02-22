@@ -13,7 +13,7 @@ The "program" string can be:
 * a filename (if it contains any slash `/` characters)
 * otherwise, it is a program name (a file in one of the `PATH` directories)
 
-> NOTE: need a builtin to resolve program names like `$findprog NAME`
+> NOTE: if I implement logic to find a program in `PATH` then it needs to be exposed via a builtin such as `$findprog NAME`
 
 Also note that when looking at a script, if something looks like a single argument, it should be.  For example, `$myfile` should always be a single argument whether or not it contains whitespace.  This is achieved by performing variable expansion after program arguments have been separated.  To create mutiple arguments from a variable, array expansion is required.
 
@@ -356,14 +356,24 @@ Also compare that they produce the same output.
 
 # Thoughts
 
-This scripting language is meant to represent coherent programs that live inside files rather than individual commands typed by a user.  For this reason the term "script" will be used rather than "shell".
+### Script instead of Shell
 
-One thing I've learned is that if you want to make it easy to write something correctly, you should avoid cases where something works "some of the time".  Working "some of the time" usually means it works in the test environment but then fails when it gets to the customer.  With this in mind, it's better to make features that either "fail all of the time" or "work all of the time"; working only "some of the time" is the space where bugs thrive.
+This scripting language is meant to represent coherent programs that live inside files rather than individual commands typed by a user.  For this reason the term "script" seems more fitting than the term "shell".
 
-Why don't I use `$( ... )` for command substitution rather than `(...)`?  These are three observations I made:
+### "always fails" is better than "sometimes works"
+
+Having code that "sometimes works" is where bugs thrive.  It usually means the code will work in the test environment but then fail when it gets to the customer.  With this in mind, it's better to make features that either "fail all of the time" or "work all of the time".  If possible, avoid features that encourage code to "sometimes work".
+
+### Why Command Substitution is `(...)` rather than `$(...)`
+
+This syntax is a result of the following 3 observations:
 
 1. I don't want `)` to be treated differently inside or outside a command-substitution
 2. I don't want `(` and `)` to be treated differently from each other
 3. Given the above 2, I would need to use something like `$( ... $)`, however, that looks weird.
 
 Also note that issues 1 and 3 still apply even if I only used 1 character like `|` instead of the parenthesis.
+
+### Reserved Characters
+
+I've limited the number of reserved/special characters quite a bit.  It's possible to have only 1 special character, however, that seems to be too far in one direction.  This makes the source code littered with the "special character" and seems to make the code harder for humans to parse, and consequently, harder to write "correct code".  Minimizing the number of special characters simplifies the language and makes it easier to reason about what the source code is doing, however, special characters can sometimes aid in making the source code more readable.  The strategy I've adopted is to keep special characters limited by default until it becomes clear that adding a new special character is the best way to make it easier to write correct code.  I think the comment character `#` has passed this criteria.  Using `#` to create comments rather than `$#` makes the difference between code and comments easier to distinguish.  It's also a commonly used comment character so it makes the script more compatible with other existing languges which includes working with "shebang line" without special handling for the first line of the script.
