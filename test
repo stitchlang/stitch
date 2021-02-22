@@ -1,2 +1,2 @@
 #!/usr/bin/env bash
-exec $(dirname $(readlink -f ${BASH_SOURCE[0]}))/prototype/main.py test2
+exec $(dirname $(readlink -f ${BASH_SOURCE[0]}))/prototype test2
