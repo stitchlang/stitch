@@ -69,16 +69,10 @@ arg 1
 arg 2
 arg 3
 
-> $echolines arg$space$1 arg$space$2 arg$space$3
+> $echolines arg$sp$1 arg$sp$2 arg$sp$3
 arg 1
 arg 2
 arg 3
-
-# NOTE: maybe I could make space be something like $_ or $-, whatever I pick, note that no other symbol could start with it
-#       $- might be better because some would probably expect $_foo to work
-> $echolines arg$-1 arg$-2 arg$-3
-> $echolines arg$_1 arg$_2 arg$_3
-> $echolines arg$,1 arg$,2 arg$,3
 
 # NOTE: I can use command substituion to include spaces in a string like this
 > $echolines ($echo arg 1) ($echo arg 2) ($echo arg 3)
@@ -116,11 +110,11 @@ Builtin variables
 
 Name   | C Equivalent
 -------|---------
-space  | The string " "
+sp     | The string " "
 lf     | The string "\n"
 cr     | The string "\r"
 crlf   | The string "\r\n"
-newline| Either "\n" or "\r\n" depending on platform
+nl     | Either "\n" or "\r\n" depending on platform
 tab    | The string "\t"
 g      | The script's global scope.
 env    | Environment variable scope.

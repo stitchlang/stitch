@@ -237,7 +237,6 @@ class ObjString:
 
 # builtin objects that do not change and are the same for all scripts
 builtin_objects = {
-    "_": ObjString(" "),
     "note": ObjBuiltin("note"),
     "echo": ObjBuiltin("echo"),
     "set": ObjBuiltin("set"),
