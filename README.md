@@ -15,7 +15,7 @@ The "program" string can be:
 
 > NOTE: if I implement logic to find a program in `PATH` then it needs to be exposed via a builtin such as `$findprog NAME`
 
-Also note that when looking at a script, if something looks like a single argument, it should be.  For example, `$myfile` should always be a single argument whether or not it contains whitespace.  This is achieved by performing variable expansion after program arguments have been separated.  To create mutiple arguments from a variable, array expansion is required.
+Also note that when looking at a script, if something looks like a single argument, it should be.  For example, `$myfile` should always be a single argument whether or not it contains whitespace.  This is achieved by performing variable expansion after program arguments have been separated.  When multiple arguments are required from a variable, array expansion can be used.
 
 Special characters:
 

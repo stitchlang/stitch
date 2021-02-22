@@ -1,4 +1,10 @@
-
-
 $captureexitcode true
 $captureexitcode false
+
+
+$set direct_which (which ls)
+
+$set which which
+$set indirect_which ($which ls)
+
+test $direct_which = $indirect_which
