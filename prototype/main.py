@@ -165,7 +165,8 @@ def handleBuiltinOutput(output, capture_stdout):
     if capture_stdout:
         return output
     if len(output) > 0:
-        print(output)
+        # TODO: should echo even being outputing a newline?
+        print(output, end="\n" if (output[-1] != "\n") else "")
     return None
 
 class Builtin:
@@ -185,6 +186,25 @@ class Builtin:
         # NOTE: not returning the value here? Why? because the $set builtin doesn't output it.  Also, if
         #       a script wants the value, they can now acces it through the variable that is being set.
         return handleBuiltinOutput("", capture_stdout)
+    def settmp(args, script_vars, capture_stdout):
+        if len(args) < 3:
+            sys.exit("Error: the $settmp builtin requires at least 3 arguments")
+        varname = args[0]
+        value = args[1]
+        command = args[2:]
+        save = script_vars.get(varname)
+        #print("DEBUG: settmp '{}' to '{}'".format(varname, value))
+        script_vars[varname] = ObjString(value)
+        try:
+            return runCommandExpanded(command, script_vars, capture_stdout=capture_stdout, log_cmd=False)
+        finally:
+            if save:
+                #print("DEBUG: settmp reverting '{}' back to '{}'".format(varname, save))
+                script_vars[varname] = save
+            else:
+                #print("DEBUG: settmp reverting '{}' back to None".format(varname))
+                del script_vars[varname]
+
     def oneline(args, script_vars, capture_stdout):
         if len(args) == 0:
             sys.exit("Error: the $oneline builtin requires at least one argument")
@@ -227,6 +247,7 @@ builtin_objects = {
     "echo": ObjBuiltin("echo"),
     "set": ObjBuiltin("set"),
     "setarray": ObjBuiltin("setarray"),
+    "settmp": ObjBuiltin("settmp"),
     "oneline": ObjBuiltin("oneline"),
     "captureexitcode": ObjBuiltin("captureexitcode"),
     "call": ObjBuiltin("call"),
@@ -367,7 +388,10 @@ def runFile(filename, capture_stdout):
             result = runCommandNodes(nodes, script_vars, capture_stdout=capture_stdout)
             if capture_stdout:
                 assert(type(result) == str)
-                output += result + "\n"
+                if len(output) > 0:
+                    output += result
+                    if output[-1] != "\n":
+                        output += "\n"
             else:
                 assert(result == None)
     return output if capture_stdout else None
