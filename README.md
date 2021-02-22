@@ -350,6 +350,10 @@ git -C $scriptdir status
 ./script2
 ```
 
+Also compare that they produce the same output.
+
+* Look at BASH "Gotchas" https://tldp.org/LDP/abs/html/gotchas.html.  See how many we avoided.
+
 # Thoughts
 
 This scripting language is meant to represent coherent programs that live inside files rather than individual commands typed by a user.  For this reason the term "script" will be used rather than "shell".
