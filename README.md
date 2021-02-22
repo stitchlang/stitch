@@ -37,16 +37,16 @@ Char | Description
 
 $echo hello
 
-# varibles
+# variables
 $set name Fred
 $echo Hello $name
+
+# command substitution
+$set arch (uname -m)
 
 # arrays
 $setarray names args Fred Lisa Joey
 $echo Hello $expand.names
-
-# command substitution
-$set arch (uname -m)
 ```
 
 > NOTE: $echolines is just like $echo except it prints a newline after each argument

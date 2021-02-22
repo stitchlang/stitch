@@ -2,14 +2,14 @@
 
 $echo hello
 
-# varibles
+# variables
 $set name Fred
 $echo Hello $name
-
-# arrays
-# NOT IMPLEMENTED $setarray names args Fred Lisa Joey
-# NOT IMPLEMENTED $echo Hello $expand.names
 
 # command substitution
 $set arch (uname -m)
 $echo $arch
+
+# arrays
+# NOT IMPLEMENTED $setarray names args Fred Lisa Joey
+# NOT IMPLEMENTED $echo Hello $expand.names
