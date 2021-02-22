@@ -4,7 +4,7 @@
 #
 # These pitfalls are taken from https://mywiki.wooledge.org/BashPitfalls
 #
-$set scriptdir ($oneline dirname $scriptfile)
+$set scriptdir (dirname $scriptfile)
 
 $note --------------------------------------------------------------------------------
 $note $@"Bash Pitfall #1: for f in $(ls *.mp3)"

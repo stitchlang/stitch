@@ -204,17 +204,12 @@ class Builtin:
             else:
                 #print("DEBUG: settmp reverting '{}' back to None".format(varname))
                 del script_vars[varname]
-
-    def oneline(args, script_vars, capture_stdout):
+    def multiline(args, script_vars, capture_stdout):
         if len(args) == 0:
-            sys.exit("Error: the $oneline builtin requires at least one argument")
-        s = runCommandExpanded(args, script_vars, capture_stdout=True, log_cmd=False)
-        lines = s.splitlines()
-        if len(lines) == 0:
-            return handleBuiltinOutput("", capture_stdout)
-        if len(lines) == 1:
-            return handleBuiltinOutput(stripNewline(lines[0]), capture_stdout)
-        sys.exit("Error: program '{}' returned {} lines, but expected 1".format(str(args[0]), len(lines)))
+            sys.exit("Error: the $multiline builtin requires at least one argument")
+        if not capture_stdout:
+            sys.exit("Error: the $multiline builtin is only supported inside a command-substitution")
+        return MultilineResult(runCommandExpanded(args, script_vars, capture_stdout=True, log_cmd=False))
     def captureexitcode(args, script_vars, capture_stdout):
         if len(args) == 0:
             sys.exit("Error: the $captureexitcode builtin requires at least one argument")
@@ -248,10 +243,14 @@ builtin_objects = {
     "set": ObjBuiltin("set"),
     "setarray": ObjBuiltin("setarray"),
     "settmp": ObjBuiltin("settmp"),
-    "oneline": ObjBuiltin("oneline"),
+    "multiline": ObjBuiltin("multiline"),
     "captureexitcode": ObjBuiltin("captureexitcode"),
     "call": ObjBuiltin("call"),
 }
+
+class MultilineResult:
+    def __init__(self, value):
+        self.value = value
 
 def which(name):
     for path in os.environ["PATH"].split(os.pathsep):
@@ -353,8 +352,17 @@ def expandNodes(nodes, script_vars):
                 sys.exit("not impl, expand object ${} of type {}".format(node.id, type(obj)))
         elif type(node) is NodeCommandSub:
             result = runCommandNodes(node.nodes, script_vars, capture_stdout=True)
-            assert(type(result) == str)
-            exec_nodes.append(result)
+            if type(result) == MultilineResult:
+                exec_nodes.append(result.value)
+            else:
+                assert(type(result) == str)
+                lines = result.splitlines()
+                if len(lines) == 0:
+                    exec_nodes.append("")
+                elif len(lines) == 1:
+                    exec_nodes.append(stripNewline(lines[0]))
+                else:
+                    sys.exit("Error: program '{}' returned {} lines, but command-subtitution requires only 1 line of output.  Prefix the command with '$multiline' to support multiple.".format(str(node.nodes[0]), len(lines)))
         elif type(node) is NodeMultiple:
             sub_exec_nodes = expandNodes(node.nodes, script_vars)
             exec_nodes.append("".join([concatPartAsString(n) for n in sub_exec_nodes]))

@@ -11,5 +11,5 @@ $echo Hello $name
 # NOT IMPLEMENTED $echo Hello $expand.names
 
 # command substitution
-$set arch ($oneline uname -m)
+$set arch (uname -m)
 $echo $arch

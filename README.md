@@ -46,7 +46,7 @@ $setarray names args Fred Lisa Joey
 $echo Hello $expand.names
 
 # command substitution
-$set arch ($oneline uname -m)
+$set arch (uname -m)
 ```
 
 > NOTE: $echolines is just like $echo except it prints a newline after each argument
@@ -104,7 +104,7 @@ $echo $msg
 $echo $g.msg
 # still prints "Hello, my name is Fred", "g" is a special scope through which user variables can be accessed.  This should be used for variables that may conflict with predefined variables (i.e. $g.echo instead of $echo). (Note: `$g.g` is not the same as `$g`, it would be a user script variable named `g`).
 
-$set cpu_count ($oneline nproc)
+$set cpu_count (nproc)
 
 $echo You have $cpu_count cpus
 $echo Expand cpu count with a suffix is $cpu_count$cpus
@@ -170,22 +170,31 @@ $set env.VAR VALUE
 ## Command Substitution
 
 ```
-# run command and return its output as a string
+# run command and return one line of output as a string with no trailing newline
 (PROG ARGS...)
 
-$set myfile_content (cat myfile)
+# run the command and return any number of lines of output
+($multiline PROG ARGS...)
+```
 
-# you can use the $oneline builtin to enforce that the command only prints one line and it will also trim the trailing newline
-$set lsfile ($oneline which ls)
+It's assumed that Command Subtitution is more commonly used to return strings that don't contain newlines.  Because of this, by default Command Substitution only allows up to one line of output from stdout of the underlying command.  It also strips the trailing newline from the output before returning the string.
+
+This default behavior is overriden by prefixing the comand with `$multiline`.  This will return stdout of the underlying process unmodified.
+
+```
+$set arch (uname -m)
+
+$set myfile_content ($multiline cat myfile)
+
+$set lsfile (which ls)
 
 # TODO: maybe have a $firstline/$lastline?
 
 # Example
-make -j($oneline nproc)
+make -j(nproc)
 ```
 
-I should consider whether to change the default behavior of command-substitution.  Command substitution is commonly used to set strings that don't intend to contain newline characters.  I could make the `($oneline COMMAND...)` behavior the default, and require something like `($multiline COMMAND..)` to support multiple lines.  This might make it easier to write correct programs, since it might be making the more common use case the default.  However, this would make command-substitution more complicated. All it does now is forward the string from stdout without modification. Also note that if this were changed, conceptually this would be introducing a new Type because the `$multiline` builtin would have to take the command output and wrap it in a type that signals to command-substituion that multiple lines are ok.  Using `$multiline` outside command-substition would also be an error I think.
-
+> TODO: consider ($firstline COMMAND...) and ($lastline COMMAND...)
 
 # Examples
 
@@ -205,8 +214,8 @@ $echo You entered: $input
 ### Random
 
 ```
-$set pwd ($oneline pwd)
-$set arch ($oneline uname -m)
+$set pwd (pwd)
+$set arch (uname -m)
 $set target $arch$-linux-musl
 $set prefix $env.HOME/$target
 $set jobs -j(nproc)
@@ -219,9 +228,9 @@ $set env.PATH $pwd/$target/bin:$env.PATH
 
 ## Builtin Programs
 
-#### $oneline PROG ARGS...
+#### $multiline PROG ARGS...
 
-Runs the given program, enforces it only outputs one line and trims the trailing newline if it exists.
+Runs the given program output wrapped in an internal "MultilineResult" object that allows strings with mulitple lines to be returned from a command-substitution.
 
 ## Raw String Mode
 

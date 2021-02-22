@@ -38,7 +38,7 @@ $note Print week number
 $echo Week number: `date +"%V"`
 
 $note Create unique filename
-$set f ($oneline date +%s-%N)
+$set f (date +%s-%N)
 touch $f
 ls -l $f
 rm $f
@@ -46,7 +46,7 @@ rm $f
 $note Add epoch time to existing file
 $set f /tmp/test
 touch $f
-$set f2 $f$.($oneline date +%s)
+$set f2 $f$.(date +%s)
 mv $f $f2
 ls -l $f2
 rm $f2
