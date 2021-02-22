@@ -222,27 +222,30 @@ Runs the given program, enforces it only outputs one line and trims the trailing
 
 ## Raw String Mode
 
-I think there is value WYSIWYG strings. They are easier for humans to verify and make it easy to copy strings to and from your script. This means we need a way to disable our special characters `$` and `(` `)`.
+I think there is value WYSIWYG strings. They are easier for humans to verify and make it easy to copy strings to and from your script. This means we need a way to disable our special characters `#`, `$`, `(` and `)`.
 
-We can reserve a special character to appear after `$` to enter this "raw string mode".  Note that once in this mode, we will also need a way to escape it, however, we don't want to tie ourselves to one character to escape this mode because the string being represented may need that chatacter.  We solve this by including the sentinel character as well. For example, if we chose `@` to enable raw string mode, then we could do this:
+We can reserve a special character to appear after `$` to enter this "raw string mode".  Note that once in this mode, we will also need a way to escape it, however, we don't want to tie ourselves to one character to escape this mode because the string being represented may need that character.  We solve this by including the sentinel character as well. For example, if we chose `@` to enable raw string mode, then we could do this:
 
 ```
-$echo $@" I can use $, ( and ) in here but not a double-quote "
-$echo $@' I can use $, (, ) and " but not single-quote '
-$echo $@| I can use $, (, ), " and ' but not a pipe character in here '
+$echo $@" I can use #, $, ( and ) in here but not a double-quote "
+$echo $@' I can use #, $, (, ) and " but not single-quote '
+$echo $@| I can use #, $, (, ), " and ' but not a pipe character in here '
 ```
 
-As a shorthand, I could also just reserve multiple characters for this, like:
+As a shorthand, I could also reserve multiple characters for this, like:
 ```
 $echo $" example 1 "
 $echo $' example 1 '
-$echo $< example 1 >
+$echo $| example 1 |
 
 # probably don't do $( ... ) because that could easily get confused with command-substitution
 # maybe just $"..." and $'...'
 ```
 
+I could also support `"..."`.  This would make the double-quote `"` character a special reserved character. Would this make it easier to write correct programs? Keeping the number of reserved characters low makes it simpler to reason about what source is doing.  The question is whether that benefit outweighs needing to type `$"..."` instead of `"..."`.
+
 Note that the same reasoning that applies to WYSIWYG strings would also apply to HEREDOC strings.  Also, we may raw and processed multiline strings.  A special dollar keyword could start a heredoc, tell if it is raw or processed, then specify the sentinel delimiter.
+
 
 # Grammar
 
