@@ -74,7 +74,7 @@ $note --------------------------------------------------------------------------
 #         $set dir (dirname $f)
 #         cat $dir/foo
 #         git -C $dir status
-#         $cwd $dir tar xf bar.tar
+#         $withcwd $dir tar xf bar.tar
 #
 # Note that unlike the BASH example, the equivalent example is "correct".
 rm -rf $scriptdir/scratch

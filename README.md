@@ -530,10 +530,10 @@ $run $foo
 Having a current working directory as hidden state that affects all relative path names may be more trouble than it's worth.  One alterative is to use absolute path names.  However, some programs use the current working directory as an important input, in which case there needs to be a way to set it.  Here's a way we could set this and make it excplicit:
 
 ```sh
-$cwd DIR PROG ARGS...
+$withcwd DIR PROG ARGS...
 
 # example
-$cwd $scriptdir git status
+$withcwd $scriptdir git status
 
 # here's the same example not using CWD, if the program supports it, then this is probably preferred
 git -C $scriptdir status
