@@ -57,10 +57,10 @@ def testExpression(line, expected):
             __file__, lineno, expected, result.value, line))
 
 
-def runScriptTests():
+def runStitchTests():
     script_dir = os.path.dirname(__file__)
-    print("test: running script-tests...")
-    result = subprocess.run([os.path.join(script_dir, "prototype"), "script-tests"])
+    print("test: running stitch-tests...")
+    result = subprocess.run([os.path.join(script_dir, "stitch"), "stitch-tests"])
     if result.returncode != 0:
         sys.exit(result.returncode)
 
@@ -120,7 +120,7 @@ def main():
     testExpression("((true) $and (true)) $and (true)", True)
     testExpression("((true) $and (true)) $and ((true) $and (false))", False)
 
-    runScriptTests()
+    runStitchTests()
 
     print("test: success")
 

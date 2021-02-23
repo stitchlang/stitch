@@ -1,4 +1,4 @@
-#!/usr/bin/env this-scripting-language
+#!/usr/bin/env stitch
 #
 # This is the ldd script that I'm translating from the one I happened to have on my
 # NixOS machine at the time.
@@ -14,11 +14,8 @@ $set env.TEXTDOMAINDIR /nix/store/xg6ilb9g9zhi2zg1dpi4zcp288rhnvns-glibc-2.30/sh
 
 $set env.RTLDLIST $@"/nix/store/xg6ilb9g9zhi2zg1dpi4zcp288rhnvns-glibc-2.30/lib/ld-linux.so.2 /nix/store/xg6ilb9g9zhi2zg1dpi4zcp288rhnvns-glibc-2.30/lib64/ld-linux-x86-64.so.2 /nix/store/xg6ilb9g9zhi2zg1dpi4zcp288rhnvns-glibc-2.30/libx32/ld-linux-x32.so.2"
 
-#warn=
 $set warn $@""
-#bind_now=
 $set bind_now $@""
-#verbose=
 $set verbose $@""
 
 #while test $# -gt 0; do

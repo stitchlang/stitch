@@ -1,6 +1,6 @@
+#!/usr/bin/env stitch
 #
-# An example script that enumerates BASH pitfalls and how they would
-# compare to this scripting language:
+# What happens to bash pitfalls in stitch?
 #
 # These pitfalls are taken from https://mywiki.wooledge.org/BashPitfalls
 #
@@ -15,8 +15,8 @@ $note --------------------------------------------------------------------------
 $note $@"Bash Pitfall #2: cp $file $target"
 $note --------------------------------------------------------------------------------
 #
-# This examples is correct in this scripting language because:
-#     - variables can have whitespace and are still treated as a single argument
+# In stitch this example is correct because:
+#     - variables can have whitespace and are still treated as single arguments
 #     - there's no $IFS
 #     - variables can have wildcards
 #     - there's no wordsplitting
@@ -40,13 +40,13 @@ $note --------------------------------------------------------------------------
 $note $@"Bash Pitfall #4: [ $foo = "bar" ]
 $note --------------------------------------------------------------------------------
 #
-# In this scripting language, the correct usage is
+# In stitch the correct syntax is:
 #     [ $foo = bar ]
 #
 # We avoid the pitfalls because:
 #     - we don't have quoted variable semantics
 #     - if 'foo' does not exist then a "foo is undefined" error will be asserted rather than evaluating it as [ = "bar" ]
-#     - variables can have whitespace and are still treated as a single argument
+#     - variables can have whitespace and are still treated as single arguments
 #     - there's no $IFS
 #     - variables can have wildcards
 #     - there's no wordsplitting
@@ -61,8 +61,8 @@ $set foo notbar
 $note --------------------------------------------------------------------------------
 $note $@'Bash Pitfall #5: cd $(dirname "$f")'
 $note --------------------------------------------------------------------------------
-# Right now this scripting language does not support a `cd` command. The example
-# below demonstrates the alternatives in order of preference:
+# Right now stitch does not support a `cd` command. The example below demonstrates
+# the alternatives in order of preference:
 #
 #     Bash Example:
 #         cd $(dirname "$f")
@@ -87,11 +87,14 @@ ls $dir
 $note --------------------------------------------------------------------------------
 $note $@'Bash Pitfall #6: [ "$foo" = bar && "$bar" = foo ]'
 $note --------------------------------------------------------------------------------
-# this scripting language currently doesn't have an equivalent of "&&" so this one
-# can't happen, however, I also don't have a good alternative for "&&" at this point.
-# Here is the corrected BASH example:
+# In stitch the equivalent error would be this:
 #
-#     [ $foo = bar ] && [ $bar = foo ]
+#     [ $foo $equal $bar $and $bar $equal $foo ]
+#
+# In stitch this is a syntax error because binary operators only support single node
+# operands. stitch won't run this unless it is corrected to:
+#
+#     ($foo $equal bar) $and ($bar $equal foo)
 #
 $set foo bar
 $set bar foo

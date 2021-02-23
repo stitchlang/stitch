@@ -575,7 +575,7 @@ def runFile(filename, capture_stdout):
 def main():
     cmd_args = sys.argv[1:]
     if len(cmd_args) == 0:
-        sys.exit("Usage: prototype FILE")
+        sys.exit("Usage: stitch FILE")
     if len(cmd_args) != 1:
         sys.exit("Error: too many command-line arguments")
     filename = cmd_args[0]

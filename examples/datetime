@@ -1,4 +1,4 @@
-#!/usr/bin/env this-scripting-language
+#!/usr/bin/env stitch
 #
 # Example ported from: https://www.linode.com/docs/guides/solving-real-world-problems-with-bash-scripts-a-tutorial/
 #

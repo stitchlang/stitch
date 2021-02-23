@@ -1,4 +1,4 @@
-#!/usr/bin/env this-scripting-language
+#!/usr/bin/env stitch
 #
 # TODO: use an array to enumerate all the examples
 #

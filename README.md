@@ -1,17 +1,19 @@
-A scripting language to make it easy to write programs that are correct.  This is an attempt to create a better alternative to languages like BASH.
+# Stitch
 
-The purpose of this language is to create programs by "stitching" together other programs (maybe "stitch" is a good name for the language?).  For programs that mainly implement new logic rather than calling other programs, another langauge like Python is better suited. Given this, the basic syntax of the language is:
+A scripting language to make it easy to write programs that are correct.  An attempt to create a better alternative to languages like BASH.
+
+The purpose of this language is to create programs by "stitching" other programs together.  For programs whose primary purpose is not to call other programs, another langauge like Python is better suited.  Given our primary purpose, the basic syntax is:
 
 ```
 program args...
 program args...
 ```
 
-The "program" string can be:
+"program" can be:
 
 * a builtin program (like `$echo`)
 * a filename (if it contains any slash `/` characters)
-* otherwise, it is a program name (a file in one of the `PATH` directories)
+* a program name (a file in one of the `PATH` directories)
 
 > NOTE: if I implement logic to find a program in `PATH` then it needs to be exposed via a builtin such as `$findprog NAME`
 
