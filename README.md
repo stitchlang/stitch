@@ -252,6 +252,71 @@ I could also support `"..."`.  This would make the double-quote `"` character a 
 
 Note that the same reasoning that applies to WYSIWYG strings would also apply to HEREDOC strings.  Also, we may raw and processed multiline strings.  A special dollar keyword could start a heredoc, tell if it is raw or processed, then specify the sentinel delimiter.
 
+## Binary Expressions
+
+Binary expressions are distinct from Commands. The operands between binary operators are limited to a "single node".
+
+```
+#
+# Binary Expression
+#
+Node BinaryOperator Node
+
+
+# OK
+$a $and $b
+
+# Syntax Error
+grep foo bar $and $b
+
+# OK
+(grep foo bar) $and $b
+```
+
+The `(grep foo bar)` operand in the example above looks like normal "Command Substitution" but has some differences.  Instead of returning stdout of the underlying command, it returns a TestResult object based on the exit code.  This change in behavior also imples that:
+
+1. a non-zero exit code from the command does not cause the script to exit
+2. since the return channel has been taken by the TestResult object, stdout is no longer captured and is printed like a normal command
+
+Currently there are only 2 binary operators: `$and` and `$or`.  Here are some more candidates:
+
+```
+Node $equals Node
+Node $lessorequal Node
+Node $greaterorequal Node
+Node $less Node
+Node $greater Node
+
+# or maybe
+Node $= Node
+Node $== Node
+Node $<= Node
+Node $>= Node
+Node $< Node
+Node $> Node
+```
+
+### Short Circuting
+
+If the final result of a binary expression has been determined before it has been fully evaluated, the language does not expand the rest of the expression.  Because of this, commands must be checked for binary operators before expanding them.  Since this requires special handling of node expansion within the binary expression, this provides the information we need to enable modified command-substitution.
+
+### Binary Expression TODO/Questions
+
+* Top Level Handling?
+
+How should binary expressions be handled at the top-level?  For now I've just made them an error "uhandled TestResult".
+
+* Unary Expressions?
+
+I don't think the language needs an special handling for unary expressions.  I believe these can be handled by builtins, like:
+
+```
+$exists PATH
+$isdir PATH
+$isfile PATH
+```
+
+
 ## Control Flow
 
 ### First Idea for if/while:
@@ -289,26 +354,6 @@ $while command
 
 $end
 ```
-
-How do we turn a command into a conditional?  First, we can have builtins like:
-
-```
-$exists PATH
-$isdir PATH
-$isfile PATH
-```
-
-binary operators?
-```
-command $equals command
-command $lessorequal command
-command $greaterorequal command
-command $less command
-command $greater command
-```
-
-How do these commands behave outside a `$if`?  I could opt not to use exit codes, however, this would could make it cumbersome to work with other programs that were designed to use exit codes.  Assuming we also use exit codes, this means that at least sometimes, non-zero exit codes will no longer exit the script immediately.  Sometimes they must propogate the result up to the caller. I need to go through some use cases to explore this.
-
 ```
 # returns a CommandResult "top-level handler" which causes a fatal error on non-zero exit code
 grep needle file
@@ -379,41 +424,6 @@ foo $or bar $and baz
 ```
 
 I think the right thing to do here is to only allow chaining binary operators if they are the same operator.
-
-
-### Expressions:
-
-Idea1: binary boolean operators:
-
-```
-$if foo $and bar
-    command
-
-$if foo $or bar
-    command
-```
-
-Binary operators may be problematic because they require an order of operations to be clarified.  Can I use command-substitution to fix this?
-
-```
-if (foo) $and (bar)
-     command
-```
-
-### Current Binary Operator Design
-
-```
-(command) $and (command) $and (command) ...
-(command) $or (command) $or (command) ...
-
-# NOTE: you cannot mix $and and $or
-```
-
-During expansion, all top-level nodes are checked before performing command-substitution.  If the command contains binary operators, then each binary operator is required to wrap their operands in parenthesis.  These operands look like command substitution but they work slightly differenly.
-
-1. When an "Operand Expansion" fails, it does not cause the script to exit, instead, it returns a `false` TestResult
-2. Operand Expansion does not capture stdout.  This is because stdout can not accessed through the "return channel" as it has been hijacked by the TestResult.  So, rather than throw away stdout, it's printed like a normal command.
-
 
 # Grammar
 
