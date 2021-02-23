@@ -4,7 +4,7 @@ A scripting language that creates programs by "stitching" other programs togethe
 
 # Preview
 
-```
+```sh
 # this is a comment
 $echo Hello, World
 
@@ -59,20 +59,20 @@ $echolines arg 1 arg 2 arg 3
 #   arg
 #   3
 
-> $echolines $@"arg 1" $@"arg 2" $@"arg 3"
+$echolines $@"arg 1" $@"arg 2" $@"arg 3"
 # prints:
 #   arg 1
 #   arg 2
 #   arg 3
 
-> $echolines arg$sp$1 arg$sp$2 arg$sp$3
+$echolines arg$sp$1 arg$sp$2 arg$sp$3
 # prints:
 #   arg 1
 #   arg 2
 #   arg 3
 
 # NOTE: I can use command substituion to include spaces in a string like this
-> $echolines ($echo arg 1) ($echo arg 2) ($echo arg 3)
+$echolines ($echo arg 1) ($echo arg 2) ($echo arg 3)
 # prints:
 #   arg 1
 #   arg 2
@@ -81,9 +81,9 @@ $echolines arg 1 arg 2 arg 3
 
 # Arguments with special characters
 
-```
+```sh
 # awk is a good example to demonstrate because it also makes use of $
-> awk $@"{print $1 $2}"
+awk $@"{print $1 $2}"
 ```
 
 # When not to use stitch
@@ -92,7 +92,7 @@ stitch's primary purpose is to call other programs, when this is not the primary
 
 # Variables
 
-```
+```sh
 #
 # $set [SCOPE.]VARNAME VALUE
 #
@@ -129,7 +129,7 @@ expand | Scope to expand arrays through.
 
 Arrays are important because they provide a way to represent one or more strings without requiring them to be delimited.  Not having an array type and requiring a delimiter instead is the source of many pitfalls with other scripting languages.
 
-```
+```sh
 #
 # $setarray [SCOPE.]VARNAME splitlines VALUE
 # $setarray [SCOPE.]VARNAME args ARGS...
@@ -155,7 +155,7 @@ Note that arrays cannot be used within another string.  They must be expanded on
 
 Environment variables are accessed through the `env` scope.
 
-```
+```sh
 $env.VAR
 
 $set env.VAR VALUE
@@ -165,7 +165,7 @@ $set env.VAR VALUE
 
 Command Subtitution is expected to be a very common construct in this language.  Note that Command Substitution runs a command and returns stdout of that command as a string.  Note unlike other scripting languages, the command is executed within the current process environment.
 
-```
+```sh
 # run command and return one line of output as a string with no trailing newline
 (PROG ARGS...)
 
@@ -177,7 +177,7 @@ In general Command Subtitution is commonly used to return strings that don't con
 
 This default behavior is overriden by prefixing the comand with `$multiline`.  This will return stdout of the underlying process unmodified.
 
-```
+```sh
 #echo you're arch is (uname -m)
 
 $set myfile_content ($multiline cat myfile)
@@ -191,20 +191,20 @@ make -j(nproc)
 
 ### Hello World
 
-```
+```sh
 $echo Hello World
 ```
 
 ### Read input and print it
 
-```
+```sh
 $set input (read)
 $echo You entered: $input
 ```
 
 ### Random
 
-```
+```sh
 $set pwd (pwd)
 $set arch (uname -m)
 $set target $arch$-linux-musl
@@ -244,21 +244,24 @@ Assuming programs are located the same way as BASH and/or execve, I should expos
 
 WYSIWYG strings make it easier to write correct code because they are easy for humans to verify and easy to copy between applications. To support them, we need a way to disable our special characters `#`, `$`, `(` and `)`.  A WYSIWYG string is started with the sequence `$@` followed by a delimiter character.  The string continues until it sees the delimiter character again.  Here are some examples:
 
-```
-> $echo $@"I can use #, $, ( and ) in here but not a double-quote"
-I can use #, $, ( and ) in here but not a double-quote
+```sh
+$echo $@"I can use #, $, ( and ) in here but not a double-quote"
+# prints:
+#   I can use #, $, ( and ) in here but not a double-quote
 
-> $echo $@'I can use #, $, (, ) and " but not single-quote'
-I can use #, $, (, ) and " but not single-quote
+$echo $@'I can use #, $, (, ) and " but not single-quote'
+# prints:
+#   I can use #, $, (, ) and " but not single-quote
 
-> $echo $@|I can use #, $, (, ), " and ' but not a pipe character in here|
-I can use #, $, (, ), " and ' but not a pipe character in here
+$echo $@|I can use #, $, (, ), " and ' but not a pipe character in here|
+# prints:
+#   I can use #, $, (, ), " and ' but not a pipe character in here
 ```
 
 The scripting language should also probably include a way to create multiline strings.  I'll decide on this later.
 
 It might also be good to include some shorthand variations like this:
-```
+```sh
 $echo $" example 1 "
 $echo $' example 1 '
 $echo $| example 1 |
@@ -275,7 +278,7 @@ Note that the same reasoning that applies to WYSIWYG strings would also apply to
 
 Binary expressions are distinct from Commands. The operands between binary operators are limited to a "single node".
 
-```
+```sh
 #
 # Binary Expression Syntax:
 #
@@ -299,7 +302,7 @@ The `(grep foo bar)` operand in the example above looks like normal "Command Sub
 
 Currently there are only 2 binary operators: `$and` and `$or`.  Here are some more candidates:
 
-```
+```sh
 Node $equals Node
 Node $lessorequal Node
 Node $greaterorequal Node
@@ -329,7 +332,7 @@ How should binary expressions be handled at the top-level?  For now I've just ma
 
 I don't think the language needs an special handling for unary expressions.  I believe these can be handled by builtins, like:
 
-```
+```sh
 $exists PATH
 $isdir PATH
 $isfile PATH
@@ -340,7 +343,7 @@ $isfile PATH
 
 ### First Idea for if/while:
 
-```
+```sh
 #
 # if/elif/else/endif
 #
@@ -373,7 +376,8 @@ $while command
 
 $end
 ```
-```
+
+```sh
 # returns a CommandResult "top-level handler" which causes a fatal error on non-zero exit code
 grep needle file
 
@@ -395,7 +399,7 @@ $not grep needle file
 
 So any command that is given to a "test operator" must bubble up to a control flow builtin like `$if`, `$while`.
 
-```
+```sh
 $if $not grep needle file $and $not grep needle2 file
     $echo both needles are not found
 $else
@@ -405,7 +409,7 @@ $end
 
 So, unary operators are always higher precedence than binary operators.  What if we want to override that?
 
-```
+```sh
 $if $not (grep needle file $and grep needle2 file)
     $echo at least one needle is missing
 $else
@@ -415,7 +419,7 @@ $end
 
 I think the example above just WORKS.  Command substitution takes any TestResult and propogates it up as a TestResult.  If a TestResult is attempted to be used as a string, it is an error, i.e.
 
-```
+```sh
 ls ($not grep needle file)
 #
 # error: expected a string but got TestResult
@@ -424,7 +428,7 @@ ls ($not grep needle file)
 
 What if we required parenthesis around binary operators?
 
-```
+```sh
 # maybe this is an error?
 $not grep needle file $and grep needle2 file
 
@@ -434,7 +438,7 @@ $not grep needle file $and grep needle2 file
 
 I think this makes things more clear and readable.  After a command is expanded, binary operators only support one object to their left and right.  If there are more then it's an error.  What about chaining binary operators?
 
-```
+```sh
 # OK
 foo $and bar $and baz
 
@@ -466,7 +470,7 @@ Operand ::= '(' Command ')' | Argument
 # Idea: stderr/exitcode
 
 How to handle return code and stdout/stderr?  I could have a CommandResult type of object.
-```
+```sh
 #
 # $captureouts PROG ARGS...
 # $captureall     PROG ARGS...
@@ -496,7 +500,7 @@ A running process has 2 objects, the stdout and stderr file stream.  Once the pr
 A script should be able to forward stdout and/or stderr from one process to the stdin of another.  Note that to forward stdout/stderr to a named file that can be read by another program, pipe files can be used.  This means the scripting language would need a way to redirect stdout and/or stderr to a named file as well.  Note that this could be done using a pipe operator that goes to a builtin command that forwards it to a file (means we don't need a redirect feature).
 
 Syntax
-```
+```sh
 
 foo $out bar
 foo $err bar
@@ -524,7 +528,7 @@ $run $foo
 
 Having a current working directory as hidden state that affects all relative path names may be more trouble than it's worth.  One alterative is to use absolute path names.  However, some programs use the current working directory as an important input, in which case there needs to be a way to set it.  Here's a way we could set this and make it excplicit:
 
-```
+```sh
 $cwd DIR PROG ARGS...
 
 # example
@@ -538,7 +542,7 @@ git -C $scriptdir status
 
 * as a test, I should run a script, output all the commands that were run to another script, then run that script a second time and it should still work.  Assuming there is a `--dump-commands-to FILE` command-line option:
 
-```
+```sh
 ./script --dump-commands-to script2
 ./script2
 ```
