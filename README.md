@@ -91,7 +91,7 @@ arg 3
 #
 # $set [SCOPE.]VARNAME VALUE
 #
-$set msg Hello, my name is Fred
+$set msg $@"Hello, my name is Fred"
 $echo $msg
 # prints "Hello, my name is Fred"
 
@@ -139,21 +139,18 @@ $setarray mounts splitlines (cat /proc/mounts)
 # now the "mounts" variable is an array of all the mounts
 
 # How to use the array in a command?
-$args-to-lines $expand.mounts
+$echolines $expand.mounts
 
 # Not using $expand.VAR will cause an error
-$args-to-lines $mounts
+$echolines $mounts
 # Error: mounts is an array, you must expand it with $expand.mounts
 ```
 
 Note that arrays cannot be used within another string.  They must be expanded on their own.  The reason for using the `expand` scope to expand arrays, is so that it's immediately apparent that an array is being expanded into 0 or more arguments.
 
-So we have 2 types, strings and arrays of strings. Is that all we need?
-We also have scopes, but so far string/arrays/scopes haven't had any intermixing in the grammar.
+## Environment variables:
 
-### Environment variables:
-
-Environment variables are accessed in the `env` scope.
+Environment variables are accessed through the `env` scope.
 
 ```
 $env.VAR
@@ -163,6 +160,8 @@ $set env.VAR VALUE
 
 ## Command Substitution
 
+Command Subtitution is expected to be a very common construct in this language.  Note that Command Substitution runs a command and returns stdout of that command as a string.  Note unlike other scripting languages, the command is executed within the current process environment.
+
 ```
 # run command and return one line of output as a string with no trailing newline
 (PROG ARGS...)
@@ -171,24 +170,19 @@ $set env.VAR VALUE
 ($multiline PROG ARGS...)
 ```
 
-It's assumed that Command Subtitution is more commonly used to return strings that don't contain newlines.  Because of this, by default Command Substitution only allows up to one line of output from stdout of the underlying command.  It also strips the trailing newline from the output before returning the string.
+In general Command Subtitution is commonly used to return strings that don't contain newlines.  Because of this, by default Command Substitution only allows up to one line of output from stdout of the underlying command.  It also strips the trailing newline from the output before returning the string.
 
 This default behavior is overriden by prefixing the comand with `$multiline`.  This will return stdout of the underlying process unmodified.
 
 ```
-$set arch (uname -m)
+#echo you're arch is (uname -m)
 
 $set myfile_content ($multiline cat myfile)
-
 $set lsfile (which ls)
-
-# TODO: maybe have a $firstline/$lastline?
 
 # Example
 make -j(nproc)
 ```
-
-> TODO: consider ($firstline COMMAND...) and ($lastline COMMAND...)
 
 # Examples
 
@@ -222,23 +216,41 @@ $set env.PATH $pwd/$target/bin:$env.PATH
 
 ## Builtin Programs
 
+Because this scripting language uses named builtin's, this enables the language to provide many features without the need to add new syntax.  Among these features include cross-platform builtin programs.  When considering whether the language should provide a builtin, these questions can be analyzed:
+
+1. How simple is the feature?
+2. How common/generally useful is the feature?
+
+If a feature is "simple" and provides some sort of benefit, then there's not much downside to including it in the language.  A few lines of code is all that's needed to include it in the language.  The only downside I see is feature overlap/multiple ways to do the same thing which should be avoided if it can.
+
+If a feature is not so simple, then it still may be a candidate for inclusion if it is common and/or generally useful enough.
+
 #### $multiline PROG ARGS...
 
 Runs the given program output wrapped in an internal "MultilineResult" object that allows strings with mulitple lines to be returned from a command-substitution.
 
-## Raw String Mode
+#### $firstline/$lastline
 
-I think there is value WYSIWYG strings. They are easier for humans to verify and make it easy to copy strings to and from your script. This means we need a way to disable our special characters `#`, `$`, `(` and `)`.
+Not sure if these should be added yet. I've included them to be considered.
 
-We can reserve a special character to appear after `$` to enter this "raw string mode".  Note that once in this mode, we will also need a way to escape it, however, we don't want to tie ourselves to one character to escape this mode because the string being represented may need that character.  We solve this by including the sentinel character as well. For example, if we chose `@` to enable raw string mode, then we could do this:
+## WYSIWYG Strings
+
+WYSIWYG strings make it easier to write correct code because they are easy for humans to verify and easy to copy between applications. To support them, we need a way to disable our special characters `#`, `$`, `(` and `)`.  A WYSIWYG string is started with the sequence `$@` followed by a delimiter character.  The string continues until it sees the delimiter character again.  Here are some examples:
 
 ```
-$echo $@" I can use #, $, ( and ) in here but not a double-quote "
-$echo $@' I can use #, $, (, ) and " but not single-quote '
-$echo $@| I can use #, $, (, ), " and ' but not a pipe character in here '
+> $echo $@"I can use #, $, ( and ) in here but not a double-quote"
+I can use #, $, ( and ) in here but not a double-quote
+
+> $echo $@'I can use #, $, (, ) and " but not single-quote'
+I can use #, $, (, ) and " but not single-quote
+
+> $echo $@|I can use #, $, (, ), " and ' but not a pipe character in here|
+I can use #, $, (, ), " and ' but not a pipe character in here
 ```
 
-As a shorthand, I could also reserve multiple characters for this, like:
+The scripting language should also probably include a way to create multiline strings.  I'll decide on this later.
+
+It might also be good to include some shorthand variations like this:
 ```
 $echo $" example 1 "
 $echo $' example 1 '
