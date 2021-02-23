@@ -1,7 +1,9 @@
 
 true
-#false $or true
-#true $and true
+#(false) $or (true)
+#(true) $and (true)
+#(false) $or (false) $or (true)
+#(true) $and (true) $and (true)
 
 $set direct_which (which ls)
 

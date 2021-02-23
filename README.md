@@ -307,9 +307,7 @@ command $less command
 command $greater command
 ```
 
-How do these commands behave outside a `$if`?  I could opt not to use exit codes, however, this would could make it cumbersome to work with other programs that were designed to use exit codes.  Assuming we also use exit codes, this means that non-zero exit codes no longer cause fatal error immediately.  Instead, they must propogate up to the caller.  They will cause a fatal error if uhandled at the top level.  This means that running a command will return a type "CommandResult".  When a top-level command is executed, the default top-level handler will take the command result and assert an error if it had a non-zero exit code.  What about nested errors?
-
-I need to go through some use cases to explore this.
+How do these commands behave outside a `$if`?  I could opt not to use exit codes, however, this would could make it cumbersome to work with other programs that were designed to use exit codes.  Assuming we also use exit codes, this means that at least sometimes, non-zero exit codes will no longer exit the script immediately.  Sometimes they must propogate the result up to the caller. I need to go through some use cases to explore this.
 
 ```
 # returns a CommandResult "top-level handler" which causes a fatal error on non-zero exit code
@@ -325,7 +323,6 @@ $end
 # unary operator example
 
 # applying a "test operator" to a CommandResult returns a TestResult
-# catch takes a CommandResult and turns it into a TestResult
 grep needle file
 $not grep needle file
 
@@ -403,18 +400,39 @@ if (foo) $and (bar)
      command
 ```
 
+### Current Binary Operator Design
+
+```
+(command) $and (command) $and (command) ...
+(command) $or (command) $or (command) ...
+
+# NOTE: you cannot mix $and and $or
+```
+
+During expansion, all top-level nodes are checked before performing command-substitution.  If the command contains binary operators, then each binary operator is required to wrap their operands in parenthesis.  These operands look like command substitution but they work slightly differenly.
+
+1. When an "Operand Expansion" fails, it does not cause the script to exit, instead, it returns a `false` TestResult
+2. Operand Expansion does not capture stdout.  This is because stdout can not accessed through the "return channel" as it has been hijacked by the TestResult.  So, rather than throw away stdout, it's printed like a normal command.
+
+
 # Grammar
 
 What I've got so far
 ```
 Script ::= Command*
 
-Command ::= Arg*
+Command ::= Argument* | BinaryExpression
 
-Arg ::= (Char | '$' DollarExpr)*
+Argument ::= (Char | '$' DollarExpression)* | BinaryExpression
 
-DollarExpr ::= '(' Command ')' | [a-zA-Z_.]* '$'?
+DollarExpression ::= '(' Command ')' | [a-zA-Z_.]* '$'?
+
+BinaryExpression ::= Operand Op Operand ( Op Operand )*
+
+Operand ::= '(' Command ')' | Argument
 ```
+
+> NOTE: "BinaryExpression" takes "Operand" instead of "Argument"  because these nodes are evaluated differently
 
 # Idea
 
