@@ -252,6 +252,156 @@ I could also support `"..."`.  This would make the double-quote `"` character a 
 
 Note that the same reasoning that applies to WYSIWYG strings would also apply to HEREDOC strings.  Also, we may raw and processed multiline strings.  A special dollar keyword could start a heredoc, tell if it is raw or processed, then specify the sentinel delimiter.
 
+## Control Flow
+
+### First Idea for if/while:
+
+```
+#
+# if/elif/else/endif
+#
+$if command
+    command
+    command
+    ...
+$elif command
+    command
+    command
+    ...
+$else
+    command
+    command
+    ...
+$end
+
+#
+# while/continue/break
+#
+$while command
+    command
+    command
+    ...
+
+    $if command
+        $continue
+    $if command
+        $break
+
+$end
+```
+
+How do we turn a command into a conditional?  First, we can have builtins like:
+
+```
+$exists PATH
+$isdir PATH
+$isfile PATH
+```
+
+binary operators?
+```
+command $equals command
+command $lessorequal command
+command $greaterorequal command
+command $less command
+command $greater command
+```
+
+How do these commands behave outside a `$if`?  I could opt not to use exit codes, however, this would could make it cumbersome to work with other programs that were designed to use exit codes.  Assuming we also use exit codes, this means that non-zero exit codes no longer cause fatal error immediately.  Instead, they must propogate up to the caller.  They will cause a fatal error if uhandled at the top level.  This means that running a command will return a type "CommandResult".  When a top-level command is executed, the default top-level handler will take the command result and assert an error if it had a non-zero exit code.  What about nested errors?
+
+I need to go through some use cases to explore this.
+
+```
+# returns a CommandResult "top-level handler" which causes a fatal error on non-zero exit code
+grep needle file
+
+# $if will both zero and non-zero exit codes from a CommandResult and use it to decide on the brancht to execute
+$if grep needle file
+    $echo found needle!
+$else
+    $echo did not find needle
+$end
+
+# unary operator example
+
+# applying a "test operator" to a CommandResult returns a TestResult
+# catch takes a CommandResult and turns it into a TestResult
+grep needle file
+$not grep needle file
+
+# both of the commands above would cause an "unhandle TestResult" if they appeared at the top-level
+```
+
+So any command that is given to a "test operator" must bubble up to a control flow builtin like `$if`, `$while`.
+
+```
+$if $not grep needle file $and $not grep needle2 file
+    $echo both needles are not found
+$else
+    $echo at least one needle is present
+$end
+```
+
+So, unary operators are always higher precedence than binary operators.  What if we want to override that?
+
+```
+$if $not (grep needle file $and grep needle2 file)
+    $echo at least one needle is missing
+$else
+    $echo both needls are present
+$end
+```
+
+I think the example above just WORKS.  Command substitution takes any TestResult and propogates it up as a TestResult.  If a TestResult is attempted to be used as a string, it is an error, i.e.
+
+```
+ls ($not grep needle file)
+#
+# error: expected a string but got TestResult
+#
+```
+
+What if we required parenthesis around binary operators?
+
+```
+# maybe this is an error?
+$not grep needle file $and grep needle2 file
+
+# need this
+($not grep needle file) $and (grep needle2 file)
+```
+
+I think this makes things more clear and readable.  After a command is expanded, binary operators only support one object to their left and right.  If there are more then it's an error.  What about chaining binary operators?
+
+```
+# OK
+foo $and bar $and baz
+
+# This looks confusing
+foo $or bar $and baz
+```
+
+I think the right thing to do here is to only allow chaining binary operators if they are the same operator.
+
+
+### Expressions:
+
+Idea1: binary boolean operators:
+
+```
+$if foo $and bar
+    command
+
+$if foo $or bar
+    command
+```
+
+Binary operators may be problematic because they require an order of operations to be clarified.  Can I use command-substitution to fix this?
+
+```
+if (foo) $and (bar)
+     command
+```
 
 # Grammar
 
