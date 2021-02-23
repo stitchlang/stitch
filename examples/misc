@@ -1,8 +1,7 @@
 
-# TODO: replace these with an $if or an $and or something
-#$captureexitcode true
-#$captureexitcode false
-
+true
+#false $or true
+#true $and true
 
 $set direct_which (which ls)
 

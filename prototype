@@ -229,6 +229,10 @@ class ObjString:
     def __init__(self, value):
         self.value = value
 
+class ObjBinaryTestOperator:
+    def __init__(self, name):
+        self.name = name
+
 # builtin objects that do not change and are the same for all scripts
 builtin_objects = {
     "note": ObjBuiltin("note"),
@@ -238,6 +242,8 @@ builtin_objects = {
     "settmp": ObjBuiltin("settmp"),
     "multiline": ObjBuiltin("multiline"),
     "call": ObjBuiltin("call"),
+    "or": ObjBinaryTestOperator("or"),
+    "and": ObjBinaryTestOperator("and"),
 }
 
 class MultilineResult:
@@ -279,6 +285,13 @@ def runCommandExpanded(exec_nodes, script_vars, capture_stdout, log_cmd):
     # I suppose this could happen if the whole command is just an expanded array that expands to nothing
     if len(exec_nodes) == 0:
         return CommandResult(0, "" if capture_stdout else None, None)
+
+    # handle binary operators
+    # TODO: handle binary operators
+    for node in exec_nodes:
+        if type(node) == ObjBinaryTestOperator:
+            sys.exit("TODO: implement binary operators")
+
     ## NOTE: I may not want to log the expanded command
     #if log_cmd:
     #    print("+ {}".format(" ".join([execNodeToScriptSource(n) for n in exec_nodes])))
@@ -338,6 +351,8 @@ def expandNodes(nodes, script_vars):
             if type(obj) is ObjString:
                 exec_nodes.append(obj.value)
             elif type(obj) is ObjBuiltin:
+                exec_nodes.append(obj)
+            elif type(obj) is ObjBinaryTestOperator:
                 exec_nodes.append(obj)
             else:
                 sys.exit("not impl, expand object ${} of type {}".format(node.id, type(obj)))
