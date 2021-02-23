@@ -32,7 +32,7 @@ One way to make it easier to write "correct programs" is if something looks like
 
 # Special Characters
 
-stitch has 4 special characters that cause it to deviate from the normal mode of specifying programs/arguments:
+stitch has very few special characters that cause it to deviate from the normal mode of specifying programs/arguments:
 
 Char | Description
 -----|-------------
@@ -40,6 +40,7 @@ Char | Description
 `$`  | starts an expression, escape with `$$`
 `(`  | start a command substitution, escape with `$(`
 `)`  | ends a command substitution, escape with `$)`
+` `  | separates command arguments, using strings to include them instead
 
 # Arguments with Spaces
 
@@ -163,7 +164,7 @@ $set env.VAR VALUE
 
 # Command Substitution
 
-Command Subtitution is expected to be a very common construct in this language.  Note that Command Substitution runs a command and returns stdout of that command as a string.  Note unlike other scripting languages, the command is executed within the current process environment.
+Command Subtitution is expected to be a very common construct in this language.  Note that Command Substitution runs a command and returns stdout of that command as a string.  Unlike other scripting languages, the command is executed within the current process environment, it is not executed in a subprocess so it has very low overhead.
 
 ```sh
 # run command and return one line of output as a string with no trailing newline
@@ -242,7 +243,7 @@ Assuming programs are located the same way as BASH and/or execve, I should expos
 
 # WYSIWYG Strings
 
-WYSIWYG strings make it easier to write correct code because they are easy for humans to verify and easy to copy between applications. To support them, we need a way to disable our special characters `#`, `$`, `(` and `)`.  A WYSIWYG string is started with the sequence `$@` followed by a delimiter character.  The string continues until it sees the delimiter character again.  Here are some examples:
+WYSIWYG strings make it easier to write correct code because they are easy for humans to verify and easy to copy between applications. To support them, we need a way to disable our special characters `#`, `$`, `(`, `)` and ` `.  A WYSIWYG string is started with the sequence `$@` followed by a delimiter character.  The string continues until it sees the delimiter character again.  Here are some examples:
 
 ```sh
 $echo $@"I can use #, $, ( and ) in here but not a double-quote"
@@ -272,7 +273,7 @@ $echo $| example 1 |
 
 I could also support `"..."`.  This would make the double-quote `"` character a special reserved character. Would this make it easier to write correct programs? Keeping the number of reserved characters low makes it simpler to reason about what source is doing.  The question is whether that benefit outweighs needing to type `$"..."` instead of `"..."`.
 
-Note that the same reasoning that applies to WYSIWYG strings would also apply to HEREDOC strings.  Also, we may raw and processed multiline strings.  A special dollar keyword could start a heredoc, tell if it is raw or processed, then specify the sentinel delimiter.
+Note that the same reasoning that applies to WYSIWYG strings would also apply to HEREDOC strings. A special dollar keyword could start a heredoc, tell if it is raw or processed, then specify the sentinel delimiter.
 
 # Binary Expressions
 
