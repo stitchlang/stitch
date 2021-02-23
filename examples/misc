@@ -1,5 +1,7 @@
-$captureexitcode true
-$captureexitcode false
+
+# TODO: replace these with an $if or an $and or something
+#$captureexitcode true
+#$captureexitcode false
 
 
 $set direct_which (which ls)
