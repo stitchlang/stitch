@@ -5,20 +5,29 @@ import subprocess
 
 import prototype
 
-def testError(line, msg):
+def testSemanticError(line, msg):
     script_vars = prototype.createScriptVars(__file__)
     result = prototype.runLine(line, script_vars, print_trace=False, capture_stdout=True)
-    assert(type(result.stdout) == str)
-    if result.exitcode == 0:
-        print("Error: expected an error but got success: '{}'".format(line))
+    if type(result) != prototype.SemanticError:
+        sys.exit("Error: expected a SemanticError but got {}".format(result))
 
-def main():
-    #testError("$and", "???")
+    if result.msg != msg:
+        print("Error: semantic error message does not match expected:")
+        print("expected: {}".format(msg))
+        print("actual  : {}".format(result.msg))
+        sys.exit(1)
 
+    print("got expected semantic error from '{}': {}".format(line, msg))
+
+def runScriptTests():
     script_dir = os.path.dirname(__file__)
     result = subprocess.run([os.path.join(script_dir, "prototype"), "script-tests"])
     if result.returncode != 0:
         sys.exit(result.returncode)
+
+def main():
+    testSemanticError("$and", "missing argument before binary operator '$and'")
+    runScriptTests()
 
     print("test: success")
 

@@ -254,6 +254,9 @@ class CommandResult:
         self.exitcode = exitcode
         self.stdout = stdout
         self.stderr = stderr
+class SemanticError:
+    def __init__(self, msg):
+        self.msg = msg
 
 def which(name):
     for path in os.environ["PATH"].split(os.pathsep):
@@ -279,7 +282,10 @@ def execNodeToScriptSource(arg):
     return "$@{}{}{}".format(delimiter, arg, delimiter)
 
 def runCommandNodes(ast_nodes, script_vars, capture_stdout):
-    return runCommandExpanded(expandNodes(ast_nodes, script_vars), script_vars, capture_stdout=capture_stdout, log_cmd=True)
+    nodes = expandNodes(ast_nodes, script_vars)
+    if type(nodes) == SemanticError:
+        return nodes
+    return runCommandExpanded(nodes, script_vars, capture_stdout=capture_stdout, log_cmd=True)
 
 def runCommandExpanded(exec_nodes, script_vars, capture_stdout, log_cmd):
     # I suppose this could happen if the whole command is just an expanded array that expands to nothing
@@ -292,7 +298,7 @@ def runCommandExpanded(exec_nodes, script_vars, capture_stdout, log_cmd):
     for node in exec_nodes:
         if type(node) == ObjBinaryTestOperator:
             if node_index == 0:
-                sys.exit("a command canot start with binary operator '{}'".format(node.name))
+                return SemanticError("missing argument before binary operator '${}'".format(node.name))
             sys.exit("TODO: implement binary operators")
         node_index += 1
 
@@ -364,6 +370,8 @@ def expandNodes(nodes, script_vars):
             result = runCommandNodes(node.nodes, script_vars, capture_stdout=True)
             if type(result) == MultilineResult:
                 exec_nodes.append(result.value)
+            elif type(result) == SemanticError:
+                return result
             else:
                 assert(type(result) == CommandResult)
                 if result.exitcode != 0:
@@ -377,6 +385,8 @@ def expandNodes(nodes, script_vars):
                     sys.exit("Error: program '{}' returned {} lines, but command-subtitution requires only 1 line of output.  Prefix the command with '$multiline' to support multiple.".format(str(node.nodes[0]), len(lines)))
         elif type(node) is NodeMultiple:
             sub_exec_nodes = expandNodes(node.nodes, script_vars)
+            if type(sub_exec_nodes) == SemanticError:
+                return sub_exec_nodes
             exec_nodes.append("".join([concatPartAsString(n) for n in sub_exec_nodes]))
         else:
             raise Exception("codebug, unhandled node type {}".format(type(node)))
@@ -401,6 +411,10 @@ def runLine(line, script_vars, print_trace, capture_stdout):
             print(msg)
 
     result = runCommandNodes(nodes, script_vars, capture_stdout=capture_stdout)
+    if type(result) == SemanticError:
+        return result
+
+    assert(type(result) == CommandResult)
     if capture_stdout:
         assert(type(result.stdout) == str)
         output += result.stdout
@@ -424,6 +438,10 @@ def runFile(filename, capture_stdout):
                 break
             line = line.rstrip()
             result = runLine(line, script_vars, print_trace=True, capture_stdout=capture_stdout)
+            if type(result) == SemanticError:
+                return result
+
+            assert(type(result) == CommandResult)
             if capture_stdout:
                 assert(type(result.stdout) == str)
                 if len(result.stdout) > 0:
@@ -453,6 +471,11 @@ def main():
         os.chdir("/tmp/script-sandbox")
 
     result = runFile(full_filename, capture_stdout=False)
+    if type(result) == SemanticError:
+        print("{}: SemanticError: {}".format(filename, result.msg))
+        sys.exit(1)
+
+    assert(type(result) == CommandResult)
     assert(result.stdout == None)
     assert(result.stderr == None)
     if result.exitcode:
