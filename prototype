@@ -288,9 +288,13 @@ def runCommandExpanded(exec_nodes, script_vars, capture_stdout, log_cmd):
 
     # handle binary operators
     # TODO: handle binary operators
+    node_index = 0
     for node in exec_nodes:
         if type(node) == ObjBinaryTestOperator:
+            if node_index == 0:
+                sys.exit("a command canot start with binary operator '{}'".format(node.name))
             sys.exit("TODO: implement binary operators")
+        node_index += 1
 
     ## NOTE: I may not want to log the expanded command
     #if log_cmd:
@@ -379,6 +383,32 @@ def expandNodes(nodes, script_vars):
     return exec_nodes
 
 
+def runLine(line, script_vars, print_trace, capture_stdout):
+    output = "" if capture_stdout else None
+
+    nodes = parseTopLevelCommand(line)
+    if len(nodes) == 0:
+        return CommandResult(0, output, None)
+
+    # Note: it seems like it might be better to just print the
+    #       line in its source form rather than the expanded form
+    #       definitely should have an option for this
+    if print_trace:
+        msg = "+ {}".format(line)
+        if capture_stdout:
+            output += msg + "\n"
+        else:
+            print(msg)
+
+    result = runCommandNodes(nodes, script_vars, capture_stdout=capture_stdout)
+    if capture_stdout:
+        assert(type(result.stdout) == str)
+        output += result.stdout
+    else:
+        assert(result.stdout == None)
+
+    return CommandResult(result.exitcode, output, result.stderr)
+
 def runFile(filename, capture_stdout):
     script_vars = {
         "scriptfile": ObjString(filename),
@@ -390,18 +420,7 @@ def runFile(filename, capture_stdout):
             if not line:
                 break
             line = line.rstrip()
-            nodes = parseTopLevelCommand(line)
-            if len(nodes) == 0:
-                continue
-            # Note: it seems like it might be better to just print the
-            #       line in its source form rather than the expanded form
-            #       definitly should have an option for this
-            msg = "+ {}".format(line)
-            if capture_stdout:
-                output += msg + "\n"
-            else:
-                print(msg)
-            result = runCommandNodes(nodes, script_vars, capture_stdout=capture_stdout)
+            result = runLine(line, script_vars, print_trace=True, capture_stdout=capture_stdout)
             if capture_stdout:
                 assert(type(result.stdout) == str)
                 if len(result.stdout) > 0:
@@ -436,4 +455,5 @@ def main():
     if result.exitcode:
         sys.exit("Error: the last progam exited with code {}".format(result.exitcode))
 
-main()
+if __name__ == "__main__":
+    main()
