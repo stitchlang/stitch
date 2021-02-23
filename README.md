@@ -492,7 +492,7 @@ $echo the exit code of another_program_result is: $another_program_result.code
 
 # Idea: piping
 
-UPDATE: I think piping may not be a binary operator, so I need to update this section to reflect how it would work with binary operators
+UPDATE: I think piping *might* be a binary operator, so I need to update this section to reflect how it would work with binary operators
 
 Piping is a pretty useful feature.  You could emulate piping by setting output to variables, however, piping directly from one process to another could remove extra copies of the output.
 
