@@ -1,43 +1,12 @@
-# Stitch
+# stitch
 
-A scripting language to make it easy to write programs that are correct.  An attempt to create a better alternative to languages like BASH.
+A scripting language that creates programs by "stitching" other programs together.  An alternative to other languages like BASH with a focus on making it easy to write "correct programs".
 
-The purpose of this language is to create programs by "stitching" other programs together.  For programs whose primary purpose is not to call other programs, another langauge like Python is better suited.  Given our primary purpose, the basic syntax is:
-
-```
-program args...
-program args...
-```
-
-"program" can be:
-
-* a builtin program (like `$echo`)
-* a filename (if it contains any slash `/` characters)
-* a program name (a file in one of the `PATH` directories)
-
-> NOTE: if I implement logic to find a program in `PATH` then it needs to be exposed via a builtin such as `$findprog NAME`
-
-Also note that when looking at a script, if something looks like a single argument, it should be.  For example, `$myfile` should always be a single argument whether or not it contains whitespace.  This is achieved by performing variable expansion after program arguments have been separated.  When multiple arguments are required from a variable, array expansion can be used.
-
-Special characters:
-
-Char | Description
------|-------------
-`#`  | a single-line comment, escape with `$#`
-`$`  | starts an expression, escape with `$$`
-`(`  | start a command substitution, escape with `$(`
-`)`  | ends a command substitution, escape with `$)`
-
-> NOTE: Say a line starts with `$foo`, if foo is a string, then it's expanded and it's interpreted as a program. If it's a builtin (like $echo), then it's interpreted as that builtin program.
-
-> IDEA: maybe a script or line should be able to change their special symbol from `$` to something else?  For example, you could have something like this `$->! !echo your balance is $1.25`.
-
-## Sample
+# Preview
 
 ```
 # this is a comment
-
-$echo hello
+$echo Hello, World
 
 # variables
 $set name Fred
@@ -51,41 +20,75 @@ $setarray names args Fred Lisa Joey
 $echo Hello $expand.names
 ```
 
-> NOTE: $echolines is just like $echo except it prints a newline after each argument
-```sh
-> $echolines arg1 arg2 arg3
-arg1
-arg2
-arg3
+stitch scripts primarily consist of commands containing one or more arguments.  The first argument is inspected to determine how the command is invoked; it can be:
 
-> $echolines arg 1 arg 2 arg 3
-arg
-1
-arg
-2
-arg
-3
+* a builtin program (like `$echo`)
+* a program filename (if it contains any slash `/` characters)
+* a program name (a file in one of the `PATH` directories)
+
+# Argument Separation Before Expansion
+
+One way to make it easier to write "correct programs" is if something looks like a duck, it should be a duck.  One common pitfall of other scripting languages is that program arguments are not always separated as they appear to be in the script.  For example, the command `cat $myfile` would call `cat` with any number of arguments depending on the contents of `$myfile` even though it appears like it is a single argument.  In stitch, this would always be a single argument.  This is accomplished by separating arguments before variable expansion.  In the case where `$myfile` was actually meant to be any number of arguments, array expansion can be used `cat $expand.myfiles`.
+
+# Special Characters
+
+stitch has 4 special characters that cause it to deviate from the normal mode of specifying programs/arguments:
+
+Char | Description
+-----|-------------
+`#`  | a single-line comment, escape with `$#`
+`$`  | starts an expression, escape with `$$`
+`(`  | start a command substitution, escape with `$(`
+`)`  | ends a command substitution, escape with `$)`
+
+# Arguments with Spaces
+
+```sh
+$echolines arg1 arg2 arg3
+# prints:
+#   arg1
+#   arg2
+#   arg3
+
+$echolines arg 1 arg 2 arg 3
+# prints:
+#   arg
+#   1
+#   arg
+#   2
+#   arg
+#   3
 
 > $echolines $@"arg 1" $@"arg 2" $@"arg 3"
-arg 1
-arg 2
-arg 3
+# prints:
+#   arg 1
+#   arg 2
+#   arg 3
 
 > $echolines arg$sp$1 arg$sp$2 arg$sp$3
-arg 1
-arg 2
-arg 3
+# prints:
+#   arg 1
+#   arg 2
+#   arg 3
 
 # NOTE: I can use command substituion to include spaces in a string like this
 > $echolines ($echo arg 1) ($echo arg 2) ($echo arg 3)
-arg 1
-arg 2
-arg 3
+# prints:
+#   arg 1
+#   arg 2
+#   arg 3
+```
 
-# awk is a good example to demonstrate because it also makes use of $
-> awk $@"{print $1 $2}"
+# Arguments with special characters
 
 ```
+# awk is a good example to demonstrate because it also makes use of $
+> awk $@"{print $1 $2}"
+```
+
+# When not to use stitch
+
+stitch's primary purpose is to call other programs, when this is not the primary purpose of a script, another language like Python is better suited.
 
 # Variables
 
@@ -106,8 +109,6 @@ $echo You have $cpu_count cpus
 $echo Expand cpu count with a suffix is $cpu_count$cpus
 ```
 
-
-
 Builtin variables
 
 Name   | C Equivalent
@@ -124,7 +125,7 @@ expand | Scope to expand arrays through.
 
 > NOTE: maybe support $XX$ to insert arbitrary hex characters?  So a space could be $20$?
 
-## Arrays
+# Arrays
 
 Arrays are important because they provide a way to represent one or more strings without requiring them to be delimited.  Not having an array type and requiring a delimiter instead is the source of many pitfalls with other scripting languages.
 
@@ -150,7 +151,7 @@ $echolines $mounts
 
 Note that arrays cannot be used within another string.  They must be expanded on their own.  The reason for using the `expand` scope to expand arrays, is so that it's immediately apparent that an array is being expanded into 0 or more arguments.
 
-## Environment variables:
+# Environment variables:
 
 Environment variables are accessed through the `env` scope.
 
@@ -160,7 +161,7 @@ $env.VAR
 $set env.VAR VALUE
 ```
 
-## Command Substitution
+# Command Substitution
 
 Command Subtitution is expected to be a very common construct in this language.  Note that Command Substitution runs a command and returns stdout of that command as a string.  Note unlike other scripting languages, the command is executed within the current process environment.
 
@@ -216,7 +217,7 @@ tar xf $target$.tar.xz
 $set env.PATH $pwd/$target/bin:$env.PATH
 ```
 
-## Builtin Programs
+# Builtin Programs
 
 Because this scripting language uses named builtin's, this enables the language to provide many features without the need to add new syntax.  Among these features include cross-platform builtin programs.  When considering whether the language should provide a builtin, these questions can be analyzed:
 
@@ -235,7 +236,11 @@ Runs the given program output wrapped in an internal "MultilineResult" object th
 
 Not sure if these should be added yet. I've included them to be considered.
 
-## WYSIWYG Strings
+#### $findprog NAME
+
+Assuming programs are located the same way as BASH and/or execve, I should expose this logic through a builtin.
+
+# WYSIWYG Strings
 
 WYSIWYG strings make it easier to write correct code because they are easy for humans to verify and easy to copy between applications. To support them, we need a way to disable our special characters `#`, `$`, `(` and `)`.  A WYSIWYG string is started with the sequence `$@` followed by a delimiter character.  The string continues until it sees the delimiter character again.  Here are some examples:
 
@@ -266,13 +271,13 @@ I could also support `"..."`.  This would make the double-quote `"` character a 
 
 Note that the same reasoning that applies to WYSIWYG strings would also apply to HEREDOC strings.  Also, we may raw and processed multiline strings.  A special dollar keyword could start a heredoc, tell if it is raw or processed, then specify the sentinel delimiter.
 
-## Binary Expressions
+# Binary Expressions
 
 Binary expressions are distinct from Commands. The operands between binary operators are limited to a "single node".
 
 ```
 #
-# Binary Expression
+# Binary Expression Syntax:
 #
 Node BinaryOperator Node
 
@@ -331,7 +336,7 @@ $isfile PATH
 ```
 
 
-## Control Flow
+# Control Flow
 
 ### First Idea for if/while:
 
@@ -458,7 +463,7 @@ Operand ::= '(' Command ')' | Argument
 
 > NOTE: "BinaryExpression" takes "Operand" instead of "Argument"  because these nodes are evaluated differently
 
-# Idea
+# Idea: stderr/exitcode
 
 How to handle return code and stdout/stderr?  I could have a CommandResult type of object.
 ```
@@ -481,6 +486,8 @@ $echo the exit code of another_program_result is: $another_program_result.code
 ```
 
 # Idea: piping
+
+UPDATE: I think piping may not be a binary operator, so I need to update this section to reflect how it would work with binary operators
 
 Piping is a pretty useful feature.  You could emulate piping by setting output to variables, however, piping directly from one process to another could remove extra copies of the output.
 
@@ -569,3 +576,7 @@ I've limited the number of reserved/special characters quite a bit.  It's possib
 I should consider whether it is better to require all builtin's to be qualified with `$` (like `$echo`) or whether I should introduce keywords.  Adding keywords can make it easier to read and write code, however, it adds some cognitive load in that the programmer must remember the keywords, and in rare cases how to create a string that matches a keyword.  This cognitive burden may be small, but it should be compared to the alternative which is when there are no keywords, there is nothing to remember and it is immediately apparent whether something is a builtin.
 
 I want to make a distinction between "incorrect code" and "buggy code".  Incorrect code due to a syntax or semantic error is better than "bugggy code".  Buggy code is code that "sometimes works", but "incorrect code" always fails.  This language is designed to avoid "buggy code", but is less concerned about avoiding obviously "incorrect code".  Incorrect code is still a concern, but sometimes this is in conflict with language simplicity.  For example, adding keywords might make it easier to avoid incorrect code because of a missing `$` in some cases, however, that is obviously incorrect code that can be checked before executing it.  The complexity cost of adding keywords needs to be weighed against this.  Also note that I'm favoring reading code over writing code, so making something more readable takes priority over how hard it is to type.
+
+### Custom Special Character
+
+Maybe a script or line should be able to change their special symbol from `$` to something else?  For example, you could have something like this `$->! !echo your balance is $1.25`.  The single-line case may be tenuous, but if there is a domain where the `$` symbol needs to be escaped alot, maybe allowing it to be subtituted is worthwhile.
