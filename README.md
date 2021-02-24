@@ -28,7 +28,9 @@ stitch scripts primarily consist of commands containing one or more arguments.  
 
 # Argument Separation Before Expansion
 
-One way to make it easier to write "correct programs" is if something looks like a duck, it should be a duck.  One common pitfall of other scripting languages is that program arguments are not always separated as they appear to be in the script.  For example, the command `cat $myfile` would call `cat` with any number of arguments depending on the contents of `$myfile` even though it appears like it is a single argument.  In stitch, this would always be a single argument.  This is accomplished by separating arguments before variable expansion.  In the case where `$myfile` was actually meant to be any number of arguments, array expansion can be used `cat $expand.myfiles`.
+This design choice comes from recognizing that if something looks like a duck, it should be a duck.  A common pitfall of other scripting languages is that program arguments are not always separated as they appear to be in the script.  For example, the command `cat $myfile` would call `cat` with any number of arguments depending on the contents of `$myfile` even though it appears like it is a single argument.  In stitch, this would always be a single argument.  This is accomplished by separating arguments before variable expansion.
+
+> NOTE: in the case where `$myfile` was actually meant to be any number of arguments, array expansion can be used `cat $expand.myfiles`.
 
 # Special Characters
 
