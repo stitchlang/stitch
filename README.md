@@ -541,17 +541,17 @@ git -C $scriptdir status
 
 # Script Verificaton
 
-"Script Verification" means checking a script for syntax/semantic errors before executing it.  This verification is done on all the code inside the script, not just the parts executed on a particular invocation.  This verification is vitally important in making it easy to write "correct code" because catching all "execution errors" requires exhaustive testing, but catching all syntax/semantic errors can be done before a script executed and without any tests.  There is a drastic distinction between "verification errors" and "runtime errors".  Note that when evaluating features of the language, any time it's possible to make an "execution bug" a "syntax/semantic error", we are making it much easier to write correct code.
+"Script Verification" means checking a script for syntax/semantic errors before executing it.  This verification is done on all the code inside the script, not just the parts executed on a particular invocation.  This verification is vitally important in making it easy to write "correct code" because catching all "execution errors" requires exhaustive testing, but catching all syntax/semantic errors can be done without any tests.  This is a drastic distinction between these two kinds of errors.  When evaluating language features, making "execution errors" into "syntax/semantic errors" has a big affect on making it easier to write correct code.
 
-By default, "Script Verification" is performed on every script before it is executed.  When this extra step becomes a performance concern, a script can be marked as verified like this:
+By default, "Script Verification" is performed on every script before it is executed.  To disable this verification, a script can include the `$noverify` builtin to stop verification wherever it appears.  It also takes an optional md5 hash that the interpreter will use to verify the contents of the rest of the script.  This provides a way for a script disable verification only if the script hasn't changed.
 
+```sh
+# disable verification
+$noverify
+
+# disable verification only if the rest of the file matches this hash
+$noverify 03299287e43dc67cf0f177aa85031a43
 ```
-#!/usr/bin/env stitch
-$verified 03299287e43dc67cf0f177aa85031a43
-...
-```
-
-This `$verified` builtin must alway appear on the first line, or the line after the shebang and contains the md5 hash of the rest of the file.  This hash allows the interpreter to detect whether the script has changed since it was verified. If a developer wants to disable verification entirely for whatever reason, they should be able to do so with an option to the interpreter, or, inside the script with the `$noverify` builtin.
 
 # TODO:
 
