@@ -40,7 +40,6 @@ Char | Description
 `$`  | starts an expression, escape with `$$`
 `(`  | start a command substitution, escape with `$(`
 `)`  | ends a command substitution, escape with `$)`
-` `  | separates command arguments, using strings to include them instead
 
 # Arguments with Spaces
 
@@ -243,7 +242,7 @@ Assuming programs are located the same way as BASH and/or execve, I should expos
 
 # WYSIWYG Strings
 
-WYSIWYG strings make it easier to write correct code because they are easy for humans to verify and easy to copy between applications. To support them, we need a way to disable our special characters `#`, `$`, `(`, `)` and ` `.  A WYSIWYG string is started with the sequence `$@` followed by a delimiter character.  The string continues until it sees the delimiter character again.  Here are some examples:
+WYSIWYG strings make it easier to write correct code because they are easy for humans to verify and easy to copy between applications. To support them, we need a way to disable our special characters `#`, `$`, `(` and `)`.  A WYSIWYG string is started with the sequence `$@` followed by a delimiter character.  The string continues until it sees the delimiter character again.  Here are some examples:
 
 ```sh
 $echo $@"I can use #, $, ( and ) in here but not a double-quote"
