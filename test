@@ -9,8 +9,8 @@ import prototype
 def testSemanticError(line, msg):
     lineno = inspect.getframeinfo(inspect.stack()[1][0]).lineno
 
-    script_vars = prototype.createScriptVars(__file__)
-    result = prototype.runLine(line, script_vars, print_trace=False, capture_stdout=True)
+    context = prototype.Context(__file__)
+    result = prototype.runLine(context, line, print_trace=False, capture_stdout=True)
     if type(result) != prototype.SemanticError:
         sys.exit("{}({}): Error: expected a SemanticError but got {}".format(__file__, lineno, result))
 
@@ -25,8 +25,8 @@ def testSemanticError(line, msg):
 def testRunError(line, stderr):
     lineno = inspect.getframeinfo(inspect.stack()[1][0]).lineno
 
-    script_vars = prototype.createScriptVars(__file__)
-    result = prototype.runLine(line, script_vars, print_trace=False, capture_stdout=True)
+    context = prototype.Context(__file__)
+    result = prototype.runLine(context, line, print_trace=False, capture_stdout=True)
     if type(result) != prototype.CommandResult:
         sys.exit("{}({}): Error: expected a CommandResult but got {}".format(__file__, lineno, result))
 
@@ -47,8 +47,8 @@ def testRunError(line, stderr):
 def testExpression(line, expected):
     lineno = inspect.getframeinfo(inspect.stack()[1][0]).lineno
 
-    script_vars = prototype.createScriptVars(__file__)
-    result = prototype.runLine(line, script_vars, print_trace=False, capture_stdout=True)
+    context = prototype.Context(__file__)
+    result = prototype.runLine(context, line, print_trace=False, capture_stdout=True)
     if type(result) != prototype.TestResult:
         sys.exit("{}({}): Error: expected a TestResult but got {}".format(__file__, lineno, result))
 
