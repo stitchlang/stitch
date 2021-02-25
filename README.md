@@ -297,10 +297,7 @@ grep foo bar $and $b
 (grep foo bar) $and $b
 ```
 
-The `(grep foo bar)` operand in the example above looks like normal "Command Substitution" but has some differences.  Instead of returning stdout of the underlying command, it returns a TestResult object based on the exit code.  This change in behavior also imples that:
-
-1. a non-zero exit code from the command does not cause the script to exit
-2. since the return channel has been taken by the TestResult object, stdout is no longer captured and is printed like a normal command
+When a binary operator receives a CommandResult object from a Command Substitition, it can handle it differently depending on the operator.  For the boolean binary operators `$or` and `$and`, it converts the exit code of the command to a boolean value, 0 indicates "success" which becomese `true`, and non-zero becomes `false`.  In this case, since stdout is ignored, it is printed to the current stdout handler instead.
 
 Currently there are only 2 binary operators: `$and` and `$or`.  Here are some more candidates:
 

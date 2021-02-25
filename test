@@ -9,7 +9,7 @@ import prototype
 def testSemanticError(line, msg):
     lineno = inspect.getframeinfo(inspect.stack()[1][0]).lineno
 
-    context = prototype.Context(__file__)
+    context = prototype.Context(__file__, True)
     result = prototype.runLine(context, line, print_trace=False, capture_stdout=True)
     if type(result) != prototype.SemanticError:
         sys.exit("{}({}): Error: expected a SemanticError but got {}".format(__file__, lineno, result))
@@ -25,7 +25,7 @@ def testSemanticError(line, msg):
 def testRunError(line, stderr):
     lineno = inspect.getframeinfo(inspect.stack()[1][0]).lineno
 
-    context = prototype.Context(__file__)
+    context = prototype.Context(__file__, False)
     result = prototype.runLine(context, line, print_trace=False, capture_stdout=True)
     if type(result) != prototype.CommandResult:
         sys.exit("{}({}): Error: expected a CommandResult but got {}".format(__file__, lineno, result))
@@ -47,7 +47,7 @@ def testRunError(line, stderr):
 def testExpression(line, expected):
     lineno = inspect.getframeinfo(inspect.stack()[1][0]).lineno
 
-    context = prototype.Context(__file__)
+    context = prototype.Context(__file__, False)
     result = prototype.runLine(context, line, print_trace=False, capture_stdout=True)
     if type(result) != prototype.TestResult:
         sys.exit("{}({}): Error: expected a TestResult but got {}".format(__file__, lineno, result))
@@ -67,25 +67,27 @@ def runStitchTests():
 def main():
     testSemanticError("$and", "missing operand before '$and'")
     testSemanticError("$or", "missing operand before '$or'")
-    testSemanticError("false $and", "'$and' expects a TestResult but got token 'false'")
+    testSemanticError("true $and true", "'$and' does not accept objects of type String")
+    testSemanticError("$expandemptyarray $and $true", "array expansion cannot appear before '$and'")
+    testSemanticError("$true $and $expandemptyarray", "array expansion cannot appear after '$and'")
+    testSemanticError("$false $and", "missing operand after '$and'")
+    testSemanticError("(true) $and", "missing operand after '$and'")
     testSemanticError("(false) $and", "missing operand after '$and'")
-    testSemanticError("false false $or", "command operands to '$or' must be wrapped with (...)")
+    testSemanticError("false false $or", "unexpected binary operator '$or'")
     testSemanticError("(false) $or", "missing operand after '$or'")
-    testSemanticError("($multiline false) $or", "the $multiline builtin is only supported inside a command-substitution")
+    testSemanticError("($multiline true) $or", "missing operand after '$or'")
     testSemanticError("($and) $or", "missing operand before '$and'")
     testSemanticError("(false) $and", "missing operand after '$and'")
-    testSemanticError("false false $and", "command operands to '$and' must be wrapped with (...)")
-    testSemanticError("false $and false false", "'$and' expects a TestResult but got token 'false'")
-    testSemanticError("(false) $and false false", "'$and' expects a TestResult but got token 'false'")
-    testSemanticError("(false) $and (false) false", "expected '$and' operator but got token 'false'; command operands must be wrapped with (...)")
+    testSemanticError("(false) $and false false", "'$and' does not accept objects of type String")
+    testSemanticError("(false) $and (false) false", "expected '$and' operator but got token 'false'; commands must be wrapped with (...)")
     testSemanticError("(false) $and (false) $or false", "'$and' and '$or' cannot be chained")
-    testSemanticError("true $and true", "'$and' expects a TestResult but got token 'true'")
-    testSemanticError("(true) $and true", "'$and' expects a TestResult but got token 'true'")
-    testSemanticError("true $and (true)", "'$and' expects a TestResult but got token 'true'")
+    testSemanticError("true $and true", "'$and' does not accept objects of type String")
+    testSemanticError("(true) $and true", "'$and' does not accept objects of type String")
+    testSemanticError("true $and (true)", "'$and' does not accept objects of type String")
     testSemanticError("(false) $or (false) $and (false)", "'$or' and '$and' cannot be chained")
     testSemanticError("(true) $or (true) $and (true)", "'$or' and '$and' cannot be chained")
     testSemanticError("(true) $and (true) $or (true)", "'$and' and '$or' cannot be chained")
-    testSemanticError("(false) $or (false) $or false", "'$or' expects a TestResult but got token 'false'")
+    testSemanticError("(false) $or (false) $or false", "'$or' does not accept objects of type String")
 
     # TODO: implement stderr error messages
     testRunError("false", "")
@@ -115,10 +117,14 @@ def main():
     testSemanticError("$missing $and $true", "'$missing' is undefined")
     testExpression("($echo hello) $and $true", True)
     testExpression("(($echo true)) $and $true", True)
-    testSemanticError("abc$def $and $true", "'$and' expects a TestResult but got a token expression")
+    testSemanticError("abc$false $and $true", "can only concatenate strings but got 'TestResult'")
+    testSemanticError("abc$scriptfile $and $true", "'$and' does not accept objects of type String")
 
     testExpression("((true) $and (true)) $and (true)", True)
     testExpression("((true) $and (true)) $and ((true) $and (false))", False)
+
+    #testExpression("foo $eq foo", True)
+    #testExpression("foo $eq foo", False)
 
     runStitchTests()
 
