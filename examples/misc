@@ -1,10 +1,16 @@
 #!/usr/bin/env stitch
 
 true
-#(false) $or (true)
-#(true) $and (true)
-#(false) $or (false) $or (true)
-#(true) $and (true) $and (true)
+$assert $true
+$assert ($not $false)
+$assert ($not ($not $true))
+$assert ($false $or $true)
+$assert ((true) $and $true)
+$assert ((false) $or (false) $or (true))
+$assert ((true) $and (true) $and (true))
+
+$assert (foo $eq foo)
+$assert ($not (foo $eq bar))
 
 $set direct_which (which ls)
 

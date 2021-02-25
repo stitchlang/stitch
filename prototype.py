@@ -246,6 +246,26 @@ class BuiltinMethods:
         assert(type(result) == CommandResult)
         result.multiline = True
         return result
+    def assert_(context, args, capture_stdout):
+        if len(args) != 1:
+            return SemanticError("$assert requires 1 argument bug got {}".format(len(args)))
+        result = args[0]
+        if isinstance(result, Error):
+            return result
+        if type(result) != TestResult:
+            return SemanticError("$assert expects a TestResult but got a {}".format(objUserTypeDescriptor(result)))
+        if not result.value:
+            return AssertError()
+        return CommandResult(0, handleBuiltinOutput("", capture_stdout), None, False)
+    def not_(context, args, capture_stdout):
+        if len(args) != 1:
+            return SemanticError("$not requires 1 argument bug got {}".format(len(args)))
+        result = args[0]
+        if isinstance(result, Error):
+            return result
+        if type(result) != TestResult:
+            return SemanticError("$not expects a TestResult but got a {}".format(objUserTypeDescriptor(result)))
+        return TEST_RESULT_FALSE if result.value else TEST_RESULT_TRUE
     def call(context, args, capture_stdout):
         if len(args) == 0:
             sys.exit("Error: the $call builtin requires at least one argument")
@@ -316,10 +336,18 @@ class OrOperator(ChainableBinaryOperator):
 class EqOperator(BinaryOperator):
     def __init__(self):
         BinaryOperator.__init__(self, "eq")
-    def apply(self, left, right):
-        sys.exit("EqOperator.apply not impl")
-        assert(not left)
-        return right
+    def initialValue(self, context, stdout_handler, operand):
+        if type(operand) == str:
+            return operand
+        return opInvalidTypeError(self, operand)
+    def apply(self, context, stdout_handler, left, right):
+        if type(right) == str:
+            return TEST_RESULT_TRUE if (left == right) else TEST_RESULT_FALSE
+        return opInvalidTypeError(self, right)
+
+
+def opInvalidTypeError(op, operand):
+    return SemanticError("'{}' does not accept objects of type {}".format(op, objUserTypeDescriptor(operand)))
 
 def operandToTestResult(context, stdout_handler, op, operand):
     if type(operand) == TestResult:
@@ -329,7 +357,8 @@ def operandToTestResult(context, stdout_handler, op, operand):
         if operand.stdout != None:
             stdout_handler.handle(operand.stdout)
         return TEST_RESULT_TRUE if (operand.exitcode == 0) else TEST_RESULT_FALSE
-    return SemanticError("'{}' does not accept objects of type {}".format(op, objUserTypeDescriptor(operand)))
+    return opInvalidTypeError(op, operand)
+
 
 def objUserTypeDescriptor(obj):
     if type(obj) == str:
@@ -347,9 +376,10 @@ builtin_objects = {
     "settmp": Builtin("settmp"),
     "multiline": Builtin("multiline"),
     "call": Builtin("call"),
+    "assert": Builtin("assert_"),
     "false": TEST_RESULT_FALSE,
     "true": TEST_RESULT_TRUE,
-    "not": Builtin("not"),
+    "not": Builtin("not_"),
     "or": OrOperator(),
     "and": AndOperator(),
     "eq": EqOperator(),
@@ -391,6 +421,11 @@ class SemanticError(Error):
         Error.__init__(self, msg)
     def __repr__(self):
         return "SemanticError: {}".format(self.msg)
+class AssertError(Error):
+    def __init__(self):
+        Error.__init__(self, "an assertion failed")
+    def __repr__(self):
+        return "AssertError"
 class NonZeroExitCodeError(Error):
     def __init__(self, cmd_result: CommandResult):
         assert(cmd_result.exitcode != 0)
@@ -460,6 +495,10 @@ def runCommandNodes(context, ast_nodes, capture_stdout):
     if not capture_stdout:
         return result
     if isinstance(result, Error):
+        return result
+    if type(result) == TestResult:
+        if len(stdout_handler.output) > 0:
+            print(stdout_handler.output, end='')
         return result
     assert(type(result) == CommandResult)
     return CommandResult(result.exitcode, stdout_handler.combine(result.stdout), result.stderr, result.multiline)
@@ -623,7 +662,7 @@ def expandBinaryExpression(context, stdout_handler, nodes, op):
     expression_result = op.initialValue(context, stdout_handler, operand_result)
     if isinstance(expression_result, Error):
         return expression_result
-    if not context.verification_mode and op.shortcircuit(expression_result):
+    if isinstance(op, ChainableBinaryOperator) and not context.verification_mode and op.shortcircuit(expression_result):
         return expression_result
 
     index = 1
@@ -639,7 +678,7 @@ def expandBinaryExpression(context, stdout_handler, nodes, op):
         expression_result = op.apply(context, stdout_handler, expression_result, operand_result)
         if isinstance(expression_result, Error):
             return expression_result
-        if not context.verification_mode and op.shortcircuit(expression_result):
+        if isinstance(op, ChainableBinaryOperator) and not context.verification_mode and op.shortcircuit(expression_result):
             return expression_result
 
         index += 2

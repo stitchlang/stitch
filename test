@@ -53,7 +53,7 @@ def testExpression(line, expected):
         sys.exit("{}({}): Error: expected a TestResult but got {}".format(__file__, lineno, result))
 
     if result.value != expected:
-        sys.exit("{}({}): Error: expected line return {} but returned {}: '{}'".format(
+        sys.exit("{}({}): Error: expected line to return {} but returned {}: '{}'".format(
             __file__, lineno, expected, result.value, line))
 
 
@@ -123,8 +123,10 @@ def main():
     testExpression("((true) $and (true)) $and (true)", True)
     testExpression("((true) $and (true)) $and ((true) $and (false))", False)
 
-    #testExpression("foo $eq foo", True)
-    #testExpression("foo $eq foo", False)
+    testExpression("foo $eq foo", True)
+    testExpression("foo $eq bar", False)
+
+    testSemanticError("$assert true", "$assert expects a TestResult but got a String")
 
     runStitchTests()
 
