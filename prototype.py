@@ -344,6 +344,22 @@ class EqOperator(BinaryOperator):
         if type(right) == str:
             return TEST_RESULT_TRUE if (left == right) else TEST_RESULT_FALSE
         return opInvalidTypeError(self, right)
+class CompareOperator(BinaryOperator):
+    def __init__(self, name, func):
+        BinaryOperator.__init__(self, name)
+        self.func = func
+    def initialValue(self, context, stdout_handler, operand):
+        if type(operand) == str:
+            # TODO: return semantic error if not a valid integer
+            return int(operand)
+        return opInvalidTypeError(self, operand)
+    def apply(self, context, stdout_handler, left, right):
+        assert(type(left) == int)
+        if type(right) == str:
+            # TODO: return semantic error if not a valid integer
+            right_int = int(right)
+            return TEST_RESULT_TRUE if self.func(left, right_int) else TEST_RESULT_FALSE
+        return opInvalidTypeError(self, right)
 
 
 def opInvalidTypeError(op, operand):
@@ -367,6 +383,12 @@ def objUserTypeDescriptor(obj):
         return obj.userTypeDescriptor()
     raise Exception("objUserTypeDescriptor does not support '{}' yet".format(obj))
 
+class CompareOp:
+    def gt(left, right):
+        return left > right
+    def lt(left, right):
+        return left < right
+
 # builtin objects that do not change and are the same for all scripts
 builtin_objects = {
     "note": Builtin("note"),
@@ -383,6 +405,8 @@ builtin_objects = {
     "or": OrOperator(),
     "and": AndOperator(),
     "eq": EqOperator(),
+    "gt": CompareOperator("gt", CompareOp.gt),
+    "lt": CompareOperator("lt", CompareOp.lt),
 }
 
 class CommandResult(Obj):

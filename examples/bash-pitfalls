@@ -41,7 +41,7 @@ $note $@"Bash Pitfall #4: [ $foo = "bar" ]
 $note --------------------------------------------------------------------------------
 #
 # In stitch the correct syntax is:
-#     [ $foo = bar ]
+#     ($foo $eq bar)
 #
 # We avoid the pitfalls because:
 #     - we don't have quoted variable semantics
@@ -53,10 +53,9 @@ $note --------------------------------------------------------------------------
 #     - there's no pathname expansion
 #
 $set foo bar
-[ $foo = bar ]
+$assert ($foo $eq bar)
 $set foo notbar
-# TODO: add this back in when I get test operators going
-#[ 1 = ($captureexitcode [ $foo = bar ]) ]
+$assert ($not ($foo $eq bar))
 
 $note --------------------------------------------------------------------------------
 $note $@'Bash Pitfall #5: cd $(dirname "$f")'
@@ -87,29 +86,29 @@ ls $dir
 $note --------------------------------------------------------------------------------
 $note $@'Bash Pitfall #6: [ "$foo" = bar && "$bar" = foo ]'
 $note --------------------------------------------------------------------------------
-# In stitch the equivalent error would be this:
+# In stitch the equivalent command would be:
 #
-#     [ $foo $equal $bar $and $bar $equal $foo ]
+#     [ (($foo $eq bar) $and ($bar $eq foo)) ]
 #
-# In stitch this is a syntax error because binary operators only support single node
-# operands. stitch won't run this unless it is corrected to:
-#
-#     ($foo $equal bar) $and ($bar $equal foo)
+# However, in stitch this is a semantic type error, becuase the result of the $and binary
+# operator is a TestResult object, which cannot be passed to the external "[" (aka. "test")
+# program. Instead, stitch provides its own builtins for handling TestResult objects, in
+# this case we can use $assert.
 #
 $set foo bar
 $set bar foo
 
-# TODO: how to represent this?
-#[ $foo = bar ] && [ $bar = foo ]
-# TODO: add these back in when I get test operators going
-#$set test1 ($captureexitcode [ $foo = bar ])
-#$set test2 ($captureexitcode [ $bar = foo ])
-#$echo test1 is $test1, test2 is $test2
+$assert ( ($foo $eq bar) $and ($bar $eq foo) )
 
 $note --------------------------------------------------------------------------------
 $note $@'Bash Pitfall #7: [[ $foo > 7 ]]'
 $note --------------------------------------------------------------------------------
-# this one looks like a problem with the '[[' program rather than with BASH itself
+# This one looks like a problem with the '[[' program rather than with BASH itself.
+# However, stitch's binary comparison operators return TestResult objects that cannot
+# be passed to external programs, so this pitfall becomes a semantic type error in stitch.
+$set foo 8
+
+$assert ($foo $gt 7)
 
 $note --------------------------------------------------------------------------------
 $note $@'Bash Pitfall #8: grep foo bar | while read -r; do ((count++)); done'
