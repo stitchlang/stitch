@@ -16,11 +16,11 @@
 # TODO: get these from command-line
 $set oldref HEAD~1
 $set newref HEAD
-$set oldref (git rev-parse HEAD~2)
-$set newref (git rev-parse HEAD)
+$set oldref (git -C $callerworkdir rev-parse HEAD~2)
+$set newref (git -C $callerworkdir rev-parse HEAD)
 
 #gitcmd=(git log --no-merges --pretty=oneline --abbrev-commit "${1}..${2}")
-$set gitcmd ($multiline git log --no-merges --pretty=oneline --abbrev-commit $oldref$..$newref)
+$set gitcmd ($multiline git -C $callerworkdir log --no-merges --pretty=oneline --abbrev-commit $oldref$..$newref)
 
 #repo="$(git config --get remote.origin.url | \
 #        sed -r -e 's,^(https://github.*\.azc\.ext\.hp\.com/|git@github.*\.azc\.ext\.hp\.com:)(.*),\2,' -e 's/.git$//')"

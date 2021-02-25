@@ -7,9 +7,10 @@ import re
 special_regex = re.compile("$()")
 
 class Context:
-    def __init__(self, scriptfile, verification_mode):
+    def __init__(self, scriptfile, callerworkdir, verification_mode):
         self.script_vars = {
             "scriptfile": String(scriptfile),
+            "callerworkdir": String(callerworkdir),
         }
         self.verification_mode = verification_mode
 
@@ -464,10 +465,12 @@ class UnexpectedMultilineError(Error):
         self.cmd_result = cmd_result
 
 def which(name):
+    extensions = [""] if (os.name != "nt") else os.environ["PATHEXT"].split(";")
     for path in os.environ["PATH"].split(os.pathsep):
-        filename = os.path.join(path, name)
-        if os.path.isfile(filename) and os.access(filename, os.X_OK):
-            return filename
+        for ext in extensions:
+            filename = os.path.join(path, name + ext)
+            if os.path.isfile(filename) and os.access(filename, os.X_OK):
+                return filename
     return None
 
 # escape the argument in a way that it could be re-used in another script
@@ -789,15 +792,21 @@ def main():
     full_filename = os.path.abspath(filename)
 
     # try to get rid of CWD state by going to a temporary readonly directory
-    if not os.path.exists("/tmp/script-sandbox"):
-        os.mkdir("/tmp/script-sandbox")
-        os.chdir("/tmp/script-sandbox")
+    if os.name == "nt":
+        sandbox_path = os.path.join(os.getenv("TEMP"), "stitch-sandbox")
+    else:
+        sandbox_path = "/tmp/stitch-sandbox"
+
+    if not os.path.exists(sandbox_path):
+        os.mkdir(sandbox_path)
+    callerworkdir = os.getcwd()
+    os.chdir(sandbox_path)
 
     #
     # TODO: implement this
     #
     verify_done = False
-    #verify_context = Context(filename, True)
+    #verify_context = Context(filename, callerworkdir, True)
     #result = runFile(verify_context, full_filename, capture_stdout=False)
     #if isinstance(result, Error):
     #    assert(type(result) == SemanticError)
@@ -805,7 +814,7 @@ def main():
     #    sys.exit(1)
     #    verify_done = True
 
-    run_context = Context(filename, False)
+    run_context = Context(full_filename, callerworkdir, False)
     result = runFile(run_context, full_filename, capture_stdout=False)
     if isinstance(result, Error):
         assert((type(result) != SemanticError) or (not verify_done))

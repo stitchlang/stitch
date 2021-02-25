@@ -6,10 +6,12 @@ import inspect
 
 import prototype
 
+SCRIPT_DIR = os.path.dirname(__file__)
+
 def testSemanticError(line, msg):
     lineno = inspect.getframeinfo(inspect.stack()[1][0]).lineno
 
-    context = prototype.Context(__file__, True)
+    context = prototype.Context(__file__, SCRIPT_DIR, True)
     result = prototype.runLine(context, line, print_trace=False, capture_stdout=True)
     if type(result) != prototype.SemanticError:
         sys.exit("{}({}): Error: expected a SemanticError but got {}".format(__file__, lineno, result))
@@ -25,7 +27,7 @@ def testSemanticError(line, msg):
 def testRunError(line, stderr):
     lineno = inspect.getframeinfo(inspect.stack()[1][0]).lineno
 
-    context = prototype.Context(__file__, False)
+    context = prototype.Context(__file__, SCRIPT_DIR, False)
     result = prototype.runLine(context, line, print_trace=False, capture_stdout=True)
     if type(result) != prototype.CommandResult:
         sys.exit("{}({}): Error: expected a CommandResult but got {}".format(__file__, lineno, result))
@@ -47,7 +49,7 @@ def testRunError(line, stderr):
 def testExpression(line, expected):
     lineno = inspect.getframeinfo(inspect.stack()[1][0]).lineno
 
-    context = prototype.Context(__file__, False)
+    context = prototype.Context(__file__, SCRIPT_DIR, False)
     result = prototype.runLine(context, line, print_trace=False, capture_stdout=True)
     if type(result) != prototype.TestResult:
         sys.exit("{}({}): Error: expected a TestResult but got {}".format(__file__, lineno, result))
@@ -58,13 +60,16 @@ def testExpression(line, expected):
 
 
 def runStitchTests():
-    script_dir = os.path.dirname(__file__)
     print("test: running stitch-tests...")
-    result = subprocess.run([os.path.join(script_dir, "stitch"), "stitch-tests"])
+    result = subprocess.run([sys.executable, os.path.join(SCRIPT_DIR, "prototype.py"), "stitch-tests"])
     if result.returncode != 0:
         sys.exit(result.returncode)
 
 def main():
+    if os.name == "nt":
+        path = os.path.join(SCRIPT_DIR, "assetsfortest", "missing_windows_programs")
+        os.environ["PATH"] = path + ";" + os.environ["PATH"]
+
     testSemanticError("$and", "missing operand before '$and'")
     testSemanticError("$or", "missing operand before '$or'")
     testSemanticError("true $and true", "'$and' does not accept objects of type String")
