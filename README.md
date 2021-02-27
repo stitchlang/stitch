@@ -6,23 +6,23 @@ A scripting language that creates programs by "stitching" other programs togethe
 
 ```sh
 # this is a comment
-$echo Hello, World
+@echo Hello, World
 
 # variables
-$set name Fred
-$echo Hello $name
+@set name Fred
+@echo Hello $name
 
 # command substitution
-$set arch (uname -m)
+@set arch (uname -m)
 
 # arrays
-$setarray names args Fred Lisa Joey
-$echo Hello $expand.names
+@setarray names args Fred Lisa Joey
+@echo Hello @expand.names
 ```
 
 stitch scripts primarily consist of commands containing one or more arguments.  The first argument is inspected to determine how the command is invoked; it can be:
 
-* a builtin program (like `$echo`)
+* a builtin program (like `@echo`)
 * a program filename (if it contains any slash `/` characters)
 * a program name (a file in one of the `PATH` directories)
 
@@ -30,7 +30,7 @@ stitch scripts primarily consist of commands containing one or more arguments.  
 
 This design choice comes from recognizing that if something looks like a duck, it should be a duck.  A common pitfall of other scripting languages is that program arguments are not always separated as they appear to be in the script.  For example, the command `cat $myfile` would call `cat` with any number of arguments depending on the contents of `$myfile` even though it appears like it is a single argument.  In stitch, this would always be a single argument.  This is accomplished by separating arguments before variable expansion.
 
-> NOTE: in the case where `$myfile` was actually meant to be any number of arguments, array expansion can be used `cat $expand.myfiles`.
+> NOTE: in the case where `$myfile` was actually meant to be any number of arguments, array expansion can be used `cat @expand.myfiles`.
 
 # Special Characters
 
@@ -38,21 +38,22 @@ stitch has very few special characters that cause it to deviate from the normal 
 
 Char | Description
 -----|-------------
-`#`  | a single-line comment, escape with `$#`
-`$`  | starts an expression, escape with `$$`
-`(`  | start a command substitution, escape with `$(`
-`)`  | ends a command substitution, escape with `$)`
+`#`  | a single-line comment, escape with `@#`
+`@`  | start a builtin expression and/or access a builtin object, escape with `$@`
+`$`  | access a user object `@$`
+`(`  | start a command substitution, escape with `@(`
+`)`  | ends a command substitution, escape with `@)`
 
 # Arguments with Spaces
 
 ```sh
-$echolines arg1 arg2 arg3
+@echolines arg1 arg2 arg3
 # prints:
 #   arg1
 #   arg2
 #   arg3
 
-$echolines arg 1 arg 2 arg 3
+@echolines arg 1 arg 2 arg 3
 # prints:
 #   arg
 #   1
@@ -61,20 +62,20 @@ $echolines arg 1 arg 2 arg 3
 #   arg
 #   3
 
-$echolines $@"arg 1" $@"arg 2" $@"arg 3"
+@echolines @@"arg 1" @@"arg 2" @@"arg 3"
 # prints:
 #   arg 1
 #   arg 2
 #   arg 3
 
-$echolines arg$sp$1 arg$sp$2 arg$sp$3
+@echolines arg@_1 arg@_2 arg@_3
 # prints:
 #   arg 1
 #   arg 2
 #   arg 3
 
 # NOTE: I can use command substituion to include spaces in a string like this
-$echolines ($echo arg 1) ($echo arg 2) ($echo arg 3)
+@echolines (@echo arg 1) (@echo arg 2) (@echo arg 3)
 # prints:
 #   arg 1
 #   arg 2
@@ -85,16 +86,12 @@ $echolines ($echo arg 1) ($echo arg 2) ($echo arg 3)
 
 ```sh
 # awk is a good example to demonstrate because it also makes use of $
-awk $@"{print $1 $2}"
+awk @@"{print $1 $2}"
 ```
 
 # When not to use stitch
 
 stitch's primary purpose is to call other programs, when this is not the primary purpose of a script, another language like Python is better suited.
-
-# Idea
-
-Use `@foo` for reserved stitch symbols and `$foo` for user symbols.  This adds a new special character, but it might make the code more readable.  Doing this makes it immediately apparent when something is a builtin/reserved symbol vs a user-defined variable.  This alerts the user whether the thing they are looking at is a language construct or a user construct.
 
 # Type System
 
@@ -102,10 +99,10 @@ stitch has a basic type system with the following object types:
 
 | Name     |  Examples   | Description                                                                 |
 |----------|-------------|-----------------------------------------------------------------------------|
-| String   | `foo` `$@"bar"` | a sequence of characters, this is the default type of most tokens in stitch |
-| Array    | `$setarray foo args a b c` | an array of Strings |
-| CommandResult | `($echo hello)` | an exitcode and optional Strings for stdout/stderr if they were captured |
-| Builtin  | `$echo` `$set`  | a "builtin program" that takes arguments and returns a CommandResult |
+| String   | `foo` `@@"bar"` | a sequence of characters, this is the default type of most tokens in stitch |
+| Array    | `@setarray foo args a b c` | an array of Strings |
+| CommandResult | `(@echo hello)` | an exitcode and optional Strings for stdout/stderr if they were captured |
+| Builtin  | `@echo` `@set`  | a "builtin program" that takes arguments and returns a CommandResult |
 
 > NOTE: Internally I also use an Error object with subclasses for different kinds of errors.  Not sure if this will be exposed to stitch scripts yet.  I also have an object for BinaryOperator along with subclasses, also not sure if this will be exposed to stitch scripts.
 
@@ -113,19 +110,16 @@ stitch has a basic type system with the following object types:
 
 ```sh
 #
-# $set [SCOPE.]VARNAME VALUE
+# @set [SCOPE.]VARNAME VALUE
 #
-$set msg $@"Hello, my name is Fred"
-$echo $msg
+@set msg @@"Hello, my name is Fred"
+@echo $msg
 # prints "Hello, my name is Fred"
 
-$echo $g.msg
-# still prints "Hello, my name is Fred", "g" is a special scope through which user variables can be accessed.  This should be used for variables that may conflict with predefined variables (i.e. $g.echo instead of $echo). (Note: `$g.g` is not the same as `$g`, it would be a user script variable named `g`).
+@set cpu_count (nproc)
 
-$set cpu_count (nproc)
-
-$echo You have $cpu_count cpus
-$echo Expand cpu count with a suffix is $cpu_count$cpus
+@echo You have $cpu_count cpus
+@echo Expand cpu count with a suffix is $cpu_count$cpus
 ```
 
 Builtin variables
@@ -138,11 +132,10 @@ cr     | The string "\r"
 crlf   | The string "\r\n"
 nl     | Either "\n" or "\r\n" depending on platform
 tab    | The string "\t"
-g      | The script's global scope.
 env    | Environment variable scope.
 expand | Scope to expand arrays through.
 
-> NOTE: maybe support $XX$ to insert arbitrary hex characters?  So a space could be $20$?
+> NOTE: maybe support @XX@ to insert arbitrary hex characters?  So a space could be @20@?
 
 # Arrays
 
@@ -150,22 +143,22 @@ Arrays are important because they provide a way to represent one or more strings
 
 ```sh
 #
-# $setarray [SCOPE.]VARNAME splitlines VALUE
-# $setarray [SCOPE.]VARNAME args ARGS...
+# @setarray [SCOPE.]VARNAME splitlines VALUE
+# @setarray [SCOPE.]VARNAME args ARGS...
 #
 # TODO: splitwhitespace?
 #
 # Example:
-$setarray mounts splitlines (cat /proc/mounts)
+@setarray mounts splitlines (cat /proc/mounts)
 
 # now the "mounts" variable is an array of all the mounts
 
 # How to use the array in a command?
-$echolines $expand.mounts
+@echolines @expand.mounts
 
-# Not using $expand.VAR will cause an error
-$echolines $mounts
-# Error: mounts is an array, you must expand it with $expand.mounts
+# Not using @expand.VAR will cause an error
+@echolines $mounts
+# Error: mounts is an array, you must expand it with @expand.mounts
 ```
 
 Note that arrays cannot be used within another string.  They must be expanded on their own.  The reason for using the `expand` scope to expand arrays, is so that it's immediately apparent that an array is being expanded into 0 or more arguments.
@@ -175,9 +168,9 @@ Note that arrays cannot be used within another string.  They must be expanded on
 Environment variables are accessed through the `env` scope.
 
 ```sh
-$env.VAR
+@env.VAR
 
-$set env.VAR VALUE
+@set env.VAR VALUE
 ```
 
 # Command Substitution
@@ -189,18 +182,18 @@ Command Subtitution is expected to be a very common construct in this language. 
 (PROG ARGS...)
 
 # run the command and return any number of lines of output
-($multiline PROG ARGS...)
+(@multiline PROG ARGS...)
 ```
 
 In general Command Subtitution is commonly used to return strings that don't contain newlines.  Because of this, by default Command Substitution only allows up to one line of output from stdout of the underlying command.  It also strips the trailing newline from the output before returning the string.
 
-This default behavior is overriden by prefixing the comand with `$multiline`.  This will return stdout of the underlying process unmodified.
+This default behavior is overriden by prefixing the comand with `@multiline`.  This will return stdout of the underlying process unmodified.
 
 ```sh
 #echo you're arch is (uname -m)
 
-$set myfile_content ($multiline cat myfile)
-$set lsfile (which ls)
+@set myfile_content (@multiline cat myfile)
+@set lsfile (which ls)
 
 # Example
 make -j(nproc)
@@ -211,29 +204,29 @@ make -j(nproc)
 ### Hello World
 
 ```sh
-$echo Hello World
+@echo Hello World
 ```
 
 ### Read input and print it
 
 ```sh
-$set input (read)
-$echo You entered: $input
+@set input (read)
+@echo You entered: $input
 ```
 
 ### Random
 
 ```sh
-$set pwd (pwd)
-$set arch (uname -m)
-$set target $arch$-linux-musl
-$set prefix $env.HOME/$target
-$set jobs -j(nproc)
+@set pwd (pwd)
+@set arch (uname -m)
+@set target $arch$-linux-musl
+@set prefix @env.HOME/$target
+@set jobs -j(nproc)
 
 wget example.come/$target$.tar.xz
 tar xf $target$.tar.xz
 
-$set env.PATH $pwd/$target/bin:$env.PATH
+@set env.PATH $pwd/$target/bin:@env.PATH
 ```
 
 # Builtin Programs
@@ -247,53 +240,51 @@ If a feature is "simple" and provides some sort of benefit, then there's not muc
 
 If a feature is not so simple, then it still may be a candidate for inclusion if it is common and/or generally useful enough.
 
-#### $multiline PROG ARGS...
+#### @multiline PROG ARGS...
 
 Runs the given program output wrapped in an internal "MultilineResult" object that allows strings with mulitple lines to be returned from a command-substitution.
 
-#### $firstline/$lastline
+#### @firstline/@lastline
 
 Not sure if these should be added yet. I've included them to be considered.
 
-#### $findprog NAME
+#### @findprog NAME
 
 Assuming programs are located the same way as BASH and/or execve, I should expose this logic through a builtin.
 
 # Delimited String Literals
 
-WYSIWYG strings make it easier to write correct code because they are easy for humans to verify and easy to copy between applications. To support them, we need a way to disable our special characters `#`, `$`, `(` and `)`.
+WYSIWYG strings make it easier to write correct code because they are easy for humans to verify and easy to copy between applications. To support them, we need a way to disable our special characters `#`, `@`, `$`, `(` and `)`.
 
-For this I've added syntax for "Delimited String Literals".  It starts with the sequence `$@` followed by a delimiter character.  The string continues until it sees the delimiter character again.  Here are some examples:
+For this I've added syntax for "Delimited String Literals".  It starts with the sequence `@@` followed by a delimiter character.  The string continues until it sees the delimiter character again.  Here are some examples:
 
 ```sh
-$echo $@"I can use #, $, ( and ) in here but not a double-quote"
+@echo @@"I can use #, @, $, ( and ) in here but not a double-quote"
 # prints:
-#   I can use #, $, ( and ) in here but not a double-quote
+#   I can use #, @, $, ( and ) in here but not a double-quote
 
-$echo $@'I can use #, $, (, ) and " but not single-quote'
+@echo @@'I can use #, @, $, (, ) and " but not single-quote'
 # prints:
-#   I can use #, $, (, ) and " but not single-quote
+#   I can use #, @, $, (, ) and " but not single-quote
 
-$echo $@|I can use #, $, (, ), " and ' but not a pipe character in here|
+@echo @@|I can use #, @, $, (, ), " and ' but not a pipe character in here|
 # prints:
-#   I can use #, $, (, ), " and ' but not a pipe character in here
+#   I can use #, @, $, (, ), " and ' but not a pipe character in here
 ```
 
 The scripting language should also probably include a way to create multiline strings.  I'll decide on this later.
 
 It might also be good to include some shorthand variations like this:
 ```sh
-$echo $" example 1 "
-$echo $' example 1 '
-$echo $| example 1 |
+@echo @" example 1 "
+@echo @' example 1 '
+@echo @| example 1 |
 
-# probably don't do $( ... ) because that could easily get confused with command-substitution
-# maybe just $"..." and $'...'
+# probably don't do @( ... ) because that could easily get confused with command-substitution
+# maybe just @"..." and @'...'
 ```
 
-> NOTE: If I decide to use `@` for reserved words, I could do `@"foo"` for shorthand, and `@$"foo"` / `@$|foo|` for delimited.
-
-I could also support `"..."`.  This would make the double-quote `"` character a special reserved character. Would this make it easier to write correct programs? Keeping the number of reserved characters low makes it simpler to reason about what source is doing.  The question is whether that benefit outweighs needing to type `$"..."` instead of `"..."`.
+I could also support `"..."`.  This would make the double-quote `"` character a special reserved character. Would this make it easier to write correct programs? Keeping the number of reserved characters low makes it simpler to reason about what source is doing.  The question is whether that benefit outweighs needing to type `@"..."` instead of `"..."`.
 
 Note that the same reasoning that applies to WYSIWYG strings would also apply to HEREDOC strings. A special dollar keyword could start a heredoc, tell if it is raw or processed, then specify the sentinel delimiter.
 
@@ -307,35 +298,35 @@ Node BinaryOperator Node
 
 
 # OK
-$a $and $b
+$a @and $b
 
 # Syntax Error: binary expressions only accept single-node operands
-grep foo bar $and $b
+grep foo bar @and $b
 
 # OK
-(grep foo bar) $and $b
+(grep foo bar) @and $b
 ```
 
-Boolean binary operators like `$or` and `$and` can take a CommandResult object, and convert it to a Bool object based on it's exit code.
+Boolean binary operators like `@or` and `@and` can take a CommandResult object, and convert it to a Bool object based on it's exit code.
 
-When a binary operator receives a CommandResult object from a Command Substitition, it can handle it differently depending on the operator.  For the boolean binary operators `$or` and `$and`, it converts the exit code of the command to a boolean value, 0 indicates "success" which becomese `true`, and non-zero becomes `false`.  In this case, since stdout is ignored, it is printed to the current stdout handler instead.
+When a binary operator receives a CommandResult object from a Command Substitition, it can handle it differently depending on the operator.  For the boolean binary operators `@or` and `@and`, it converts the exit code of the command to a boolean value, 0 indicates "success" which becomese `true`, and non-zero becomes `false`.  In this case, since stdout is ignored, it is printed to the current stdout handler instead.
 
-Currently there are only 2 binary operators: `$and` and `$or`.  Here are some more candidates:
+Currently there are only 2 binary operators: `@and` and `@or`.  Here are some more candidates:
 
 ```sh
-Node $equals Node
-Node $lessorequal Node
-Node $greaterorequal Node
-Node $less Node
-Node $greater Node
+Node @equals Node
+Node @lessorequal Node
+Node @greaterorequal Node
+Node @less Node
+Node @greater Node
 
 # or maybe
-Node $= Node
-Node $== Node
-Node $<= Node
-Node $>= Node
-Node $< Node
-Node $> Node
+Node @= Node
+Node @== Node
+Node @<= Node
+Node @>= Node
+Node @< Node
+Node @> Node
 ```
 
 ### Short Circuting
@@ -346,16 +337,16 @@ If the final result of a binary expression has been determined before it has bee
 
 * Top Level Handling?
 
-How should Boolean objects be handled at the top-level?  For now I've just made them an error "uhandled Bool".  `$assert` can be used to handle them by asserting they are true, and `$assert ($not ...)` can handle assertig they are false.
+How should Boolean objects be handled at the top-level?  For now I've just made them an error "uhandled Bool".  `@assert` can be used to handle them by asserting they are true, and `@assert (@not ...)` can handle assertig they are false.
 
 * Unary Expressions?
 
 I don't think the language needs an special handling for unary expressions.  I believe these can be handled by builtins, like:
 
 ```sh
-$exists PATH
-$isdir PATH
-$isfile PATH
+@exists PATH
+@isdir PATH
+@isfile PATH
 ```
 
 
@@ -367,80 +358,80 @@ $isfile PATH
 #
 # if/elif/else/endif
 #
-$if command
+@if command
     command
     command
     ...
-$elif command
+@elif command
     command
     command
     ...
-$else
+@else
     command
     command
     ...
-$end
+@end
 
 #
 # while/continue/break
 #
-$while command
+@while command
     command
     command
     ...
 
-    $if command
-        $continue
-    $if command
-        $break
+    @if command
+        @continue
+    @if command
+        @break
 
-$end
+@end
 ```
 
 ```sh
 # returns a CommandResult "top-level handler" which causes a fatal error on non-zero exit code
 grep needle file
 
-# $if will both zero and non-zero exit codes from a CommandResult and use it to decide on the brancht to execute
-$if grep needle file
-    $echo found needle!
-$else
-    $echo did not find needle
-$end
+# @if will both zero and non-zero exit codes from a CommandResult and use it to decide on the brancht to execute
+@if grep needle file
+    @echo found needle!
+@else
+    @echo did not find needle
+@end
 
 # unary operator example
 
 # applying a "test operator" to a CommandResult returns a Bool
 grep needle file
-$not grep needle file
+@not grep needle file
 
 # both of the commands above would cause an "unhandle Bool" if they appeared at the top-level
 ```
 
-So any command that is given to a "test operator" must bubble up to a control flow builtin like `$if`, `$while`.
+So any command that is given to a "test operator" must bubble up to a control flow builtin like `@if`, `@while`.
 
 ```sh
-$if $not grep needle file $and $not grep needle2 file
-    $echo both needles are not found
-$else
-    $echo at least one needle is present
-$end
+@if @not grep needle file @and @not grep needle2 file
+    @echo both needles are not found
+@else
+    @echo at least one needle is present
+@end
 ```
 
 So, unary operators are always higher precedence than binary operators.  What if we want to override that?
 
 ```sh
-$if $not (grep needle file $and grep needle2 file)
-    $echo at least one needle is missing
-$else
-    $echo both needls are present
-$end
+@if @not (grep needle file @and grep needle2 file)
+    @echo at least one needle is missing
+@else
+    @echo both needls are present
+@end
 ```
 
 I think the example above just WORKS.  Command substitution takes any Bool and propogates it up as a Bool.  If a Bool is attempted to be used as a string, it is an error, i.e.
 
 ```sh
-ls ($not grep needle file)
+ls (@not grep needle file)
 #
 # error: expected a string but got Bool
 #
@@ -450,20 +441,20 @@ What if we required parenthesis around binary operators?
 
 ```sh
 # maybe this is an error?
-$not grep needle file $and grep needle2 file
+@not grep needle file @and grep needle2 file
 
 # need this
-($not grep needle file) $and (grep needle2 file)
+(@not grep needle file) @and (grep needle2 file)
 ```
 
 I think this makes things more clear and readable.  After a command is expanded, binary operators only support one object to their left and right.  If there are more then it's an error.  What about chaining binary operators?
 
 ```sh
 # OK
-foo $and bar $and baz
+foo @and bar @and baz
 
 # This looks confusing
-foo $or bar $and baz
+foo @or bar @and baz
 ```
 
 I think the right thing to do here is to only allow chaining binary operators if they are the same operator.
@@ -476,9 +467,12 @@ Script ::= Command*
 
 Command ::= Argument* | BinaryExpression
 
-Argument ::= (Char | '$' DollarExpression)* | BinaryExpression
+Argument ::= (Char | '@' AtExpression | '$' DollarExpression)* | BinaryExpression
 
 DollarExpression ::= '(' Command ')' | [a-zA-Z_.]* '$'?
+
+# TODO: AtExpression
+#AtExpression ::= ...
 
 BinaryExpression ::= Operand Op Operand ( Op Operand )*
 
@@ -492,21 +486,21 @@ Operand ::= '(' Command ')' | Argument
 How to handle return code and stdout/stderr?  I could have a CommandResult type of object.
 ```sh
 #
-# $captureouts PROG ARGS...
-# $captureall     PROG ARGS...
+# @captureouts PROG ARGS...
+# @captureall     PROG ARGS...
 #
-# the $capture* builtins will run the program/args that follow, and instead of just returning stdout, it will return
-# an object.  $capturestreams will capture stdout and stderr via the "out" and "err" fields.  $captureall will also capture
-$ the exit code in the field `code`, note that this overrides the default behavior of exiting on a non-zero exit code.
+# the @capture* builtins will run the program/args that follow, and instead of just returning stdout, it will return
+# an object.  @capturestreams will capture stdout and stderr via the "out" and "err" fields.  @captureall will also capture
+# the exit code in the field `code`, note that this overrides the default behavior of exiting on a non-zero exit code.
 
-$set some_program_result ($captureouts some-program)
-$echo the stdout of some_program_result is: $some_program_result.out
-$echo the stderr of some_program_result is: $some_program_result.err
+@set some_program_result (@captureouts some-program)
+@echo the stdout of some_program_result is: $some_program_result.out
+@echo the stderr of some_program_result is: $some_program_result.err
 
-$set another_program_result ($captureouts another-program)
-$echo the stdout of another_program_result is: $another_program_result.out
-$echo the stderr of another_program_result is: $another_program_result.err
-$echo the exit code of another_program_result is: $another_program_result.code
+@set another_program_result (@captureouts another-program)
+@echo the stdout of another_program_result is: $another_program_result.out
+@echo the stderr of another_program_result is: $another_program_result.err
+@echo the exit code of another_program_result is: $another_program_result.code
 ```
 
 # Idea: piping
@@ -522,26 +516,26 @@ A script should be able to forward stdout and/or stderr from one process to the 
 Syntax
 ```sh
 
-foo $out bar
-foo $err bar
-foo $outerr bar
+foo @out bar
+foo @err bar
+foo @outerr bar
 
 # How to pipe stdout and stderr to different places?
 
-# the following won't work because $err could belong to the previous command
-foo $out COMMAND... $err COMMAND...
+# the following won't work because @err could belong to the previous command
+foo @out COMMAND... @err COMMAND...
 
 
-# to redirect the output of "foo" to a file "myfile", use $in2file
-foo $out $in2file myfile
+# to redirect the output of "foo" to a file "myfile", use @in2file
+foo @out @in2file myfile
 
 # to forward out/err to different places, could do multiple lines like this
-$set foo $stage foo args...
-# the $stage COMMAND... builtin will create create a process that has not been started yet
+@set foo @stage foo args...
+# the @stage COMMAND... builtin will create create a process that has not been started yet
 # now $myprogram.out and $myprogram.err are open file handles
-$attach $foo.out bar
-$attach $foo.err baz
-$run $foo
+@attach $foo.out bar
+@attach $foo.err baz
+@run $foo
 ```
 
 # The Current Working Directory
@@ -549,27 +543,27 @@ $run $foo
 Having a current working directory as hidden state that affects all relative path names may be more trouble than it's worth.  One alterative is to use absolute path names.  However, some programs use the current working directory as an important input, in which case there needs to be a way to set it.  Here's a way we could set this and make it excplicit:
 
 ```sh
-$withcwd DIR PROG ARGS...
+@withcwd DIR PROG ARGS...
 
 # example
-$withcwd $scriptdir git status
+@withcwd @scriptdir git status
 
 # here's the same example not using CWD, if the program supports it, then this is probably preferred
-git -C $scriptdir status
+git -C @scriptdir status
 ```
 
 # Script Verificaton
 
 "Script Verification" means checking a script for syntax/semantic errors before executing it.  This verification is done on all the code inside the script, not just the parts executed on a particular invocation.  This verification is vitally important in making it easy to write "correct code" because catching all "execution errors" requires exhaustive testing, but catching all syntax/semantic errors can be done without any tests.  This is a drastic distinction between these two kinds of errors.  When evaluating language features, making "execution errors" into "syntax/semantic errors" has a big affect on making it easier to write correct code.
 
-By default, "Script Verification" is performed on every script before it is executed.  To disable this verification, a script can include the `$noverify` builtin to stop verification wherever it appears.  It also takes an optional md5 hash that the interpreter will use to verify the contents of the rest of the script.  This provides a way for a script disable verification only if the script hasn't changed.
+By default, "Script Verification" is performed on every script before it is executed.  To disable this verification, a script can include the `@noverify` builtin to stop verification wherever it appears.  It also takes an optional md5 hash that the interpreter will use to verify the contents of the rest of the script.  This provides a way for a script disable verification only if the script hasn't changed.
 
 ```sh
 # disable verification
-$noverify
+@noverify
 
 # disable verification only if the rest of the file matches this hash
-$noverify 03299287e43dc67cf0f177aa85031a43
+@noverify 03299287e43dc67cf0f177aa85031a43
 ```
 
 # TODO:
@@ -595,26 +589,32 @@ This scripting language is meant to represent coherent programs that live inside
 
 Having code that "sometimes works" is where bugs thrive.  It usually means the code will work in the test environment but then fail when it gets to the customer.  With this in mind, it's better to make features that either "fail all of the time" or "work all of the time".  If possible, avoid features that encourage code to "sometimes work".
 
-### Why Command Substitution is `(...)` rather than `$(...)`
+### Why Command Substitution is `(...)` rather than `@(...)` or `$(...)`
 
 This syntax is a result of the following 3 observations:
 
 1. I don't want `)` to be treated differently inside or outside a command-substitution
 2. I don't want `(` and `)` to be treated differently from each other
-3. Given the above 2, I would need to use something like `$( ... $)`, however, that looks weird.
+3. Given the above 2, I would need to use something like `@( ... @)` or `$( ... $)`, however, these look weird
 
-Also note that issues 1 and 3 still apply even if I only used 1 character like `|` instead of the parenthesis.
+I should also consider reserving a single character such as `|`, then have `@|` mean mean "start command" and `|` mean "end command".  So it would look like this `@| ... |`.  This solves issue 1, issue 2 doesn't apply because it's a single character, and it doesn't look weird.  This would also mean only reserving 1 character instead of the 2 parenthesis characters `(` and `)`.  I'll have to compare these solutions.
 
 ### Reserved Characters
 
-I've limited the number of reserved/special characters quite a bit.  It's possible to have only 1 special character, however, that seems to be too far in one direction.  This makes the source code littered with the "special character" and seems to make the code harder for humans to parse, and consequently, harder to write "correct code".  Minimizing the number of special characters simplifies the language and makes it easier to reason about what the source code is doing, however, special characters can sometimes aid in making the source code more readable.  The strategy I've adopted is to keep special characters limited by default until it becomes clear that adding a new special character is the best way to make it easier to write correct code.  I think the comment character `#` has passed this criteria.  Using `#` to create comments rather than `$#` makes the difference between code and comments easier to distinguish.  It's also a commonly used comment character so it makes the script more compatible with other existing languges which includes working with "shebang line" without special handling for the first line of the script.
+I've limited the number of reserved/special characters quite a bit.  It's possible to have only 1 special character, however, that seems to be too far in one direction.  This makes the source code littered with the "special character" and seems to make the code harder for humans to parse, and consequently, harder to write "correct code".  Minimizing the number of special characters simplifies the language and makes it easier to reason about what the source code is doing, however, special characters can sometimes aid in making the source code more readable.  The strategy I've adopted is to keep special characters limited by default until it becomes clear that adding a new special character is the best way to make it easier to write correct code.  I think the comment character `#` has passed this criteria.  Using `#` to create comments rather than `@#` makes the difference between code and comments easier to distinguish.  It's also a commonly used comment character so it makes the script more compatible with other existing languges which includes working with "shebang line" without special handling for the first line of the script.
+
+#### Development Note: Adding `@`
+
+I originally used `$` to access all symbols, both language-defined and user-defined.  @ifruend suggested that accessing language symbols through another character like `@` would make stitch more readable.  Doing this elevates the distinction between user/language symbols to the syntax itself rather than an implementation detail.  I agree that being able to determine a symbol's origin makes things more readable, enough to warrant a new special character, so I accepted this change.
+
+Also note this this feature alleviates the readability benefit that keywords would add.
 
 ### Keywords
 
-I should consider whether it is better to require all builtin's to be qualified with `$` (like `$echo`, `$if`, `$and`) or whether I should introduce keywords.  Adding keywords can make it easier to read and write code, however, it adds some cognitive load in that the programmer must remember the keywords, and in rare cases how to create a string that matches a keyword.  This cognitive burden may be small, but it should be compared to the alternative which is when there are no keywords, there is nothing to remember and it is immediately apparent whether something is a builtin.
+I should consider whether it is better to require all builtin's to be qualified with `@` (like `@echo`, `@if`, `@and`) or whether I should introduce keywords.  Adding keywords can make it easier to read and write code, however, it adds some cognitive load in that the programmer must remember the keywords, and in rare cases how to create a string that matches a keyword.  This cognitive burden may be small, but it should be compared to the alternative which is when there are no keywords, there is nothing to remember and it is immediately apparent whether something is a builtin.
 
-I want to make a distinction between "incorrect code" and "buggy code".  Incorrect code due to a syntax or semantic error is better than "bugggy code".  Buggy code is code that "sometimes works", but "incorrect code" always fails.  This language is designed to avoid "buggy code", but is less concerned about avoiding obviously "incorrect code".  Incorrect code is still a concern, but sometimes this is in conflict with language simplicity.  For example, adding keywords might make it easier to avoid incorrect code because of a missing `$` in some cases, however, that is obviously incorrect code that can be checked before executing it.  The complexity cost of adding keywords needs to be weighed against this.  Also note that I'm favoring reading code over writing code, so making something more readable takes priority over how hard it is to type.
+I want to make a distinction between "incorrect code" and "buggy code".  Incorrect code due to a syntax or semantic error is better than "bugggy code".  Buggy code is code that "sometimes works", but "incorrect code" always fails.  This language is designed to avoid "buggy code", but is less concerned about avoiding obviously "incorrect code".  Incorrect code is still a concern, but sometimes this is in conflict with language simplicity.  For example, adding keywords might make it easier to avoid incorrect code because of a missing `@` in some cases, however, that is obviously incorrect code that can be checked before executing it.  The complexity cost of adding keywords needs to be weighed against this.  Also note that I'm favoring reading code over writing code, so making something more readable takes priority over how hard it is to type.
 
 ### Custom Special Character
 
-Maybe a script or line should be able to change their special symbol from `$` to something else?  For example, you could have something like this `$->! !echo your balance is $1.25`.  The single-line case may be tenuous, but if there is a domain where the `$` symbol needs to be escaped alot, maybe allowing it to be subtituted is worthwhile.
+Maybe a script or line should be able to change their special symbols from `@` and `$` to something else?  For example, you could have something like this `$->! !echo your balance is $1.25`.  The single-line case may be tenuous, but if there is a domain where the `$` symbol needs to be escaped alot, maybe allowing it to be subtituted is worthwhile.

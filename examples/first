@@ -2,16 +2,16 @@
 
 # this is a comment
 
-$echo hello
+@echo hello
 
 # variables
-$set name Fred
-$echo Hello $name
+@set name Fred
+@echo Hello $name
 
 # command substitution
-$set arch (uname -m)
-$echo $arch
+@set arch (uname -m)
+@echo $arch
 
 # arrays
-# NOT IMPLEMENTED $setarray names args Fred Lisa Joey
-# NOT IMPLEMENTED $echo Hello $expand.names
+# NOT IMPLEMENTED @setarray names args Fred Lisa Joey
+# NOT IMPLEMENTED @echo Hello @expand.names

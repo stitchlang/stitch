@@ -2,51 +2,51 @@
 #
 # Example ported from: https://www.linode.com/docs/guides/solving-real-world-problems-with-bash-scripts-a-tutorial/
 #
-$note Print default output
-$echo (date)
+@note Print default output
+@echo (date)
 
-$note Print current date without the time
-$echo (date +%m-%d-%y)
+@note Print current date without the time
+@echo (date +%m-%d-%y)
 
-$note Use 4 digits for year
-$echo (date +%m-%d-%Y)
+@note Use 4 digits for year
+@echo (date +%m-%d-%Y)
 
-$note Display time only
-$echo (date +%T)
+@note Display time only
+@echo (date +%T)
 
-$note Display 12 hour time
-$echo (date +%r)
+@note Display 12 hour time
+@echo (date +%r)
 
-$note Time without seconds
-$echo (date +%H:%M)
+@note Time without seconds
+@echo (date +%H:%M)
 
-$note Print full date
-$echo (date $@"+%A %d %b %Y %H:%M:%S")
+@note Print full date
+@echo (date @@"+%A %d %b %Y %H:%M:%S")
 
-$note Nanoseconds
-$echo Nanoseconds: (date +%s-%N)
+@note Nanoseconds
+@echo Nanoseconds: (date +%s-%N)
 
 # TODO: need to implement environment variables before this will work
-$note Different timezone by name
-$echo Timezone: ($settmp env.TZ :US/Eastern date +%T)
-$echo Timezone: ($settmp env.TZ :Europe/UK date +%T)
+@note Different timezone by name
+@echo Timezone: (@settmp env.TZ :US/Eastern date +%T)
+@echo Timezone: (@settmp env.TZ :Europe/UK date +%T)
 
-$note Print epoch time - convenient for filenames
-$echo (date +%s)
+@note Print epoch time - convenient for filenames
+@echo (date +%s)
 
-$note Print week number
-$echo Week number: `date +"%V"`
+@note Print week number
+@echo Week number: `date +"%V"`
 
-$note Create unique filename
-$set f (date +%s-%N)
+@note Create unique filename
+@set f (date +%s-%N)
 touch $f
 ls -l $f
 rm $f
 
-$note Add epoch time to existing file
-$set f /tmp/test
+@note Add epoch time to existing file
+@set f /tmp/test
 touch $f
-$set f2 $f$.(date +%s)
+@set f2 $f$.(date +%s)
 mv $f $f2
 ls -l $f2
 rm $f2

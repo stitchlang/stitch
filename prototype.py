@@ -4,16 +4,17 @@ import os
 import subprocess
 import re
 
-special_regex = re.compile("$()")
+special_regex = re.compile("@$()")
 
 class Context:
     def __init__(self, scriptfile, callerworkdir, verification_mode):
-        self.script_vars = {
+        self.script_specific_builtin_objects = {
             "scriptfile": String(scriptfile),
             # NOTE: callerworkdir will need to be forwarded to any sub-scripts
             #       maybe I can just use an environment variable
             "callerworkdir": String(callerworkdir),
         }
+        self.script_vars = {}
         self.verification_mode = verification_mode
         if self.verification_mode:
             self.verification_call_files = set([])
@@ -27,10 +28,11 @@ class NodeRawString(Node):
     def __repr__(self):
         return "RawString({})".format(self.s)
 class NodeVariable(Node):
-    def __init__(self, id):
+    def __init__(self, id, is_at):
         self.id = id
+        self.is_at = is_at
     def __repr__(self):
-        return "Variable({})".format(self.id)
+        return "Variable({}{})".format("@" if self.is_at else "$", self.id)
 class NodeCommandSub(Node):
     def __init__(self, nodes):
         self.nodes = nodes
@@ -68,37 +70,26 @@ def skipWhitespace(src, i):
         i += 1
     return i
 
-def parseRawString(src, i):
+def parseDelimitedString(src, i):
     if i == len(src):
-        sys.exit("Error: got '$@' with nothing after it")
+        sys.exit("Error: got '@@' with nothing after it")
     sentinel_char = src[i]
     sentinel_ord = ord(sentinel_char)
     i += 1
     start = i
     while True:
         if i == len(src):
-            sys.exit("Error: got '$@{}' is missing the terminating '{}' character".format(sentinel_char, sentinel_char))
+            sys.exit("Error: got '@@{}' is missing the terminating '{}' character".format(sentinel_char, sentinel_char))
         if ord(src[i]) == sentinel_ord:
             return NodeRawString(src[start:i]), i+1
         i += 1
 
-def parseDollarExpr(src, i):
-    if i == len(src):
-        # TODO: add test for this error
-        sys.exit("Error: got a '$' with nothing after it")
+def parseAtOrDollarVar(src, i, is_at):
+    special_char = "@" if is_at else "$"
     c_ord = ord(src[i])
-    if c_ord == ord("#"):
-        return NodeRawString("#"), i+1
-    if c_ord == ord("$"):
-        return NodeRawString("$"), i+1
-    if c_ord == ord("("):
-        return NodeRawString("("), i+1
-    if c_ord == ord(")"):
-        return NodeRawString(")"), i+1
-    if c_ord == ord("@"):
-        return parseRawString(src, i+1)
     if not isIdOrd(c_ord):
-        sys.exit("Error: expected [a-zA-Z0-9_.$] after '$' but got '{}'".format(chr(c_ord)))
+        sys.exit("Error: unexpected sequence '{}{}''".format(special_char, chr(c_ord)))
+    special_ord = ord(special_char)
     id_start = i
     while True:
         i += 1
@@ -108,10 +99,40 @@ def parseDollarExpr(src, i):
         c_ord = ord(src[i])
         if not isIdOrd(c_ord):
             id_end = i
-            if c_ord == ord("$"):
+            if c_ord == special_ord:
                 i += 1
             break
-    return NodeVariable(src[id_start:id_end]), i
+    return NodeVariable(src[id_start:id_end], is_at=is_at), i
+
+def parseAtExpr(src, i):
+    if i == len(src):
+        # TODO: add test for this error
+        sys.exit("Error: got a '@' with nothing after it")
+    c_ord = ord(src[i])
+    if c_ord == ord("#"):
+        return NodeRawString("#"), i+1
+    # NOTE: I'm using @@ for delimited strings for now
+    #       I could use $@ for escaping '@' we'll see
+    #if c_ord == ord("@"):
+    #    return NodeRawString("@"), i+1
+    if c_ord == ord("@"):
+        return parseDelimitedString(src, i+1)
+    if c_ord == ord("$"):
+        return NodeRawString("$"), i+1
+    if c_ord == ord("("):
+        return NodeRawString("("), i+1
+    if c_ord == ord(")"):
+        return NodeRawString(")"), i+1
+    return parseAtOrDollarVar(src, i, is_at=True)
+
+def parseDollarExpr(src, i):
+    if i == len(src):
+        # TODO: add test for this error
+        sys.exit("Error: got a '$' with nothing after it")
+    c_ord = ord(src[i])
+    if c_ord == ord("@"):
+        return NodeRawString("@"), i+1
+    return parseAtOrDollarVar(src, i, is_at=False)
 
 def parseNode(src, i):
     assert(i < len(src))
@@ -121,6 +142,14 @@ def parseNode(src, i):
     mark = i
     while i < len(src):
         c_ord = ord(src[i])
+        if c_ord == ord("@"):
+            if i > mark:
+                node = combineNodes(node, NodeRawString(src[mark:i]))
+            at_node, at_str_limit = parseAtExpr(src, i+1)
+            mark = at_str_limit
+            i = at_str_limit
+            node = combineNodes(node, at_node)
+            continue
         if c_ord == ord("$"):
             if i > mark:
                 node = combineNodes(node, NodeRawString(src[mark:i]))
@@ -196,16 +225,16 @@ class BuiltinMethods:
                     return arg_string
                 arg_strings.append(arg_string)
             else:
-                return SemanticError("$echo does not support objects of type {}".format(sub_node.userTypeDescriptor()))
+                return SemanticError("@echo does not support objects of type {}".format(sub_node.userTypeDescriptor()))
         return CommandResult(0, handleBuiltinOutput(" ".join(arg_strings), capture_stdout), None, False)
     def set(context, args, capture_stdout):
         if len(args) == 0:
-            sys.exit("Error: the $set builtin requires at least one argument")
+            sys.exit("Error: the @set builtin requires at least one argument")
         if len(args) > 2:
-            sys.exit("Error: the $set builtin can only accept 2 arguments but got {}".format(len(args)))
+            sys.exit("Error: the @set builtin can only accept 2 arguments but got {}".format(len(args)))
         varname = args[0]
         if type(varname) != str:
-            return SemanticError("$set requires a String but got {}".format(varname.userTypeDescriptor()))
+            return SemanticError("@set requires a String but got {}".format(varname.userTypeDescriptor()))
         value_obj = args[1]
         if type(value_obj) == str:
             value_string = String(value_obj)
@@ -219,12 +248,12 @@ class BuiltinMethods:
 
         #print("DEBUG: setting variable '{}' to '{}'".format(varname, value_string))
         context.script_vars[varname] = value_string
-        # NOTE: not returning the value here? Why? because the $set builtin doesn't output it.  Also, if
+        # NOTE: not returning the value here? Why? because the @set builtin doesn't output it.  Also, if
         #       a script wants the value, they can now acces it through the variable that is being set.
         return CommandResult(0, handleBuiltinOutput("", capture_stdout), None, False)
     def settmp(context, args, capture_stdout):
         if len(args) < 3:
-            sys.exit("Error: the $settmp builtin requires at least 3 arguments")
+            sys.exit("Error: the @settmp builtin requires at least 3 arguments")
         varname = args[0]
         value = args[1]
         command = args[2:]
@@ -242,9 +271,9 @@ class BuiltinMethods:
                 del context.script_vars[varname]
     def multiline(context, args, capture_stdout):
         if len(args) == 0:
-            sys.exit("Error: the $multiline builtin requires at least one argument")
+            sys.exit("Error: the @multiline builtin requires at least one argument")
         if not capture_stdout:
-            return SemanticError("the $multiline builtin is only supported inside a command-substitution")
+            return SemanticError("the @multiline builtin is only supported inside a command-substitution")
         result = runCommandExpanded(context, args, capture_stdout=True, log_cmd=False)
         if isinstance(result, Error):
             return result
@@ -253,30 +282,30 @@ class BuiltinMethods:
         return result
     def assert_(context, args, capture_stdout):
         if len(args) != 1:
-            return SemanticError("$assert requires 1 argument bug got {}".format(len(args)))
+            return SemanticError("@assert requires 1 argument bug got {}".format(len(args)))
         result = args[0]
         if isinstance(result, Error):
             return result
         if type(result) != Bool:
-            return SemanticError("$assert expects a Bool but got a {}".format(objUserTypeDescriptor(result)))
+            return SemanticError("@assert expects a Bool but got a {}".format(objUserTypeDescriptor(result)))
         if not result.value:
             return AssertError()
         return CommandResult(0, handleBuiltinOutput("", capture_stdout), None, False)
     def not_(context, args, capture_stdout):
         if len(args) != 1:
-            return SemanticError("$not requires 1 argument bug got {}".format(len(args)))
+            return SemanticError("@not requires 1 argument bug got {}".format(len(args)))
         result = args[0]
         if isinstance(result, Error):
             return result
         if type(result) != Bool:
-            return SemanticError("$not expects a Bool but got a {}".format(objUserTypeDescriptor(result)))
+            return SemanticError("@not expects a Bool but got a {}".format(objUserTypeDescriptor(result)))
         return TEST_RESULT_FALSE if result.value else TEST_RESULT_TRUE
     def call(context, args, capture_stdout):
         if len(args) == 0:
-            sys.exit("Error: the $call builtin requires at least one argument")
+            sys.exit("Error: the @call builtin requires at least one argument")
         program_file = args[0]
         if len(args) > 1:
-            sys.exit("Error: $call with more than just a program not implemented")
+            sys.exit("Error: @call with more than just a program not implemented")
         return runFile(context, program_file, capture_stdout, top_level=False)
 
 
@@ -294,7 +323,7 @@ class Builtin(StitchObject):
     def __init__(self, name):
         self.name = name
     def __repr__(self):
-        return "${}".format(self.name)
+        return "@{}".format(self.name)
     def userTypeDescriptor(self):
         return "Builtin"
 class String(StitchObject):
@@ -306,7 +335,7 @@ class String(StitchObject):
 class BinaryOperator(StitchObject):
     def __init__(self, name):
         self.name = name
-        self.src_name = "$" + name
+        self.src_name = "@" + name
     def __repr__(self):
         return self.src_name
 class ChainableBinaryOperator(BinaryOperator):
@@ -389,7 +418,7 @@ class CommandResult(StitchObject):
             return stripNewline(lines[0])
         raise Exception("here")
         return UnexpectedMultilineError(self)
-        #sys.exit("Error: program '{}' returned {} lines, but command-subtitution requires only 1 line of output.  Prefix the command with '$multiline' to support multiple.".format(str(node.nodes[0]), len(lines)))
+        #sys.exit("Error: program '{}' returned {} lines, but command-subtitution requires only 1 line of output.  Prefix the command with '@multiline' to support multiple.".format(str(node.nodes[0]), len(lines)))
     def __repr__(self):
         return "CommandResult(exit={},stderr='{}',stdout='{}',multiline={})".format(
             self.exitcode, self.stderr, self.stdout, self.multiline)
@@ -419,7 +448,7 @@ class MissingProgramError(Error):
         Error.__init__(self, "unable to find program '{}' in PATH".format(prog))
 class UnexpectedMultilineError(Error):
     def __init__(self, cmd_result: CommandResult):
-        Error.__init__(self, "received multiple lines from a command that was not prefixed with $multiline")
+        Error.__init__(self, "received multiple lines from a command that was not prefixed with @multiline")
         self.cmd_result = cmd_result
 
 
@@ -493,7 +522,7 @@ def execNodeToScriptSource(arg):
             break
     if not delimiter:
         sys.exit("TODO: implement more delimiter options for this string '{}'".format(arg))
-    return "$@{}{}{}".format(delimiter, arg, delimiter)
+    return "@@{}{}{}".format(delimiter, arg, delimiter)
 
 class StdoutCaptureHandler:
     def __init__(self):
@@ -588,14 +617,25 @@ def runProgram(context: Context, prog: str, arg_nodes, capture_stdout):
             stdout = result.stdout.decode("utf8")
     return CommandResult(result.returncode, stdout, None, False)
 
-def lookupVar(context, name):
-    obj = builtin_objects.get(name)
-    if obj:
-        return obj
+def lookupUserVar(context, name):
     obj = context.script_vars.get(name)
     if obj:
         return obj
     return None
+
+def lookupBuiltinVar(context, name):
+    obj = context.script_specific_builtin_objects.get(name)
+    if obj:
+        return obj
+    obj = builtin_objects.get(name)
+    if obj:
+        return obj
+    return None
+
+def lookupVar(context: Context, node: NodeVariable):
+    if node.is_at:
+        return lookupBuiltinVar(context, node.id)
+    return lookupUserVar(context, node.id)
 
 def concatPartAsString(part):
     if type(part) == str:
@@ -608,7 +648,7 @@ def concatPartAsString(part):
 
 def tryAsBinaryOp(context, node):
     if type(node) is NodeVariable:
-        obj = lookupVar(context, node.id)
+        obj = lookupVar(context, node)
         if isinstance(obj, BinaryOperator):
             return obj
     return None
@@ -627,7 +667,7 @@ def expandNonArrayNode(context, stdout_handler, node, node_index):
         return node.s
 
     if type(node) is NodeVariable:
-        obj = lookupVar(context, node.id)
+        obj = lookupVar(context, node)
         if not obj:
             return SemanticError("'${}' is undefined".format(node.id))
         if type(obj) is String:
@@ -727,7 +767,7 @@ def expandBinaryExpression(context, stdout_handler, nodes, op):
                 return SemanticError("expected '{}' operator but got token '{}'; commands must be wrapped with (...)".format(op, next_op.s))
             return SemanticError("TODO: good error message for node that was expected to be an operand: {}".format(next_op))
         if next_op.id != op.name:
-            return SemanticError("'{}' and '${}' cannot be chained".format(op, next_op.id))
+            return SemanticError("'{}' and '@{}' cannot be chained".format(op, next_op.id))
 
 
 def runLine(context, line, print_trace, capture_stdout):
@@ -830,7 +870,7 @@ def main():
     print("stitch: DEBUG: verification done on '{}'".format(full_filename))
     print("stitch: DEBUG: verification call files: {}".format(len(verify_context.verification_call_files)))
     for call_file in verify_context.verification_call_files:
-        print("stitch: TODO: verify $call file '{}'".format(call_file))
+        print("stitch: TODO: verify @call file '{}'".format(call_file))
 
     run_context = Context(full_filename, callerworkdir, verification_mode=False)
     result = runFile(run_context, full_filename, capture_stdout=False, top_level=True)
