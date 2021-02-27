@@ -51,8 +51,8 @@ def testExpression(line, expected):
 
     context = prototype.Context(__file__, SCRIPT_DIR, False)
     result = prototype.runLine(context, line, print_trace=False, capture_stdout=True)
-    if type(result) != prototype.TestResult:
-        sys.exit("{}({}): Error: expected a TestResult but got {}".format(__file__, lineno, result))
+    if type(result) != prototype.Bool:
+        sys.exit("{}({}): Error: expected a Bool but got {}".format(__file__, lineno, result))
 
     if result.value != expected:
         sys.exit("{}({}): Error: expected line to return {} but returned {}: '{}'".format(
@@ -122,7 +122,7 @@ def main():
     testSemanticError("$missing $and $true", "'$missing' is undefined")
     testExpression("($echo hello) $and $true", True)
     testExpression("(($echo true)) $and $true", True)
-    testSemanticError("abc$false $and $true", "can only concatenate strings but got 'TestResult'")
+    testSemanticError("abc$false $and $true", "can only concatenate strings but got 'Bool'")
     testSemanticError("abc$scriptfile $and $true", "'$and' does not accept objects of type String")
 
     testExpression("((true) $and (true)) $and (true)", True)
@@ -131,7 +131,7 @@ def main():
     testExpression("foo $eq foo", True)
     testExpression("foo $eq bar", False)
 
-    testSemanticError("$assert true", "$assert expects a TestResult but got a String")
+    testSemanticError("$assert true", "$assert expects a Bool but got a String")
 
     runStitchTests()
 

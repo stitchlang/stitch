@@ -91,8 +91,8 @@ $note --------------------------------------------------------------------------
 #     [ (($foo $eq bar) $and ($bar $eq foo)) ]
 #
 # However, in stitch this is a semantic type error, becuase the result of the $and binary
-# operator is a TestResult object, which cannot be passed to the external "[" (aka. "test")
-# program. Instead, stitch provides its own builtins for handling TestResult objects, in
+# operator is a Bool object, which cannot be passed to the external "[" (aka. "test")
+# program. Instead, stitch provides its own builtins for handling Bool objects, in
 # this case we can use $assert.
 #
 $set foo bar
@@ -104,7 +104,7 @@ $note --------------------------------------------------------------------------
 $note $@'Bash Pitfall #7: [[ $foo > 7 ]]'
 $note --------------------------------------------------------------------------------
 # This one looks like a problem with the '[[' program rather than with BASH itself.
-# However, stitch's binary comparison operators return TestResult objects that cannot
+# However, stitch's binary comparison operators return Bool objects that cannot
 # be passed to external programs, so this pitfall becomes a semantic type error in stitch.
 $set foo 8
 

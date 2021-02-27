@@ -278,8 +278,6 @@ Note that the same reasoning that applies to WYSIWYG strings would also apply to
 
 # Binary Expressions
 
-Binary expressions are distinct from Commands. The operands between binary operators are limited to a "single node".
-
 ```sh
 #
 # Binary Expression Syntax:
@@ -290,12 +288,14 @@ Node BinaryOperator Node
 # OK
 $a $and $b
 
-# Syntax Error
+# Syntax Error: binary expressions only accept single-node operands
 grep foo bar $and $b
 
 # OK
 (grep foo bar) $and $b
 ```
+
+Boolean binary operators like `$or` and `$and` can take a CommandResult object, and convert it to a Bool object based on it's exit code.
 
 When a binary operator receives a CommandResult object from a Command Substitition, it can handle it differently depending on the operator.  For the boolean binary operators `$or` and `$and`, it converts the exit code of the command to a boolean value, 0 indicates "success" which becomese `true`, and non-zero becomes `false`.  In this case, since stdout is ignored, it is printed to the current stdout handler instead.
 
@@ -325,7 +325,7 @@ If the final result of a binary expression has been determined before it has bee
 
 * Top Level Handling?
 
-How should binary expressions be handled at the top-level?  For now I've just made them an error "uhandled TestResult".
+How should Boolean objects be handled at the top-level?  For now I've just made them an error "uhandled Bool".  `$assert` can be used to handle them by asserting they are true, and `$assert ($not ...)` can handle assertig they are false.
 
 * Unary Expressions?
 
@@ -389,11 +389,11 @@ $end
 
 # unary operator example
 
-# applying a "test operator" to a CommandResult returns a TestResult
+# applying a "test operator" to a CommandResult returns a Bool
 grep needle file
 $not grep needle file
 
-# both of the commands above would cause an "unhandle TestResult" if they appeared at the top-level
+# both of the commands above would cause an "unhandle Bool" if they appeared at the top-level
 ```
 
 So any command that is given to a "test operator" must bubble up to a control flow builtin like `$if`, `$while`.
@@ -416,12 +416,12 @@ $else
 $end
 ```
 
-I think the example above just WORKS.  Command substitution takes any TestResult and propogates it up as a TestResult.  If a TestResult is attempted to be used as a string, it is an error, i.e.
+I think the example above just WORKS.  Command substitution takes any Bool and propogates it up as a Bool.  If a Bool is attempted to be used as a string, it is an error, i.e.
 
 ```sh
 ls ($not grep needle file)
 #
-# error: expected a string but got TestResult
+# error: expected a string but got Bool
 #
 ```
 

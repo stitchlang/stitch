@@ -253,8 +253,8 @@ class BuiltinMethods:
         result = args[0]
         if isinstance(result, Error):
             return result
-        if type(result) != TestResult:
-            return SemanticError("$assert expects a TestResult but got a {}".format(objUserTypeDescriptor(result)))
+        if type(result) != Bool:
+            return SemanticError("$assert expects a Bool but got a {}".format(objUserTypeDescriptor(result)))
         if not result.value:
             return AssertError()
         return CommandResult(0, handleBuiltinOutput("", capture_stdout), None, False)
@@ -264,8 +264,8 @@ class BuiltinMethods:
         result = args[0]
         if isinstance(result, Error):
             return result
-        if type(result) != TestResult:
-            return SemanticError("$not expects a TestResult but got a {}".format(objUserTypeDescriptor(result)))
+        if type(result) != Bool:
+            return SemanticError("$not expects a Bool but got a {}".format(objUserTypeDescriptor(result)))
         return TEST_RESULT_FALSE if result.value else TEST_RESULT_TRUE
     def call(context, args, capture_stdout):
         if len(args) == 0:
@@ -278,13 +278,13 @@ class BuiltinMethods:
 
 class Obj:
     pass
-class TestResult(Obj):
+class Bool(Obj):
     def __init__(self, value):
         self.value = value
     def userTypeDescriptor(self):
-        return "TestResult"
-TEST_RESULT_FALSE = TestResult(False)
-TEST_RESULT_TRUE = TestResult(True)
+        return "Bool"
+TEST_RESULT_FALSE = Bool(False)
+TEST_RESULT_TRUE = Bool(True)
 
 class Builtin:
     def __init__(self, name):
@@ -312,23 +312,23 @@ class AndOperator(ChainableBinaryOperator):
     def __init__(self):
         ChainableBinaryOperator.__init__(self, "and")
     def initialValue(self, context, stdout_handler, operand):
-        return operandToTestResult(context, stdout_handler, self, operand)
-    def apply(self, context, stdout_handler, left: TestResult, right):
+        return operandToBool(context, stdout_handler, self, operand)
+    def apply(self, context, stdout_handler, left: Bool, right):
         assert(context.verification_mode or left.value)
-        right_result = operandToTestResult(context, stdout_handler, self, right)
+        right_result = operandToBool(context, stdout_handler, self, right)
         if isinstance(right_result, Error):
             return right_result
         return right_result
-    def shortcircuit(self, result: TestResult):
+    def shortcircuit(self, result: Bool):
         return not result.value
 class OrOperator(ChainableBinaryOperator):
     def __init__(self):
         ChainableBinaryOperator.__init__(self, "or")
     def initialValue(self, context, stdout_handler, operand):
-        return operandToTestResult(context, stdout_handler, self, operand)
-    def apply(self, context, stdout_handler, left: TestResult, right):
+        return operandToBool(context, stdout_handler, self, operand)
+    def apply(self, context, stdout_handler, left: Bool, right):
         assert(context.verification_mode or not left.value)
-        right_result = operandToTestResult(context, stdout_handler, self, right)
+        right_result = operandToBool(context, stdout_handler, self, right)
         if isinstance(right_result, Error):
             return right_result
         return right_result
@@ -366,8 +366,8 @@ class CompareOperator(BinaryOperator):
 def opInvalidTypeError(op, operand):
     return SemanticError("'{}' does not accept objects of type {}".format(op, objUserTypeDescriptor(operand)))
 
-def operandToTestResult(context, stdout_handler, op, operand):
-    if type(operand) == TestResult:
+def operandToBool(context, stdout_handler, op, operand):
+    if type(operand) == Bool:
         return operand
     if type(operand) == CommandResult:
         assert(operand.stderr == None)
@@ -513,7 +513,7 @@ def runCommandNodes(context, ast_nodes, capture_stdout):
     nodes = expandNodes(context, stdout_handler, ast_nodes)
     if isinstance(nodes, Error):
         return nodes
-    if type(nodes) == TestResult:
+    if type(nodes) == Bool:
         if capture_stdout:
             if len(stdout_handler.output) > 0:
                 print(stdout_handler.output, end='')
@@ -523,7 +523,7 @@ def runCommandNodes(context, ast_nodes, capture_stdout):
         return result
     if isinstance(result, Error):
         return result
-    if type(result) == TestResult:
+    if type(result) == Bool:
         if len(stdout_handler.output) > 0:
             print(stdout_handler.output, end='')
         return result
@@ -551,8 +551,8 @@ def runCommandExpanded(context, exec_nodes, capture_stdout, log_cmd):
         if isinstance(prog_string, Error):
             return prog_string
         return runProgram(prog_string, exec_nodes[1:], capture_stdout)
-    #elif type(prog) == TestResult:
-    #    return SemanticError("unhandled TestResult")
+    #elif type(prog) == Bool:
+    #    return SemanticError("unhandled Bool")
     else:
         raise Exception("codebug: unhandled exec_node type {}".format(type(prog)))
 
@@ -593,7 +593,7 @@ def concatPartAsString(part):
         return part
     if type(part) == CommandResult:
         return part.toStringArg()
-    assert(type(part) is Builtin or type(part) is TestResult)
+    assert(type(part) is Builtin or type(part) is Bool)
     return SemanticError("can only concatenate strings but got '{}'".format(part.userTypeDescriptor()))
 
 
@@ -631,7 +631,7 @@ def expandNonArrayNode(context, stdout_handler, node, node_index):
             # this should have been caught by expandNodes
             assert(node_index != 1)
             return SemanticError("unexpected binary operator '{}'".format(obj))
-        elif type(obj) is TestResult:
+        elif type(obj) is Bool:
             return obj
         else:
             sys.exit("not impl, expand object ${} of type {}".format(node.id, type(obj)))
@@ -640,7 +640,7 @@ def expandNonArrayNode(context, stdout_handler, node, node_index):
         result = runCommandNodes(context, node.nodes, capture_stdout=True)
         if isinstance(result, Error):
             return result
-        elif type(result) == TestResult:
+        elif type(result) == Bool:
             return result
         else:
             assert(type(result) == CommandResult)
@@ -741,7 +741,7 @@ def runLine(context, line, print_trace, capture_stdout):
     result = runCommandNodes(context, nodes, capture_stdout=capture_stdout)
     if isinstance(result, Error):
         return result
-    if type(result) == TestResult:
+    if type(result) == Bool:
         return result
 
     assert(type(result) == CommandResult)
@@ -764,8 +764,8 @@ def runFile(context, filename, capture_stdout):
             result = runLine(context, line, print_trace=True, capture_stdout=capture_stdout)
             if isinstance(result, Error):
                 return result
-            if type(result) == TestResult:
-                return SemanticError("unhandled TestResult")
+            if type(result) == Bool:
+                return SemanticError("unhandled Bool")
 
             assert(type(result) == CommandResult)
             if capture_stdout:
