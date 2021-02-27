@@ -15,6 +15,8 @@ class Context:
             "callerworkdir": String(callerworkdir),
         }
         self.verification_mode = verification_mode
+        if self.verification_mode:
+            self.verification_call_files = set([])
 
 class Node:
     pass
@@ -275,7 +277,7 @@ class BuiltinMethods:
         program_file = args[0]
         if len(args) > 1:
             sys.exit("Error: $call with more than just a program not implemented")
-        return runFile(context, program_file, capture_stdout)
+        return runFile(context, program_file, capture_stdout, top_level=False)
 
 
 class Obj:
@@ -543,7 +545,7 @@ def runCommandExpanded(context, exec_nodes, capture_stdout, log_cmd):
     #    print("+ {}".format(" ".join([execNodeToScriptSource(n) for n in exec_nodes])))
     prog = exec_nodes[0]
     if type(prog) == str:
-        return runProgram(prog, exec_nodes[1:], capture_stdout)
+        return runProgram(context, prog, exec_nodes[1:], capture_stdout)
     elif type(prog) == Builtin:
         return getattr(BuiltinMethods, prog.name)(context, exec_nodes[1:], capture_stdout)
     elif type(prog) == CommandResult:
@@ -552,13 +554,13 @@ def runCommandExpanded(context, exec_nodes, capture_stdout, log_cmd):
         prog_string = prog.toStringArg()
         if isinstance(prog_string, Error):
             return prog_string
-        return runProgram(prog_string, exec_nodes[1:], capture_stdout)
+        return runProgram(context, prog_string, exec_nodes[1:], capture_stdout)
     #elif type(prog) == Bool:
     #    return SemanticError("unhandled Bool")
     else:
         raise Exception("codebug: unhandled exec_node type {}".format(type(prog)))
 
-def runProgram(prog: str, arg_nodes, capture_stdout):
+def runProgram(context: Context, prog: str, arg_nodes, capture_stdout):
     # check args
     for node in arg_nodes:
         if type(node) != str:
@@ -571,7 +573,10 @@ def runProgram(prog: str, arg_nodes, capture_stdout):
         if not prog_filename:
             return MissingProgramError(prog)
         args = [prog_filename] + arg_nodes
-    # TODO: don't capture stderr
+    if context.verification_mode:
+        return CommandResult(0, "" if capture_stdout else None, None, multiline=False)
+
+    # TODO: handle capture stderr
     result = subprocess.run(args, capture_output=capture_stdout)
     # TODO: what to do with stderr?
     stdout = None
@@ -755,7 +760,11 @@ def runLine(context, line, print_trace, capture_stdout):
 
     return CommandResult(result.exitcode, output, result.stderr, result.multiline)
 
-def runFile(context, filename, capture_stdout):
+def runFile(context, filename, capture_stdout, top_level):
+    if not top_level and context.verification_mode:
+        context.verification_call_files.add(filename)
+        return CommandResult(0, output if capture_stdout else None, None, multiline=False)
+
     output = ""
     with open(filename, "r") as file:
         while True:
@@ -780,9 +789,9 @@ def runFile(context, filename, capture_stdout):
                 assert(result.stdout == None)
 
             if result.exitcode != 0:
-                return CommandResult(result.exitcode, output if capture_stdout else None, None, False)
+                return CommandResult(result.exitcode, output if capture_stdout else None, None, multiline=False)
 
-    return CommandResult(0, output if capture_stdout else None, None, False)
+    return CommandResult(0, output if capture_stdout else None, None, multiline=False)
 
 def main():
     cmd_args = sys.argv[1:]
@@ -808,16 +817,21 @@ def main():
     # TODO: implement this
     #
     verify_done = False
-    #verify_context = Context(filename, callerworkdir, True)
-    #result = runFile(verify_context, full_filename, capture_stdout=False)
-    #if isinstance(result, Error):
-    #    assert(type(result) == SemanticError)
-    #    print("{}: SemanticError: {}".format(filename, result.msg))
-    #    sys.exit(1)
-    #    verify_done = True
+    verify_context = Context(filename, callerworkdir, verification_mode=True)
+    print("stitch: DEBUG: verifying '{}'".format(full_filename))
+    result = runFile(verify_context, full_filename, capture_stdout=False, top_level=True)
+    if isinstance(result, Error):
+        assert(type(result) == SemanticError)
+        print("{}: SemanticError: {}".format(filename, result.msg))
+        sys.exit(1)
+        verify_done = True
+    print("stitch: DEBUG: verification done on '{}'".format(full_filename))
+    print("stitch: DEBUG: verification call files: {}".format(len(verify_context.verification_call_files)))
+    for call_file in verify_context.verification_call_files:
+        print("stitch: TODO: verify $call file '{}'".format(call_file))
 
-    run_context = Context(full_filename, callerworkdir, False)
-    result = runFile(run_context, full_filename, capture_stdout=False)
+    run_context = Context(full_filename, callerworkdir, verification_mode=False)
+    result = runFile(run_context, full_filename, capture_stdout=False, top_level=True)
     if isinstance(result, Error):
         assert((type(result) != SemanticError) or (not verify_done))
         kind = "SemanticError" if (type(result) == SemanticError) else "Error"

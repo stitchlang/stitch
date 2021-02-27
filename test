@@ -11,7 +11,7 @@ SCRIPT_DIR = os.path.dirname(__file__)
 def testSemanticError(line, msg):
     lineno = inspect.getframeinfo(inspect.stack()[1][0]).lineno
 
-    context = prototype.Context(__file__, SCRIPT_DIR, True)
+    context = prototype.Context(__file__, SCRIPT_DIR, verification_mode=True)
     result = prototype.runLine(context, line, print_trace=False, capture_stdout=True)
     if type(result) != prototype.SemanticError:
         sys.exit("{}({}): Error: expected a SemanticError but got {}".format(__file__, lineno, result))
@@ -27,7 +27,7 @@ def testSemanticError(line, msg):
 def testRunError(line, stderr):
     lineno = inspect.getframeinfo(inspect.stack()[1][0]).lineno
 
-    context = prototype.Context(__file__, SCRIPT_DIR, False)
+    context = prototype.Context(__file__, SCRIPT_DIR, verification_mode=False)
     result = prototype.runLine(context, line, print_trace=False, capture_stdout=True)
     if type(result) != prototype.CommandResult:
         sys.exit("{}({}): Error: expected a CommandResult but got {}".format(__file__, lineno, result))
@@ -49,7 +49,7 @@ def testRunError(line, stderr):
 def testExpression(line, expected):
     lineno = inspect.getframeinfo(inspect.stack()[1][0]).lineno
 
-    context = prototype.Context(__file__, SCRIPT_DIR, False)
+    context = prototype.Context(__file__, SCRIPT_DIR, verification_mode=False)
     result = prototype.runLine(context, line, print_trace=False, capture_stdout=True)
     if type(result) != prototype.Bool:
         sys.exit("{}({}): Error: expected a Bool but got {}".format(__file__, lineno, result))
