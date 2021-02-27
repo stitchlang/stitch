@@ -47,12 +47,6 @@ Char | Description
 # Arguments with Spaces
 
 ```sh
-@echolines arg1 arg2 arg3
-# prints:
-#   arg1
-#   arg2
-#   arg3
-
 @echolines arg 1 arg 2 arg 3
 # prints:
 #   arg
@@ -62,24 +56,28 @@ Char | Description
 #   arg
 #   3
 
+# the rest of the examples print the following:
+#   arg 1
+#   arg 2
+#   arg 3
+
+#
+# 1. use a "Delimited String Literal"
+#
 @echolines @@"arg 1" @@"arg 2" @@"arg 3"
-# prints:
-#   arg 1
-#   arg 2
-#   arg 3
 
-@echolines arg@_1 arg@_2 arg@_3
-# prints:
-#   arg 1
-#   arg 2
-#   arg 3
+# NOTE: I might support shorthand for certain delimiters like
+@echolines @"arg 1" @"arg 2" @"arg 3"
 
-# NOTE: I can use command substituion to include spaces in a string like this
+#
+# 2. use "Command Substitution"
+#
 @echolines (@echo arg 1) (@echo arg 2) (@echo arg 3)
-# prints:
-#   arg 1
-#   arg 2
-#   arg 3
+
+#
+# 3. use a the @_ builtin variable
+#
+@echolines arg@_1 arg@_2 arg@_3
 ```
 
 # Arguments with special characters
