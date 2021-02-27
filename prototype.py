@@ -280,9 +280,9 @@ class BuiltinMethods:
         return runFile(context, program_file, capture_stdout, top_level=False)
 
 
-class Obj:
+class StitchObject:
     pass
-class Bool(Obj):
+class Bool(StitchObject):
     def __init__(self, value):
         self.value = value
     def userTypeDescriptor(self):
@@ -290,20 +290,20 @@ class Bool(Obj):
 TEST_RESULT_FALSE = Bool(False)
 TEST_RESULT_TRUE = Bool(True)
 
-class Builtin:
+class Builtin(StitchObject):
     def __init__(self, name):
         self.name = name
     def __repr__(self):
         return "${}".format(self.name)
     def userTypeDescriptor(self):
         return "Builtin"
-class String:
+class String(StitchObject):
     def __init__(self, value):
         self.value = value
     def userTypeDescriptor(self):
         return "String"
 
-class BinaryOperator(Obj):
+class BinaryOperator(StitchObject):
     def __init__(self, name):
         self.name = name
         self.src_name = "$" + name
@@ -366,6 +366,62 @@ class CompareOperator(BinaryOperator):
             return TEST_RESULT_TRUE if self.func(left, right_int) else TEST_RESULT_FALSE
         return opInvalidTypeError(self, right)
 
+class CommandResult(StitchObject):
+    def __init__(self, exitcode, stdout, stderr, multiline):
+        self.exitcode = exitcode
+        self.stdout = stdout
+        self.stderr = stderr
+        # indicates whethe multiline is allowed in toStringArg
+        self.multiline = multiline
+    def userTypeDescriptor(self):
+        return "CommandResult"
+    def toStringArg(self):
+        # stderr not implemented
+        assert(self.stderr == None)
+        if self.exitcode != 0:
+            return NonZeroExitCodeError(self)
+        if self.multiline:
+            return self.stdout
+        lines = self.stdout.splitlines()
+        if len(lines) == 0:
+            return ""
+        elif len(lines) == 1:
+            return stripNewline(lines[0])
+        raise Exception("here")
+        return UnexpectedMultilineError(self)
+        #sys.exit("Error: program '{}' returned {} lines, but command-subtitution requires only 1 line of output.  Prefix the command with '$multiline' to support multiple.".format(str(node.nodes[0]), len(lines)))
+    def __repr__(self):
+        return "CommandResult(exit={},stderr='{}',stdout='{}',multiline={})".format(
+            self.exitcode, self.stderr, self.stdout, self.multiline)
+
+# TODO: not sure if the Error types will be exposed to stitch yet, or if they
+#       are just an internal detail
+class Error:
+    def __init__(self, msg):
+        self.msg = msg
+class SemanticError(Error):
+    def __init__(self, msg):
+        Error.__init__(self, msg)
+    def __repr__(self):
+        return "SemanticError: {}".format(self.msg)
+class AssertError(Error):
+    def __init__(self):
+        Error.__init__(self, "an assertion failed")
+    def __repr__(self):
+        return "AssertError"
+class NonZeroExitCodeError(Error):
+    def __init__(self, cmd_result: CommandResult):
+        assert(cmd_result.exitcode != 0)
+        Error.__init__(self, "command failed with exit code {}".format(cmd_result.exitcode))
+        self.cmd_result = cmd_result
+class MissingProgramError(Error):
+    def __init__(self, prog):
+        Error.__init__(self, "unable to find program '{}' in PATH".format(prog))
+class UnexpectedMultilineError(Error):
+    def __init__(self, cmd_result: CommandResult):
+        Error.__init__(self, "received multiple lines from a command that was not prefixed with $multiline")
+        self.cmd_result = cmd_result
+
 
 def opInvalidTypeError(op, operand):
     return SemanticError("'{}' does not accept objects of type {}".format(op, objUserTypeDescriptor(operand)))
@@ -384,7 +440,7 @@ def operandToBool(context, stdout_handler, op, operand):
 def objUserTypeDescriptor(obj):
     if type(obj) == str:
         return "String"
-    if isinstance(obj, Obj):
+    if isinstance(obj, StitchObject):
         return obj.userTypeDescriptor()
     raise Exception("objUserTypeDescriptor does not support '{}' yet".format(obj))
 
@@ -413,60 +469,6 @@ builtin_objects = {
     "gt": CompareOperator("gt", CompareOp.gt),
     "lt": CompareOperator("lt", CompareOp.lt),
 }
-
-class CommandResult(Obj):
-    def __init__(self, exitcode, stdout, stderr, multiline):
-        self.exitcode = exitcode
-        self.stdout = stdout
-        self.stderr = stderr
-        # indicates whethe multiline is allowed in toStringArg
-        self.multiline = multiline
-    def userTypeDescriptor(self):
-        return "CommandResult"
-    def toStringArg(self):
-        # stderr not implemented
-        assert(self.stderr == None)
-        if self.exitcode != 0:
-            return NonZeroExitCodeError(self)
-        if self.multiline:
-            return self.stdout
-        lines = self.stdout.splitlines()
-        if len(lines) == 0:
-            return ""
-        elif len(lines) == 1:
-            return stripNewline(lines[0])
-        raise Exception("here")
-        return UnexpectedMultilineError(self)
-        #sys.exit("Error: program '{}' returned {} lines, but command-subtitution requires only 1 line of output.  Prefix the command with '$multiline' to support multiple.".format(str(node.nodes[0]), len(lines)))
-    def __repr__(self):
-        return "CommandResult(exit={},stderr='{}',stdout='{}',multiline={})".format(
-            self.exitcode, self.stderr, self.stdout, self.multiline)
-
-class Error:
-    def __init__(self, msg):
-        self.msg = msg
-class SemanticError(Error):
-    def __init__(self, msg):
-        Error.__init__(self, msg)
-    def __repr__(self):
-        return "SemanticError: {}".format(self.msg)
-class AssertError(Error):
-    def __init__(self):
-        Error.__init__(self, "an assertion failed")
-    def __repr__(self):
-        return "AssertError"
-class NonZeroExitCodeError(Error):
-    def __init__(self, cmd_result: CommandResult):
-        assert(cmd_result.exitcode != 0)
-        Error.__init__(self, "command failed with exit code {}".format(cmd_result.exitcode))
-        self.cmd_result = cmd_result
-class MissingProgramError(Error):
-    def __init__(self, prog):
-        Error.__init__(self, "unable to find program '{}' in PATH".format(prog))
-class UnexpectedMultilineError(Error):
-    def __init__(self, cmd_result: CommandResult):
-        Error.__init__(self, "received multiple lines from a command that was not prefixed with $multiline")
-        self.cmd_result = cmd_result
 
 def which(name):
     extensions = [""] if (os.name != "nt") else os.environ["PATHEXT"].split(";")
