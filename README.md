@@ -101,6 +101,7 @@ stitch has a basic type system with the following object types:
 | Array    | `@setarray foo args a b c` | an array of Strings |
 | CommandResult | `(@echo hello)` | an exitcode and optional Strings for stdout/stderr if they were captured |
 | Builtin  | `@echo` `@set`  | a "builtin program" that takes arguments and returns a CommandResult |
+| Bool     | `@true` | used by binary expressions like `@true @and @false` and with `@assert @true` |
 
 > NOTE: Internally I also use an Error object with subclasses for different kinds of errors.  Not sure if this will be exposed to stitch scripts yet.  I also have an object for BinaryOperator along with subclasses, also not sure if this will be exposed to stitch scripts.
 
