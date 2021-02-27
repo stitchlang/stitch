@@ -92,6 +92,23 @@ awk $@"{print $1 $2}"
 
 stitch's primary purpose is to call other programs, when this is not the primary purpose of a script, another language like Python is better suited.
 
+# Idea
+
+Use `@foo` for reserved stitch symbols and `$foo` for user symbols.  This adds a new special character, but it might make the code more readable.  Doing this makes it immediately apparent when something is a builtin/reserved symbol vs a user-defined variable.  This alerts the user whether the thing they are looking at is a language construct or a user construct.
+
+# Type System
+
+stitch has a basic type system with the following object types:
+
+| Name     |  Examples   | Description                                                                 |
+|----------|-------------|-----------------------------------------------------------------------------|
+| String   | `foo` `$@"bar"` | a sequence of characters, this is the default type of most tokens in stitch |
+| Array    | `$setarray foo args a b c` | an array of Strings |
+| CommandResult | `($echo hello)` | an exitcode and optional Strings for stdout/stderr if they were captured |
+| Builtin  | `$echo` `$set`  | a "builtin program" that takes arguments and returns a CommandResult |
+
+> NOTE: Internally I also use an Error object with subclasses for different kinds of errors.  Not sure if this will be exposed to stitch scripts yet.  I also have an object for BinaryOperator along with subclasses, also not sure if this will be exposed to stitch scripts.
+
 # Variables
 
 ```sh
@@ -242,9 +259,11 @@ Not sure if these should be added yet. I've included them to be considered.
 
 Assuming programs are located the same way as BASH and/or execve, I should expose this logic through a builtin.
 
-# WYSIWYG Strings
+# Delimited String Literals
 
-WYSIWYG strings make it easier to write correct code because they are easy for humans to verify and easy to copy between applications. To support them, we need a way to disable our special characters `#`, `$`, `(` and `)`.  A WYSIWYG string is started with the sequence `$@` followed by a delimiter character.  The string continues until it sees the delimiter character again.  Here are some examples:
+WYSIWYG strings make it easier to write correct code because they are easy for humans to verify and easy to copy between applications. To support them, we need a way to disable our special characters `#`, `$`, `(` and `)`.
+
+For this I've added syntax for "Delimited String Literals".  It starts with the sequence `$@` followed by a delimiter character.  The string continues until it sees the delimiter character again.  Here are some examples:
 
 ```sh
 $echo $@"I can use #, $, ( and ) in here but not a double-quote"
@@ -271,6 +290,8 @@ $echo $| example 1 |
 # probably don't do $( ... ) because that could easily get confused with command-substitution
 # maybe just $"..." and $'...'
 ```
+
+> NOTE: If I decide to use `@` for reserved words, I could do `@"foo"` for shorthand, and `@$"foo"` / `@$|foo|` for delimited.
 
 I could also support `"..."`.  This would make the double-quote `"` character a special reserved character. Would this make it easier to write correct programs? Keeping the number of reserved characters low makes it simpler to reason about what source is doing.  The question is whether that benefit outweighs needing to type `$"..."` instead of `"..."`.
 
