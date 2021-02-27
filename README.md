@@ -188,7 +188,7 @@ In general Command Subtitution is commonly used to return strings that don't con
 This default behavior is overriden by prefixing the comand with `@multiline`.  This will return stdout of the underlying process unmodified.
 
 ```sh
-#echo you're arch is (uname -m)
+@echo you're arch is (uname -m)
 
 @set myfile_content (@multiline cat myfile)
 @set lsfile (which ls)
@@ -229,12 +229,12 @@ tar xf $target$.tar.xz
 
 # Builtin Programs
 
-Because this scripting language uses named builtin's, this enables the language to provide many features without the need to add new syntax.  Among these features include cross-platform builtin programs.  When considering whether the language should provide a builtin, these questions can be analyzed:
+Because this scripting language uses named builtin's, this enables the language to provide many features without new syntax.  Among these features include cross-platform builtin programs.  The following questions should be considered for new builtin programs:
 
-1. How simple is the feature?
-2. How common/generally useful is the feature?
+1. How simple is the builtin program?
+2. How common/generally useful is the builtin program?
 
-If a feature is "simple" and provides some sort of benefit, then there's not much downside to including it in the language.  A few lines of code is all that's needed to include it in the language.  The only downside I see is feature overlap/multiple ways to do the same thing which should be avoided if it can.
+If a feature is "simple" and provides some sort of benefit, then there's not much downside to including it in the language.  A few lines of code is all that's needed to include it in the language.  The only downside I see is feature overlap/multiple ways to do the same thing which should be avoided.
 
 If a feature is not so simple, then it still may be a candidate for inclusion if it is common and/or generally useful enough.
 
@@ -252,9 +252,9 @@ Assuming programs are located the same way as BASH and/or execve, I should expos
 
 # Delimited String Literals
 
-WYSIWYG strings make it easier to write correct code because they are easy for humans to verify and easy to copy between applications. To support them, we need a way to disable our special characters `#`, `@`, `$`, `(` and `)`.
+WYSIWYG strings make it easier to write correct code because they are easy for humans to verify and copy between applications. Requiring manual edits to escape special characters on strings copied to and from stitch scripts would be error prone. To avoid this, we need syntax to disable the special characters `#`, `@`, `$`, `(` and `)`.
 
-For this I've added syntax for "Delimited String Literals".  It starts with the sequence `@@` followed by a delimiter character.  The string continues until it sees the delimiter character again.  Here are some examples:
+The solution for stitch is "Delimited String Literals".  They start with the sequence `@@` followed by a delimiter character.  The string continues until it sees the delimiter character again.  Here are some examples:
 
 ```sh
 @echo @@"I can use #, @, $, ( and ) in here but not a double-quote"
