@@ -10,6 +10,8 @@ class Context:
     def __init__(self, scriptfile, callerworkdir, verification_mode):
         self.script_vars = {
             "scriptfile": String(scriptfile),
+            # NOTE: callerworkdir will need to be forwarded to any sub-scripts
+            #       maybe I can just use an environment variable
             "callerworkdir": String(callerworkdir),
         }
         self.verification_mode = verification_mode
