@@ -330,7 +330,7 @@ Node @> Node
 
 ### Short Circuting
 
-If the final result of a binary expression has been determined before it has been fully evaluated, the language does not expand the rest of the expression.  Because of this, commands must be checked for binary operators before expanding them.  Since this requires special handling of node expansion within the binary expression, this provides the information we need to enable modified command-substitution.
+If the final result of a binary expression has been determined before it has been fully evaluated, the language does not expand the rest of the expression.  Because of this, commands must be checked for binary operators before expanding them.
 
 ### Binary Expression TODO/Questions
 
