@@ -41,7 +41,8 @@ cp $file $target
 @note --------------------------------------------------------------------------------
 #
 # In stitch the correct syntax is:
-#     ($foo @eq bar)
+#
+#     $foo @eq bar
 #
 # We avoid the pitfalls because:
 #     - we don't have quoted variable semantics

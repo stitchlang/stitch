@@ -8,14 +8,14 @@ import prototype
 
 SCRIPT_DIR = os.path.dirname(__file__)
 
-def testSemanticError(line, msg):
-    lineno = inspect.getframeinfo(inspect.stack()[1][0]).lineno
+def testError(error_type, line, msg):
+    lineno = inspect.getframeinfo(inspect.stack()[2][0]).lineno
 
-    print("testSemanticError('{}', '{}')".format(line, msg))
-    context = prototype.ScriptContext(__file__, SCRIPT_DIR, verification_mode=True)
+    print("test{}('{}', '{}')".format(error_type.__name__, line, msg))
+    context = prototype.ScriptContext(True, __file__, SCRIPT_DIR, verification_mode=True)
     result = prototype.runLine(context, line, print_trace=False, capture_stdout=True)
-    if type(result) != prototype.SemanticError:
-        sys.exit("{}({}): Error: expected a SemanticError but got {}".format(__file__, lineno, result))
+    if type(result) != error_type:
+        sys.exit("{}({}): Error: expected a {} but got {}: '{}'".format(__file__, lineno, error_type.__name__, result, result.msg))
 
     if result.msg != msg:
         print("{}({}): Error: semantic error message does not match expected:".format(__file__, lineno))
@@ -23,10 +23,17 @@ def testSemanticError(line, msg):
         print("actual  : {}".format(result.msg))
         sys.exit(1)
 
+def testSemanticError(line, msg):
+    testError(prototype.SemanticError, line, msg)
+
+def testAssertError(line, msg):
+    testError(prototype.AssertError, line, msg)
+
 def testRunError(line, stderr):
     lineno = inspect.getframeinfo(inspect.stack()[1][0]).lineno
 
-    context = prototype.ScriptContext(__file__, SCRIPT_DIR, verification_mode=False)
+    print("testRunError('{}', '{}')".format(line, stderr))
+    context = prototype.ScriptContext(False, __file__, SCRIPT_DIR, verification_mode=False)
     result = prototype.runLine(context, line, print_trace=False, capture_stdout=True)
     if type(result) != prototype.CommandResult:
         sys.exit("{}({}): Error: expected a CommandResult but got {}".format(__file__, lineno, result))
@@ -43,12 +50,11 @@ def testRunError(line, stderr):
     #    print("actual  : {}".format(result.msg))
     #    sys.exit(1)
 
-    print("test: got expected run error from '{}': {}".format(line, stderr))
-
 def testExpression(line, expected):
     lineno = inspect.getframeinfo(inspect.stack()[1][0]).lineno
 
-    context = prototype.ScriptContext(__file__, SCRIPT_DIR, verification_mode=False)
+    print("testExpression('{}', {})".format(line, expected))
+    context = prototype.ScriptContext(False, __file__, SCRIPT_DIR, verification_mode=False)
     result = prototype.runLine(context, line, print_trace=False, capture_stdout=True)
     if type(result) != prototype.Bool:
         sys.exit("{}({}): Error: expected a Bool but got {}".format(__file__, lineno, result))
@@ -56,6 +62,19 @@ def testExpression(line, expected):
     if result.value != expected:
         sys.exit("{}({}): Error: expected line to return {} but returned {}: '{}'".format(
             __file__, lineno, expected, result.value, line))
+
+def testCommand(line, exitcode, stdout):
+    lineno = inspect.getframeinfo(inspect.stack()[1][0]).lineno
+
+    print("testCommand('{}', exitcode={}, stdout='{}')".format(line, exitcode, stdout))
+    context = prototype.ScriptContext(False, __file__, SCRIPT_DIR, verification_mode=False)
+    result = prototype.runLine(context, line, print_trace=False, capture_stdout=True)
+    if type(result) != prototype.CommandResult:
+        sys.exit("{}({}): Error: expected a CommandResult but got {}".format(__file__, lineno, result))
+
+    if result.exitcode != exitcode:
+        sys.exit("{}({}): Error: expected Command to return exitcode {} but got {}".format(
+            __file__, lineno, exitcode, result.exitcode))
 
 
 def runStitchTests():
@@ -141,6 +160,8 @@ def main():
     testExpression("foo @eq bar", False)
     testSemanticError("foo @eq @false", "'@eq' does not accept objects of type Bool")
 
+    testAssertError("@assert @false", "@assert failed")
+    testCommand("@assert @true", 0, "")
     testSemanticError("@assert true", "@assert expects a Bool but got a CommandResult")
 
     testSemanticError("@emptyarray", "got a command with no arguments, what should the language do here?")
