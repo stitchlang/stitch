@@ -403,7 +403,7 @@ class BuiltinMethods:
         result.multiline = True
         return result
     def assert_(cmd_ctx: CommandContext, nodes: List[Node]):
-        result = resolveToBool(cmd_ctx, nodes, "@assert", allow_cmd_result=False)
+        result = expandToBool(cmd_ctx, nodes, "@assert", allow_cmd_result=False)
         if isinstance(result, Error):
             return result
         assert(type(result) == Bool)
@@ -411,7 +411,7 @@ class BuiltinMethods:
             return AssertError()
         return CommandResult(0, cmd_ctx.handleBuiltinOutput(""), None, False)
     def not_(cmd_ctx: CommandContext, nodes: List[Node]):
-        result = resolveToBool(cmd_ctx, nodes, "@assert", allow_cmd_result=True)
+        result = expandToBool(cmd_ctx, nodes, "@assert", allow_cmd_result=True)
         if isinstance(result, Error):
             return result
         assert(type(result) == Bool)
@@ -457,39 +457,6 @@ class UnexpectedMultilineError(Error):
         output = cmd_result.stdout if (cmd_result.stdout[-1] == "\n") else (cmd_result.stdout + "\n")
         Error.__init__(self, "missing '@multiline', got this multiline output\n----\n{}----\n".format(output))
         self.cmd_result = cmd_result
-
-def resolveToBool(cmd_ctx: CommandContext,
-                  nodes: List[Node], builtin_name: str, allow_cmd_result: bool) -> Union[Error,Bool]:
-    if len(nodes) == 0:
-        return SemanticError("{} requires at least 1 argument".format(builtin_name))
-
-    result = expandNodes(cmd_ctx, nodes)
-    if isinstance(result, Error):
-        return result
-    if type(result) == ExpandNodes.Bool:
-        return result.value
-    if type(result) == ExpandNodes.BinaryExp:
-        return runBinaryExpression(cmd_ctx, nodes, result.first, result.op)
-
-    if type(result) == ExpandNodes.Builtin:
-        result = getattr(BuiltinMethods, result.builtin.name)(cmd_ctx, nodes[1:])
-        if type(result) == Bool:
-            return result
-        # TODO: there are probably more types to handle here
-    else:
-        assert(type(result) == ExpandNodes.ExternalProgram)
-        result = runExternalProgram(cmd_ctx.script.verification_mode, cmd_ctx.capture_stdout, result.args)
-    if isinstance(result, Error):
-        return result
-    assert(type(result) == CommandResult)
-    if not allow_cmd_result:
-        return SemanticError("{} expects a Bool but got a CommandResult".format(builtin_name))
-    if result.stdout:
-        raise Exception("TODO")
-    if result.stderr:
-        raise Exception("TODO")
-    return BOOL_TRUE if (result.exitcode == 0) else BOOL_FALSE
-
 
 def opInvalidTypeError(op, operand):
     return SemanticError("'{}' does not accept objects of type {}".format(op, objUserTypeDescriptor(operand)))
@@ -625,6 +592,38 @@ def expandNodes(cmd_ctx: CommandContext, nodes: List[Node]) -> Union[Error,Expan
         return error
 
     return ExpandNodes.ExternalProgram(args)
+
+def expandToBool(cmd_ctx: CommandContext, nodes: List[Node], builtin_name: str, allow_cmd_result: bool) -> Union[Error,Bool]:
+    if len(nodes) == 0:
+        return SemanticError("{} requires at least 1 argument".format(builtin_name))
+
+    result = expandNodes(cmd_ctx, nodes)
+    if isinstance(result, Error):
+        return result
+    if type(result) == ExpandNodes.Bool:
+        return result.value
+    if type(result) == ExpandNodes.BinaryExp:
+        return runBinaryExpression(cmd_ctx, nodes, result.first, result.op)
+
+    if type(result) == ExpandNodes.Builtin:
+        result = getattr(BuiltinMethods, result.builtin.name)(cmd_ctx, nodes[1:])
+        if type(result) == Bool:
+            return result
+        # TODO: there are probably more types to handle here
+    else:
+        assert(type(result) == ExpandNodes.ExternalProgram)
+        result = runExternalProgram(cmd_ctx.script.verification_mode, cmd_ctx.capture_stdout, result.args)
+    if isinstance(result, Error):
+        return result
+    assert(type(result) == CommandResult)
+    if not allow_cmd_result:
+        return SemanticError("{} expects a Bool but got a CommandResult".format(builtin_name))
+    if result.stdout:
+        raise Exception("TODO")
+    if result.stderr:
+        raise Exception("TODO")
+    return BOOL_TRUE if (result.exitcode == 0) else BOOL_FALSE
+
 
 def runCommandNodes(cmd_ctx: CommandContext, nodes: List[Node]) -> Union[Error,Bool,CommandResult]:
     assert(len(nodes) > 0)
