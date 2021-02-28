@@ -3,7 +3,7 @@ import sys
 import os
 import subprocess
 import re
-from typing import List, Dict, Union
+from typing import List, Dict, Union, Tuple
 
 class Node:
     def __init__(self, src):
@@ -60,16 +60,30 @@ def skipWhitespace(src, i):
         i += 1
     return i
 
-def parseDelimitedString(src, i):
-    if i == len(src):
-        sys.exit("Error: got '@@' with nothing after it")
+# TODO: this can be implemented better
+#       the string returned should never exceed max_len, so the [..snip..]
+#       should cut off the actual characters of s as well
+def preview(s, max_len):
+    cutoff = s.find("\n")
+    if cutoff == -1:
+        cutoff = min(len(s), max_len)
+    return s[:cutoff] + ("[..snip..]" if (len(s) > cutoff) else "")
+
+class SyntaxError(Exception):
+    def __init__(self, msg):
+        self.msg = msg
+
+def parseDelimitedString(src: str, i: int, prefix: str) -> Tuple[NodeToken, int]:
+    assert(i < len(src))
     sentinel_char = src[i]
     sentinel_ord = ord(sentinel_char)
     i += 1
     start = i
     while True:
         if i == len(src):
-            sys.exit("Error: got '@@{}' is missing the terminating '{}' character".format(sentinel_char, sentinel_char))
+            literal = preview(src[start-1:], 30)
+            raise SyntaxError("string literal '{}{}' is missing the terminating '{}' character".format(
+                prefix, literal, sentinel_char))
         if ord(src[i]) == sentinel_ord:
             s = src[start:i]
             return NodeToken(s, s), i+1
@@ -107,9 +121,13 @@ def parseAtExpr(src, i):
     #if c_ord == ord("@"):
     #    return NodeToken("@@", "@"), i+1
     if c_ord == ord("@"):
-        return parseDelimitedString(src, i+1)
+        if i+1 == len(src):
+            sys.exit("Error: got '@@' with nothing after it")
+        return parseDelimitedString(src, i+1, "@@")
     if c_ord == ord("$"):
         return NodeToken("@$", "$"), i+1
+    if c_ord == ord('"'):
+        return NodeToken('@"', '"'), i+1
     if c_ord == ord("("):
         return NodeToken("@(", "@"), i+1
     if c_ord == ord(")"):
@@ -150,6 +168,15 @@ def parseNode(src, i):
             mark = dollar_str_limit
             i = dollar_str_limit
             node = combineNodes(node, dollar_node)
+            continue
+        if c_ord == ord('"'):
+            if i > mark:
+                s = src[mark:i]
+                node = combineNodes(node, NodeToken(s, s))
+            token_node, token_limit = parseDelimitedString(src, i, '')
+            mark = token_limit
+            i = token_limit
+            node = combineNodes(node, token_node)
             continue
         if c_ord == ord("("):
             if i > mark:

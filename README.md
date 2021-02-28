@@ -34,57 +34,56 @@ This design choice comes from recognizing that if something looks like a duck, i
 
 # Special Characters
 
-stitch has very few special characters that cause it to deviate from the normal mode of specifying programs/arguments:
+These are the special characters that cause stitch to deviate from the normal mode of specifying programs/arguments:
 
 Char | Description
 -----|-------------
 `#`  | a single-line comment, escape with `@#`
 `@`  | start a builtin expression and/or access a builtin object, escape with `$@`
 `$`  | access a user object `@$`
+`"`  | delimits a string literal, escape with `@"`
 `(`  | start a command substitution, escape with `@(`
 `)`  | ends a command substitution, escape with `@)`
 
 # Arguments with Spaces
 
 ```sh
-@echolines arg 1 arg 2 arg 3
+@echolines arg 1 arg 2
 # prints:
 #   arg
 #   1
 #   arg
 #   2
-#   arg
-#   3
 
-# the rest of the examples print the following:
+# How do we use @echolines to print the following instead?
 #   arg 1
 #   arg 2
-#   arg 3
 
 #
-# 1. use a "Delimited String Literal"
+# 1. use a string literals
 #
-@echolines @@"arg 1" @@"arg 2" @@"arg 3"
-
-# NOTE: I might support shorthand for certain delimiters like
-@echolines @"arg 1" @"arg 2" @"arg 3"
+@echolines "arg 1" "arg 2"
 
 #
 # 2. use "Command Substitution"
 #
-@echolines (@echo arg 1) (@echo arg 2) (@echo arg 3)
+@echolines (@echo arg 1) (@echo arg 2)
 
 #
-# 3. use a the @_ builtin variable
+# 3. use a "Delimited String Literal"
 #
-@echolines arg@_1 arg@_2 arg@_3
+@echolines @@"arg 1" @@"arg 2" @@"arg 3"
 ```
+
+> NOTE: consider adding support for `@_` so you could do `@echolines arg@_1 arg@_2
 
 # Arguments with special characters
 
 ```sh
 # awk is a good example to demonstrate because it also makes use of $
-awk @@"{print $1 $2}"
+awk "{print $1 $2}"
+
+awk @@|{print "$1" "$2"}|
 ```
 
 # When not to use stitch
@@ -97,7 +96,7 @@ stitch has a basic type system with the following object types:
 
 | Name     |  Examples   | Description                                                                 |
 |----------|-------------|-----------------------------------------------------------------------------|
-| String   | `foo` `@@"bar"` | a sequence of characters, this is the default type of most tokens in stitch |
+| String   | `foo` "bar" | a sequence of characters, this is the default type of most tokens in stitch |
 | Array    | `@setarray foo args a b c` | an array of Strings |
 | CommandResult | `(@echo hello)` | an exitcode and optional Strings for stdout/stderr if they were captured |
 | Builtin  | `@echo` `@set`  | a "builtin program" that takes arguments and returns a CommandResult |
@@ -111,7 +110,7 @@ stitch has a basic type system with the following object types:
 #
 # @set [SCOPE.]VARNAME VALUE
 #
-@set msg @@"Hello, my name is Fred"
+@set msg "Hello, my name is Fred"
 @echo $msg
 # prints "Hello, my name is Fred"
 
@@ -286,6 +285,43 @@ It might also be good to include some shorthand variations like this:
 I could also support `"..."`.  This would make the double-quote `"` character a special reserved character. Would this make it easier to write correct programs? Keeping the number of reserved characters low makes it simpler to reason about what source is doing.  The question is whether that benefit outweighs needing to type `@"..."` instead of `"..."`.
 
 Note that the same reasoning that applies to WYSIWYG strings would also apply to HEREDOC strings. A special dollar keyword could start a heredoc, tell if it is raw or processed, then specify the sentinel delimiter.
+
+
+### Idea: detect and assert error when strings are concatenated with no interpolation
+
+Imaging the following:
+```
+@echo "this is a "string" with double-quotes"
+```
+
+This will be interpreted as:
+
+```
+@echo "this is a "string" with double-quotes"
+      |          ||    ||                   |
+       ----------  ----  -------------------
+        String    String      String
+
+```
+
+which would be print this:
+```
+this is a string with double-quotes
+```
+
+What likely happened here is the user copied a string and pasted it into stitch and then stitch's string literal syntax messed it up.  This is incorrect code but we can actually detect at "verification time" by detecting when there are consecutive string literal nodes.  We could make this a syntax error which would give us this:
+
+```sh
+"foo"bar          # syntax error: replace "foo"bar with foobar
+"foo""bar"        # syntax error: replace "foo""bar" with foobar
+"foo"@@"bar"      # syntax error: replace "foo"@@"bar" with foobar
+
+"foo"$bar         # OK
+"foo"(@echo bar)  # OK
+"foo"@"           # OK
+```
+
+> NOTE: should it be an error to quote something that doesn't need to be quoted? "foo" must be foo?
 
 # Binary Expressions
 

@@ -7,12 +7,12 @@
 @set scriptdir (dirname @scriptfile)
 
 @note --------------------------------------------------------------------------------
-@note @@"Bash Pitfall #1: for f in $(ls *.mp3)"
+@note "Bash Pitfall #1: for f in $(ls *.mp3)"
 @note --------------------------------------------------------------------------------
 @note Have not implemented any looping yet
 
 @note --------------------------------------------------------------------------------
-@note @@"Bash Pitfall #2: cp $file $target"
+@note "Bash Pitfall #2: cp $file $target"
 @note --------------------------------------------------------------------------------
 #
 # In stitch this example is correct because:
@@ -37,7 +37,7 @@ cp $file $target
 @note in general that scripting languages are vulnerable to.
 
 @note --------------------------------------------------------------------------------
-@note @@"Bash Pitfall #4: [ $foo = "bar" ]
+@note @@|Bash Pitfall #4: [ $foo = "bar" ]|
 @note --------------------------------------------------------------------------------
 #
 # In stitch the correct syntax is:

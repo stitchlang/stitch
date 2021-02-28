@@ -8,6 +8,21 @@ import prototype
 
 SCRIPT_DIR = os.path.dirname(__file__)
 
+def testSyntaxError(line, msg):
+    lineno = inspect.getframeinfo(inspect.stack()[1][0]).lineno
+
+    print("testSyntaxError('{}', '{}')".format(line, msg))
+    context = prototype.ScriptContext(True, __file__, SCRIPT_DIR, verification_mode=True)
+    try:
+        result = prototype.runLine(context, line, print_trace=False, capture_stdout=True)
+        sys.exit("{}({}): Error: expected a SyntaxError but got {}: '{}'".format(__file__, lineno, result, result.msg))
+    except prototype.SyntaxError as err:
+        if err.msg != msg:
+            print("{}({}): Error: syntax error message does not match expected:".format(__file__, lineno))
+            print("expected: {}".format(msg))
+            print("actual  : {}".format(err.msg))
+            sys.exit(1)
+
 def testError(error_type, line, msg):
     lineno = inspect.getframeinfo(inspect.stack()[2][0]).lineno
 
@@ -75,6 +90,9 @@ def testCommand(line, exitcode, stdout):
     if result.exitcode != exitcode:
         sys.exit("{}({}): Error: expected Command to return exitcode {} but got {}".format(
             __file__, lineno, exitcode, result.exitcode))
+    if result.stdout != stdout:
+        sys.exit("{}({}): Error: expected Command to print '{}' but got '{}'".format(
+            __file__, lineno, stdout, result.stdout))
 
 
 def runStitchTests():
@@ -96,6 +114,23 @@ def main():
     testSemanticError("@true", "unhandled Bool")
 
     testSemanticError("@true dat", "unexpected Bool at the start of a command")
+
+    testCommand('@echo', 0, "")
+    testCommand('@echo foo', 0, "foo")
+    testCommand('@echo "foo"', 0, "foo")
+    testSyntaxError('@echo "foo', "string literal '\"foo' is missing the terminating '\"' character")
+    testSyntaxError('@echo "01234567890123456789012345678',
+                    "string literal '\"01234567890123456789012345678' is missing the terminating '\"' character")
+    testSyntaxError('@echo "012345678901234567890123456789',
+                    "string literal '\"01234567890123456789012345678[..snip..]' is missing the terminating '\"' character")
+    testCommand('@echo @"', 0, '"')
+    testCommand('@echo "#@$()"', 0, '#@$()')
+
+    # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    # TODO: test @@"..." strings
+    # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
     testSemanticError("@and", "unexpected '@and'")
     testSemanticError("@or", "unexpected '@or'")
