@@ -241,11 +241,11 @@ class ChainableBinaryOperator(BinaryOperator):
 class AndOperator(ChainableBinaryOperator):
     def __init__(self):
         ChainableBinaryOperator.__init__(self, "and")
-    def initialValue(self, script_ctx, stdout_handler, operand):
-        return operandToBool(script_ctx, stdout_handler, self, operand)
-    def apply(self, script_ctx, stdout_handler, left: Bool, right):
-        assert(script_ctx.verification_mode or left.value)
-        right_result = operandToBool(script_ctx, stdout_handler, self, right)
+    def initialValue(self, stdout_handler, operand):
+        return operandToBool(stdout_handler, self, operand)
+    def apply(self, verification_mode: bool, stdout_handler, left: Bool, right):
+        assert(verification_mode or left.value)
+        right_result = operandToBool(stdout_handler, self, right)
         if isinstance(right_result, Error):
             return right_result
         return right_result
@@ -254,11 +254,11 @@ class AndOperator(ChainableBinaryOperator):
 class OrOperator(ChainableBinaryOperator):
     def __init__(self):
         ChainableBinaryOperator.__init__(self, "or")
-    def initialValue(self, script_ctx, stdout_handler, operand):
-        return operandToBool(script_ctx, stdout_handler, self, operand)
-    def apply(self, script_ctx, stdout_handler, left: Bool, right):
-        assert(script_ctx.verification_mode or not left.value)
-        right_result = operandToBool(script_ctx, stdout_handler, self, right)
+    def initialValue(self, stdout_handler, operand):
+        return operandToBool(stdout_handler, self, operand)
+    def apply(self, verification_mode: bool, stdout_handler, left: Bool, right):
+        assert(verification_mode or not left.value)
+        right_result = operandToBool(stdout_handler, self, right)
         if isinstance(right_result, Error):
             return right_result
         return right_result
@@ -267,11 +267,11 @@ class OrOperator(ChainableBinaryOperator):
 class EqOperator(BinaryOperator):
     def __init__(self):
         BinaryOperator.__init__(self, "eq")
-    def initialValue(self, script_ctx, stdout_handler, operand):
+    def initialValue(self, stdout_handler, operand):
         if type(operand) == String:
             return operand
         return opInvalidTypeError(self, operand)
-    def apply(self, script_ctx, stdout_handler, left, right):
+    def apply(self, verification_mode: bool, stdout_handler, left, right):
         if type(right) == String:
             return TEST_RESULT_TRUE if (left.value == right.value) else TEST_RESULT_FALSE
         return opInvalidTypeError(self, right)
@@ -279,12 +279,12 @@ class CompareOperator(BinaryOperator):
     def __init__(self, name, func):
         BinaryOperator.__init__(self, name)
         self.func = func
-    def initialValue(self, script_ctx, stdout_handler, operand):
+    def initialValue(self, stdout_handler, operand):
         if type(operand) == String:
             # TODO: return semantic error if not a valid integer
             return int(operand.value)
         return opInvalidTypeError(self, operand)
-    def apply(self, script_ctx, stdout_handler, left, right):
+    def apply(self, verification_mode: bool, stdout_handler, left, right):
         assert(type(left) == int)
         if type(right) == String:
             # TODO: return semantic error if not a valid integer
@@ -327,25 +327,24 @@ class ScriptContext:
             #       maybe I can just use an environment variable
             "callerworkdir": String(callerworkdir),
         }
-        self.script_vars = {}
+        self.var_map = {}
         self.verification_mode = verification_mode
         if self.verification_mode:
             self.verification_call_files = set([])
 
-# TODO: maybe CommandContext has ScriptContext as a field? then
-#       the the methods only have 1 context parameter?
 class CommandContext:
-    def __init__(self, parent: 'CommandContext', capture_stdout: bool, depth: int = 0,
+    def __init__(self, script: ScriptContext, parent: 'CommandContext', capture_stdout: bool, depth: int = 0,
                  builtin_prefix_count: int = 0, var_map: Dict[str,StitchObject] = {}):
+        self.script = script
         self.parent = parent
         self.capture_stdout = capture_stdout
         self.depth = depth
         self.builtin_prefix_count = builtin_prefix_count
         self.var_map = var_map
     def nextDepth(self) -> 'CommandContext':
-        return type(self)(self, True, self.depth + 1, 0)
+        return type(self)(self.script, self, True, self.depth + 1, 0)
     def nextBuiltin(self) -> 'CommandContext':
-        return type(self)(self.parent, self.capture_stdout, self.depth, self.builtin_prefix_count + 1, self.var_map)
+        return type(self)(self.script, self.parent, self.capture_stdout, self.depth, self.builtin_prefix_count + 1, self.var_map)
     def handleBuiltinOutput(self, output: str):
         if self.capture_stdout:
             return output
@@ -354,17 +353,17 @@ class CommandContext:
         return None
 
 class BuiltinMethods:
-    def note(script_ctx: ScriptContext, cmd_ctx: CommandContext, nodes: List[Node]):
+    def note(cmd_ctx: CommandContext, nodes: List[Node]):
         return CommandResult(0, cmd_ctx.handleBuiltinOutput(""), None, False)
-    def echo(script_ctx: ScriptContext, cmd_ctx: CommandContext, nodes: List[Node]):
+    def echo(cmd_ctx: CommandContext, nodes: List[Node]):
         args = []
-        error = nodesToArgs(script_ctx, cmd_ctx, nodes, args)
+        error = nodesToArgs(cmd_ctx, nodes, args)
         if error:
             return error
         return CommandResult(0, cmd_ctx.handleBuiltinOutput(" ".join(args)), None, False)
-    def set(script_ctx: ScriptContext, cmd_ctx: CommandContext, nodes: List[Node]):
+    def set(cmd_ctx: CommandContext, nodes: List[Node]):
         args = []
-        error = nodesToArgs(script_ctx, cmd_ctx, nodes, args)
+        error = nodesToArgs(cmd_ctx, nodes, args)
         if error:
             return error
         if len(args) == 0:
@@ -374,28 +373,28 @@ class BuiltinMethods:
         varname = args[0]
         value = args[1]
         #print("DEBUG: setting variable '{}' to '{}'".format(varname, value_string))
-        script_ctx.script_vars[varname] = String(value)
+        cmd_ctx.script.var_map[varname] = String(value)
         return CommandResult(0, cmd_ctx.handleBuiltinOutput(""), None, False)
-    def settmp(script_ctx: ScriptContext, cmd_ctx: CommandContext, nodes: List[Node]):
+    def settmp(cmd_ctx: CommandContext, nodes: List[Node]):
         if len(nodes) < 3:
             sys.exit("Error: the @settmp builtin requires at least 3 arguments")
-        varname = nodeToNonArrayArg(script_ctx, cmd_ctx, nodes[0])
+        varname = nodeToNonArrayArg(cmd_ctx, nodes[0])
         if isinstance(varname, Error):
             return varname
-        value = nodeToNonArrayArg(script_ctx, cmd_ctx, nodes[1])
+        value = nodeToNonArrayArg(cmd_ctx, nodes[1])
         if isinstance(value, Error):
             return value
         cmd_ctx.var_map[varname] = String(value)
         #print("DEBUG: settmp '{}' to '{}'".format(varname, value))
-        return runCommandNodes(script_ctx, cmd_ctx.nextBuiltin(), nodes[2:])
-    def multiline(script_ctx: ScriptContext, cmd_ctx: CommandContext, nodes: List[Node]):
+        return runCommandNodes(cmd_ctx.nextBuiltin(), nodes[2:])
+    def multiline(cmd_ctx: CommandContext, nodes: List[Node]):
         if len(nodes) == 0:
             return SemanticError("@multiline requires at least 1 argument")
         if cmd_ctx.depth == 0:
             return SemanticError("the @multiline builtin is only supported inside a command-substitution")
         # this should always be true when cmd_ctx.depth > 0
         assert(cmd_ctx.capture_stdout)
-        result = runCommandNodes(script_ctx, cmd_ctx.nextBuiltin(), nodes)
+        result = runCommandNodes(cmd_ctx.nextBuiltin(), nodes)
         if isinstance(result, Error):
             return result
         if type(result) == Bool:
@@ -403,23 +402,23 @@ class BuiltinMethods:
         assert(type(result) == CommandResult)
         result.multiline = True
         return result
-    def assert_(script_ctx: ScriptContext, cmd_ctx: CommandContext, nodes: List[Node]):
-        result = resolveToBool(script_ctx, cmd_ctx, nodes, "@assert", allow_cmd_result=False)
+    def assert_(cmd_ctx: CommandContext, nodes: List[Node]):
+        result = resolveToBool(cmd_ctx, nodes, "@assert", allow_cmd_result=False)
         if isinstance(result, Error):
             return result
         assert(type(result) == Bool)
         if not result.value:
             return AssertError()
         return CommandResult(0, cmd_ctx.handleBuiltinOutput(""), None, False)
-    def not_(script_ctx: ScriptContext, cmd_ctx: CommandContext, nodes: List[Node]):
-        result = resolveToBool(script_ctx, cmd_ctx, nodes, "@assert", allow_cmd_result=True)
+    def not_(cmd_ctx: CommandContext, nodes: List[Node]):
+        result = resolveToBool(cmd_ctx, nodes, "@assert", allow_cmd_result=True)
         if isinstance(result, Error):
             return result
         assert(type(result) == Bool)
         return TEST_RESULT_FALSE if result.value else TEST_RESULT_TRUE
-    def call(script_ctx: ScriptContext, cmd_ctx: CommandContext, nodes: List[Node]):
+    def call(cmd_ctx: CommandContext, nodes: List[Node]):
         args = []
-        error = nodesToArgs(script_ctx, cmd_ctx, nodes, args)
+        error = nodesToArgs(cmd_ctx, nodes, args)
         if error:
             return error
         if len(args) == 0:
@@ -427,7 +426,7 @@ class BuiltinMethods:
         program_file = args[0]
         if len(args) > 1:
             sys.exit("Error: @call with more than just a program not implemented")
-        return runFile(script_ctx, program_file, cmd_ctx.capture_stdout, top_level=False)
+        return runFile(cmd_ctx.script, program_file, cmd_ctx.capture_stdout, top_level=False)
 
 
 # TODO: not sure if the Error types will be exposed to stitch yet, or if they
@@ -459,28 +458,27 @@ class UnexpectedMultilineError(Error):
         Error.__init__(self, "missing '@multiline', got this multiline output\n----\n{}----\n".format(output))
         self.cmd_result = cmd_result
 
-def resolveToBool(script_ctx: ScriptContext, cmd_ctx: CommandContext,
+def resolveToBool(cmd_ctx: CommandContext,
                   nodes: List[Node], builtin_name: str, allow_cmd_result: bool) -> Union[Error,Bool]:
     if len(nodes) == 0:
         return SemanticError("{} requires at least 1 argument".format(builtin_name))
 
-    result = expandNodes(script_ctx, cmd_ctx, nodes)
+    result = expandNodes(cmd_ctx, nodes)
     if isinstance(result, Error):
         return result
     if type(result) == ExpandNodes.Bool:
         return result.value
     if type(result) == ExpandNodes.BinaryExp:
-        return runBinaryExpression(script_ctx, cmd_ctx, nodes, result.first, result.op)
+        return runBinaryExpression(cmd_ctx, nodes, result.first, result.op)
 
     if type(result) == ExpandNodes.Builtin:
-        result = getattr(BuiltinMethods, result.builtin.name)(script_ctx, cmd_ctx, nodes[1:])
+        result = getattr(BuiltinMethods, result.builtin.name)(cmd_ctx, nodes[1:])
         if type(result) == Bool:
             return result
         # TODO: there are probably more types to handle here
     else:
         assert(type(result) == ExpandNodes.ExternalProgram)
-        result = runExternalProgram(script_ctx, cmd_ctx.capture_stdout, result.args)
-
+        result = runExternalProgram(cmd_ctx.script.verification_mode, cmd_ctx.capture_stdout, result.args)
     if isinstance(result, Error):
         return result
     assert(type(result) == CommandResult)
@@ -496,7 +494,7 @@ def resolveToBool(script_ctx: ScriptContext, cmd_ctx: CommandContext,
 def opInvalidTypeError(op, operand):
     return SemanticError("'{}' does not accept objects of type {}".format(op, objUserTypeDescriptor(operand)))
 
-def operandToBool(script_ctx, stdout_handler, op, operand):
+def operandToBool(stdout_handler, op, operand):
     if type(operand) == Bool:
         return operand
     if type(operand) == CommandResult:
@@ -587,10 +585,10 @@ class ExpandNodes:
         def __init__(self, args: List[str]):
             self.args = args
 
-def expandNodes(script_ctx: ScriptContext, cmd_ctx: CommandContext, nodes: List[Node]) -> Union[Error,ExpandNodesResult]:
+def expandNodes(cmd_ctx: CommandContext, nodes: List[Node]) -> Union[Error,ExpandNodesResult]:
     assert(len(nodes) > 0)
 
-    obj = expandNode(script_ctx, cmd_ctx, nodes[0])
+    obj = expandNode(cmd_ctx, nodes[0])
     if isinstance(obj, Error):
         return obj
     #if isinstance(obj, BinaryOperator):
@@ -602,7 +600,7 @@ def expandNodes(script_ctx: ScriptContext, cmd_ctx: CommandContext, nodes: List[
     if len(nodes) == 1:
         obj_list = [obj]
     else:
-        obj = expandNode(script_ctx, cmd_ctx, nodes[1])
+        obj = expandNode(cmd_ctx, nodes[1])
         if isinstance(obj, Error):
             return obj
         if isinstance(obj, BinaryOperator):
@@ -622,34 +620,34 @@ def expandNodes(script_ctx: ScriptContext, cmd_ctx: CommandContext, nodes: List[
         if error:
             return error
 
-    error = nodesToArgs(script_ctx, cmd_ctx, nodes, args, start=len(obj_list))
+    error = nodesToArgs(cmd_ctx, nodes, args, start=len(obj_list))
     if error:
         return error
 
     return ExpandNodes.ExternalProgram(args)
 
-def runCommandNodes(script_ctx: ScriptContext, cmd_ctx: CommandContext, nodes: List[Node]) -> Union[Error,Bool,CommandResult]:
+def runCommandNodes(cmd_ctx: CommandContext, nodes: List[Node]) -> Union[Error,Bool,CommandResult]:
     assert(len(nodes) > 0)
-    if not script_ctx.verification_mode and cmd_ctx.builtin_prefix_count == 0:
+    if not cmd_ctx.script.verification_mode and cmd_ctx.builtin_prefix_count == 0:
         # todo: is ("+" * (depth+1)) too inneficient?
         msg = "{} {}".format("+" * (cmd_ctx.depth+1), " ".join([n.src for n in nodes]))
         # NOTE: ignore capture_stdout, just always print to console for now
         print(msg)
-    result = expandNodes(script_ctx, cmd_ctx, nodes)
+    result = expandNodes(cmd_ctx, nodes)
     if isinstance(result, Error):
         return result
     if type(result) == ExpandNodes.Builtin:
-        return getattr(BuiltinMethods, result.builtin.name)(script_ctx, cmd_ctx, nodes[1:])
+        return getattr(BuiltinMethods, result.builtin.name)(cmd_ctx, nodes[1:])
     if type(result) == ExpandNodes.BinaryExp:
-        return runBinaryExpression(script_ctx, cmd_ctx, nodes, result.first, result.op)
+        return runBinaryExpression(cmd_ctx, nodes, result.first, result.op)
     if type(result) == ExpandNodes.Bool:
         return SemanticError("unhandled Bool")
     assert(type(result) == ExpandNodes.ExternalProgram)
-    return runExternalProgram(script_ctx, cmd_ctx.capture_stdout, result.args)
+    return runExternalProgram(cmd_ctx.script.verification_mode, cmd_ctx.capture_stdout, result.args)
 
-def nodesToArgs(script_ctx: ScriptContext, cmd_ctx: CommandContext, nodes: List[Node], args: List[str], start: int = 0) -> Error:
+def nodesToArgs(cmd_ctx: CommandContext, nodes: List[Node], args: List[str], start: int = 0) -> Error:
     for i, node in enumerate(nodes[start:], start=start):
-        obj = expandNode(script_ctx, cmd_ctx, node)
+        obj = expandNode(cmd_ctx, node)
         if isinstance(obj, Error):
             return obj
         error = objectToArgs(obj, args)
@@ -657,8 +655,8 @@ def nodesToArgs(script_ctx: ScriptContext, cmd_ctx: CommandContext, nodes: List[
             return error
     return None
 
-def nodeToNonArrayArg(script_ctx: ScriptContext, cmd_ctx: CommandContext, node: Node):
-    obj = expandNode(script_ctx, cmd_ctx, node)
+def nodeToNonArrayArg(cmd_ctx: CommandContext, node: Node):
+    obj = expandNode(cmd_ctx, node)
     if isinstance(obj, Error):
         return obj
     if type(obj) == Array:
@@ -689,7 +687,7 @@ def objectToArgs(obj: StitchObject, args: List[str]) -> Error:
     else:
         return SemanticError("TODO: implement objectToArgs for type {} ({})".format(type(obj), obj))
 
-def runExternalProgram(script_ctx: ScriptContext, capture_stdout: bool, args: List[str]) -> Union[Error,CommandResult]:
+def runExternalProgram(verification_mode: bool, capture_stdout: bool, args: List[str]) -> Union[Error,CommandResult]:
     if len(args) == 0:
         # NOTE: this can happen if the user executed an expanded empty array
         #       what should we do in this case?
@@ -697,7 +695,7 @@ def runExternalProgram(script_ctx: ScriptContext, capture_stdout: bool, args: Li
         #       this until the array is expanded at runtime
         return SemanticError("got a command with no arguments, what should the language do here?")
 
-    if script_ctx.verification_mode:
+    if verification_mode:
         return CommandResult(0, "" if capture_stdout else None, None, multiline=False)
 
     prog = args[0]
@@ -726,11 +724,11 @@ def tryLookupCommandVar(cmd_ctx: CommandContext, name: str):
             return obj
         ctx = ctx.parent
 
-def tryLookupUserVar(script_ctx: ScriptContext, cmd_ctx: CommandContext, name: str):
+def tryLookupUserVar(cmd_ctx: CommandContext, name: str):
     obj = tryLookupCommandVar(cmd_ctx, name)
     if obj:
         return obj
-    obj = script_ctx.script_vars.get(name)
+    obj = cmd_ctx.script.var_map.get(name)
     if obj:
         return obj
     return None
@@ -745,21 +743,21 @@ def tryLookupBuiltinVar(script_ctx: ScriptContext, name: str):
     return None
 
 # returns an array of strings and builtin objects
-def expandNode(script_ctx: ScriptContext, cmd_ctx: CommandContext, node: Node) -> StitchObject:
+def expandNode(cmd_ctx: CommandContext, node: Node) -> StitchObject:
     if type(node) is NodeToken:
         return String(node.s)
 
     if type(node) is NodeVariable:
         if node.is_at:
-            obj = tryLookupBuiltinVar(script_ctx, node.id)
+            obj = tryLookupBuiltinVar(cmd_ctx.script, node.id)
         else:
-            obj = tryLookupUserVar(script_ctx, cmd_ctx, node.id)
+            obj = tryLookupUserVar(cmd_ctx, node.id)
         if not obj:
             return SemanticError("'{}' is undefined".format(node.src, node.id))
         return obj
 
     if type(node) is NodeCommandSub:
-        result = runCommandNodes(script_ctx, cmd_ctx.nextDepth(), node.nodes)
+        result = runCommandNodes(cmd_ctx.nextDepth(), node.nodes)
         assert(isinstance(result, Error) or
                type(result) == Bool or
                type(result) == CommandResult)
@@ -767,21 +765,20 @@ def expandNode(script_ctx: ScriptContext, cmd_ctx: CommandContext, node: Node) -
 
     if type(node) is NodeMultiple:
         args = []
-        error = nodesToArgs(script_ctx, cmd_ctx, node.nodes, args)
+        error = nodesToArgs(cmd_ctx, node.nodes, args)
         if error:
             return error
         return String("".join(args))
 
     raise Exception("codebug, unhandled node type {}".format(type(node)))
 
-def runBinaryExpression(script_ctx: ScriptContext, cmd_ctx: CommandContext,
-                         nodes: List[Node], first_obj: StitchObject, op: BinaryOperator):
+def runBinaryExpression(cmd_ctx: CommandContext, nodes: List[Node], first_obj: StitchObject, op: BinaryOperator):
     stdout_handler = StdoutCaptureHandler() if cmd_ctx.capture_stdout else StdoutPrintHandler()
 
-    expression_result = op.initialValue(script_ctx, stdout_handler, first_obj)
+    expression_result = op.initialValue(stdout_handler, first_obj)
     if isinstance(expression_result, Error):
         return expression_result
-    if isinstance(op, ChainableBinaryOperator) and not script_ctx.verification_mode and op.shortcircuit(expression_result):
+    if isinstance(op, ChainableBinaryOperator) and not cmd_ctx.script.verification_mode and op.shortcircuit(expression_result):
         return expression_result
 
     index = 1
@@ -789,13 +786,13 @@ def runBinaryExpression(script_ctx: ScriptContext, cmd_ctx: CommandContext,
         if index + 1 == len(nodes):
             return SemanticError("missing operand after '{}'".format(op))
 
-        operand_result = expandNode(script_ctx, cmd_ctx, nodes[index+1])
+        operand_result = expandNode(cmd_ctx, nodes[index+1])
         if type(operand_result) == SemanticError:
             return operand_result
-        expression_result = op.apply(script_ctx, stdout_handler, expression_result, operand_result)
+        expression_result = op.apply(cmd_ctx.script.verification_mode, stdout_handler, expression_result, operand_result)
         if isinstance(expression_result, Error):
             return expression_result
-        if isinstance(op, ChainableBinaryOperator) and not script_ctx.verification_mode and op.shortcircuit(expression_result):
+        if isinstance(op, ChainableBinaryOperator) and not cmd_ctx.script.verification_mode and op.shortcircuit(expression_result):
             return expression_result
 
         index += 2
@@ -811,7 +808,7 @@ def runBinaryExpression(script_ctx: ScriptContext, cmd_ctx: CommandContext,
             return SemanticError("'{}' and '@{}' cannot be chained".format(op, next_op.id))
 
 
-def runLine(script_ctx, line, print_trace, capture_stdout):
+def runLine(script_ctx: ScriptContext, line, print_trace, capture_stdout):
     output = "" if capture_stdout else None
 
     nodes = parseTopLevelCommand(line)
@@ -828,7 +825,7 @@ def runLine(script_ctx, line, print_trace, capture_stdout):
     #    else:
     #        print(msg)
 
-    result = runCommandNodes(script_ctx, CommandContext(None, capture_stdout), nodes)
+    result = runCommandNodes(CommandContext(script_ctx, None, capture_stdout), nodes)
     if isinstance(result, Error):
         return result
     if type(result) == Bool:
