@@ -5,8 +5,6 @@ import subprocess
 import re
 from typing import List, Dict, Union
 
-special_regex = re.compile("@$()")
-
 class Node:
     def __init__(self, src):
         self.src = src
