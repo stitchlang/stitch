@@ -545,6 +545,42 @@ class StdoutPrintHandler:
 
 def runCommandNodes(context, ast_nodes, capture_stdout):
     stdout_handler = StdoutCaptureHandler() if capture_stdout else StdoutPrintHandler()
+
+    current_binary_op = None
+    command_objects = []
+    for ast_index, ast_node in enumerate(ast_nodes):
+        print("!!!DEBUG!!! expanding {}: {}".format(ast_index, ast_node))
+
+        if isArrayNode(context, ast_node):
+            # TODO: remove this special handling after I implement arrays
+            #       for now I'm just including it for writing tests
+            if ast_node.id == "expandemptyarray":
+                # do nothing
+                pass
+            else:
+                return SemanticArray("array nodes not implemented")
+        else:
+            obj = expandNonArrayNode(context, stdout_handler, ast_node, ast_index)
+            if isinstance(obj, Error):
+                return obj
+            if isinstance(obj, BinaryOperator):
+                if current_binary_op:
+                    return SemanticError("todo: support chaining")
+                else:
+                    current_binary_op = obj
+                # TODO: error if previous node was an ArrayExpansion
+                if len(command_objects) == 0:
+                    return SemanticError("missing operand before '{}'".format(obj))
+                return SemanticError("here")
+            command_objects.append(obj)
+
+
+    sys.exit("here")
+
+
+
+
+
     nodes = expandNodes(context, stdout_handler, ast_nodes)
     if isinstance(nodes, Error):
         return nodes
@@ -646,13 +682,6 @@ def concatPartAsString(part):
     return SemanticError("can only concatenate strings but got '{}'".format(part.userTypeDescriptor()))
 
 
-def tryAsBinaryOp(context, node):
-    if type(node) is NodeVariable:
-        obj = lookupVar(context, node)
-        if isinstance(obj, BinaryOperator):
-            return obj
-    return None
-
 def isArrayNode(context, node):
     # not fully implemented yet
     if type(node) is NodeVariable:
@@ -669,44 +698,44 @@ def expandNonArrayNode(context, stdout_handler, node, node_index):
     if type(node) is NodeVariable:
         obj = lookupVar(context, node)
         if not obj:
-            return SemanticError("'${}' is undefined".format(node.id))
-        if type(obj) is String:
-            return obj.value
-        elif type(obj) is Builtin:
-            return obj
-        elif isinstance(obj, BinaryOperator):
-            if node_index == 0:
-                return SemanticError("missing operand before '{}'".format(obj))
-            # this should have been caught by expandNodes
-            assert(node_index != 1)
-            return SemanticError("unexpected binary operator '{}'".format(obj))
-        elif type(obj) is Bool:
-            return obj
-        else:
-            sys.exit("not impl, expand object ${} of type {}".format(node.id, type(obj)))
+            c = "@" if obj.is_at else "$"
+            return SemanticError("'{}{}' is undefined".format(c, node.id))
+        return obj
+#        if type(obj) is String:
+#            return obj.value
+#        elif type(obj) is Builtin:
+#            return obj
+#        elif isinstance(obj, BinaryOperator):
+#            if node_index == 0:
+#                return SemanticError("missing operand before '{}'".format(obj))
+#            # this should have been caught by expandNodes
+#            assert(node_index != 1)
+#            return SemanticError("unexpected binary operator '{}'".format(obj))
+#        elif type(obj) is Bool:
+#            return obj
+#        else:
+#            sys.exit("not impl, expand object ${} of type {}".format(node.id, type(obj)))
 
     if type(node) is NodeCommandSub:
         result = runCommandNodes(context, node.nodes, capture_stdout=True)
-        if isinstance(result, Error):
-            return result
-        elif type(result) == Bool:
-            return result
-        else:
-            assert(type(result) == CommandResult)
-            return result
-    elif type(node) is NodeMultiple:
-        sub_exec_nodes = expandNodes(context, stdout_handler, node.nodes)
-        if isinstance(sub_exec_nodes, Error):
-            return sub_exec_nodes
+        assert(isinstance(result, Error) or
+               type(result) == Bool or
+               type(result) == CommandResult)
+        return result
+
+    if type(node) is NodeMultiple:
+        obj_list = expandNodes(context, stdout_handler, node.nodes)
+        if isinstance(obj_list, Error):
+            return obj_list
         strings = []
-        for sub_node in sub_exec_nodes:
-            s = concatPartAsString(sub_node)
+        for obj in obj_list:
+            s = concatPartAsString(obj)
             if isinstance(s, Error):
                 return s
             strings.append(s)
         return "".join(strings)
-    else:
-        raise Exception("codebug, unhandled node type {}".format(type(node)))
+
+    raise Exception("codebug, unhandled node type {}".format(type(node)))
 
 def expandNodes(context, stdout_handler, nodes):
     if len(nodes) >= 2:
@@ -714,7 +743,7 @@ def expandNodes(context, stdout_handler, nodes):
         if op:
             return expandBinaryExpression(context, stdout_handler, nodes, op)
 
-    exec_nodes = []
+    obj_list = []
     for node_index, node in enumerate(nodes):
         if isArrayNode(context, node):
             # TODO: remove this special handling after I implement arrays
@@ -725,8 +754,8 @@ def expandNodes(context, stdout_handler, nodes):
             expanded = expandNonArrayNode(context, stdout_handler, node, node_index)
             if isinstance(expanded, Error):
                 return expanded
-            exec_nodes.append(expanded)
-    return exec_nodes
+            obj_list.append(expanded)
+    return obj_list
 
 def expandBinaryExpression(context, stdout_handler, nodes, op):
     assert(len(nodes) >= 2)
