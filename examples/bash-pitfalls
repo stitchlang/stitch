@@ -53,9 +53,9 @@ cp $file $target
 #     - there's no pathname expansion
 #
 @set foo bar
-@assert ($foo @eq bar)
+@assert $foo @eq bar
 @set foo notbar
-@assert (@not ($foo @eq bar))
+@assert @not $foo @eq bar
 
 @note --------------------------------------------------------------------------------
 @note @@'Bash Pitfall #5: cd $(dirname "$f")'
@@ -98,7 +98,7 @@ ls $dir
 @set foo bar
 @set bar foo
 
-@assert ( ($foo @eq bar) @and ($bar @eq foo) )
+@assert ($foo @eq bar) @and ($bar @eq foo)
 
 @note --------------------------------------------------------------------------------
 @note @@'Bash Pitfall #7: [[ $foo > 7 ]]'
@@ -108,7 +108,7 @@ ls $dir
 # be passed to external programs, so this pitfall becomes a semantic type error in stitch.
 @set foo 8
 
-@assert ($foo @gt 7)
+@assert $foo @gt 7
 
 @note --------------------------------------------------------------------------------
 @note @@'Bash Pitfall #8: grep foo bar | while read -r; do ((count++)); done'
