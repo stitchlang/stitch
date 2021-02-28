@@ -208,8 +208,8 @@ class Bool(StitchObject):
         self.value = value
     def userTypeDescriptor(self):
         return "Bool"
-TEST_RESULT_FALSE = Bool(False)
-TEST_RESULT_TRUE = Bool(True)
+BOOL_FALSE = Bool(False)
+BOOL_TRUE = Bool(True)
 
 class Builtin(StitchObject):
     def __init__(self, name):
@@ -273,7 +273,7 @@ class EqOperator(BinaryOperator):
         return opInvalidTypeError(self, operand)
     def apply(self, verification_mode: bool, stdout_handler, left, right):
         if type(right) == String:
-            return TEST_RESULT_TRUE if (left.value == right.value) else TEST_RESULT_FALSE
+            return BOOL_TRUE if (left.value == right.value) else BOOL_FALSE
         return opInvalidTypeError(self, right)
 class CompareOperator(BinaryOperator):
     def __init__(self, name, func):
@@ -289,7 +289,7 @@ class CompareOperator(BinaryOperator):
         if type(right) == String:
             # TODO: return semantic error if not a valid integer
             right_int = int(right.value)
-            return TEST_RESULT_TRUE if self.func(left, right_int) else TEST_RESULT_FALSE
+            return BOOL_TRUE if self.func(left, right_int) else BOOL_FALSE
         return opInvalidTypeError(self, right)
 
 class CommandResult(StitchObject):
@@ -415,7 +415,7 @@ class BuiltinMethods:
         if isinstance(result, Error):
             return result
         assert(type(result) == Bool)
-        return TEST_RESULT_FALSE if result.value else TEST_RESULT_TRUE
+        return BOOL_FALSE if result.value else BOOL_TRUE
     def call(cmd_ctx: CommandContext, nodes: List[Node]):
         args = []
         error = nodesToArgs(cmd_ctx, nodes, args)
@@ -468,7 +468,7 @@ def operandToBool(stdout_handler, op, operand):
         assert(operand.stderr == None)
         if operand.stdout != None:
             stdout_handler.handle(operand.stdout)
-        return TEST_RESULT_TRUE if (operand.exitcode == 0) else TEST_RESULT_FALSE
+        return BOOL_TRUE if (operand.exitcode == 0) else BOOL_FALSE
     return opInvalidTypeError(op, operand)
 
 
@@ -495,8 +495,8 @@ builtin_objects = {
     "multiline": Builtin("multiline"),
     "call": Builtin("call"),
     "assert": Builtin("assert_"),
-    "false": TEST_RESULT_FALSE,
-    "true": TEST_RESULT_TRUE,
+    "false": BOOL_FALSE,
+    "true": BOOL_TRUE,
     "not": Builtin("not_"),
     "or": OrOperator(),
     "and": AndOperator(),
