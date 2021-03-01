@@ -455,7 +455,7 @@ class BuiltinMethods:
         result.multiline = True
         return result
     def assert_(cmd_ctx: CommandContext, nodes: List[Node]):
-        result = expandToBool(cmd_ctx, nodes, "@assert", allow_cmd_result=False)
+        result = expandNodesToBool(cmd_ctx, nodes, "@assert")
         if isinstance(result, Error):
             return result
         if type(result) == UnknownBool:
@@ -465,7 +465,7 @@ class BuiltinMethods:
             return AssertError(" ".join([n.src for n in nodes]))
         return CommandResult(0, cmd_ctx.handleBuiltinOutput(""), None, False)
     def not_(cmd_ctx: CommandContext, nodes: List[Node]):
-        result = expandToBool(cmd_ctx, nodes, "@assert", allow_cmd_result=True)
+        result = expandOneNodeToBool(cmd_ctx, nodes, "@not")
         if isinstance(result, Error) or isinstance(result, UnknownBool):
             return result
         assert(type(result) == Bool)
@@ -649,7 +649,7 @@ def expandNodes(cmd_ctx: CommandContext, nodes: List[Node]) -> Union[Error,Expan
 
     return ExpandNodes.ExternalProgram(args)
 
-def expandToBool(cmd_ctx: CommandContext, nodes: List[Node], builtin_name: str, allow_cmd_result: bool) -> Union[Error,Bool,UnknownBool]:
+def expandNodesToBool(cmd_ctx: CommandContext, nodes: List[Node], builtin_name: str) -> Union[Error,Bool,UnknownBool]:
     if len(nodes) == 0:
         return SemanticError("{} requires at least 1 argument".format(builtin_name))
 
@@ -673,16 +673,31 @@ def expandToBool(cmd_ctx: CommandContext, nodes: List[Node], builtin_name: str, 
         return result
     is_unknown_cmd_result = type(result) == UnknownCommandResult
     assert(type(result) == CommandResult or is_unknown_cmd_result)
-    if not allow_cmd_result:
-        return SemanticError("{} expects a Bool but got a CommandResult".format(builtin_name))
-    if is_unknown_cmd_result:
-        return UNKNOWN_BOOL
-    if result.stdout:
-        raise Exception("TODO")
-    if result.stderr:
-        raise Exception("TODO")
-    return BOOL_TRUE if (result.exitcode == 0) else BOOL_FALSE
+    return SemanticError("{} expects a Bool but got a CommandResult".format(builtin_name))
 
+def expandOneNodeToBool(cmd_ctx: CommandContext, nodes: List[Node], builtin_name: str) -> Union[Error,Bool,UnknownBool]:
+    if len(nodes) == 0:
+        return SemanticError("'{}' requires 1 node".format(builtin_name))
+    if len(nodes) > 1:
+        return SemanticError("'{}' only accepts 1 not but got multiple, consider wrapping them with in parens (...)".format(builtin_name))
+
+    obj = expandNode(cmd_ctx, nodes[0])
+    if isinstance(obj, Error):
+        return obj
+    if type(obj) == Bool:
+        return obj
+    if type(obj) == CommandResult:
+        if result.stdout:
+            raise Exception("TODO")
+        if result.stderr:
+            raise Exception("TODO")
+        return BOOL_TRUE if (result.exitcode == 0) else BOOL_FALSE
+
+    if type(obj) == UnknownBool or type(obj) == UnknownCommandResult:
+        assert(cmd_ctx.script.verification_mode)
+        return UNKNOWN_BOOL
+
+    return SemanticError("'{}' expects Bool but got {}".format(builtin_name, obj.userTypeDescriptor()))
 
 def runCommandNodes(cmd_ctx: CommandContext, nodes: List[Node]) -> Union[Error,Bool,CommandResult,UnknownBool,UnknownCommandResult]:
     assert(len(nodes) > 0)

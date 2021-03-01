@@ -384,6 +384,20 @@ I don't think the language needs an special handling for unary expressions.  I b
 @isfile PATH
 ```
 
+Note that we currently have `@assert ...` and `@not ...`.  However, take a look at this:
+
+
+```sh
+@not $foo @and $bar @and $baz
+```
+
+This does not look clear.  However here's the assert:
+```sh
+@assert $foo @and $bar @and $baz
+```
+
+This one much more clear.  It seems obvious that `@assert` would have lower precedence than the binary expressions that follow it, this is not so clear with `@not`.  I think the way to address this is that `@not` will behave like a binary operator, in that it may only accept 1 node as an argument, and `@assert` will work more like a typical builtin, that can accept any number of nodes.
+
 
 # Control Flow
 

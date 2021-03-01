@@ -10,13 +10,13 @@ true
 @assert (true) @and (true) @and (true)
 
 @assert foo @eq foo
-@assert @not foo @eq bar
+@assert @not (foo @eq bar)
 
 @assert 0 @eq 0
 @assert 2 @gt 1
-@assert @not 1 @gt 2
+@assert @not (1 @gt 2)
 @assert 2 @lt 3
-@assert @not 3 @lt 2
+@assert @not (3 @lt 2)
 
 @set direct_which (which ls)
 

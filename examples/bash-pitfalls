@@ -56,7 +56,7 @@ cp $file $target
 @set foo bar
 @assert $foo @eq bar
 @set foo notbar
-@assert @not $foo @eq bar
+@assert @not ($foo @eq bar)
 
 @note --------------------------------------------------------------------------------
 @note @%'Bash Pitfall #5: cd $(dirname "$f")'

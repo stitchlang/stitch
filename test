@@ -30,7 +30,7 @@ def testError(error_type, line, msg):
     context = prototype.ScriptContext(True, __file__, SCRIPT_DIR, verification_mode=True)
     result = prototype.runLine(context, line, print_trace=False, capture_stdout=True)
     if type(result) != error_type:
-        sys.exit("{}({}): Error: expected a {} but got {}: '{}'".format(__file__, lineno, error_type.__name__, result, result.msg))
+        sys.exit("{}({}): Error: expected a {} but got {}: '{}'".format(__file__, lineno, error_type.__name__, result, result))
 
     if result.msg != msg:
         print("{}({}): Error: semantic error message does not match expected:".format(__file__, lineno))
@@ -195,9 +195,16 @@ def main():
     testExpression("foo @eq bar", False)
     testSemanticError("foo @eq @false", "'@eq' does not accept objects of type Bool")
 
+    testSemanticError("@assert", "@assert requires at least 1 argument")
+    testSemanticError("@assert @emptyarray", "got a command with no arguments, what should the language do here?")
     testAssertError("@assert @false", "@assert failed")
     testCommand("@assert @true", 0, "")
     testSemanticError("@assert true", "@assert expects a Bool but got a CommandResult")
+
+    testSemanticError("@not", "'@not' requires 1 node")
+    testSemanticError("@not @true @and @false", "'@not' only accepts 1 not but got multiple, consider wrapping them with in parens (...)")
+    testSemanticError("@not @emptyarray", "'@not' expects Bool but got Array")
+    testExpression("@not @false", True)
 
     testSemanticError("@emptyarray", "got a command with no arguments, what should the language do here?")
 
