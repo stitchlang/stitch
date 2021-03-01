@@ -24,7 +24,7 @@
 #
 rm -rf $scriptdir/scratch
 mkdir $scriptdir/scratch
-@set file $scriptdir/scratch/@@|file with crazy characters like *[{}]<>"'|
+@set file $scriptdir/scratch/@%|file with crazy characters like *[{}]<>"'|
 @set target (@echo $scriptdir/scratch/the target file)
 touch $file
 
@@ -37,7 +37,7 @@ cp $file $target
 @note in general that scripting languages are vulnerable to.
 
 @note --------------------------------------------------------------------------------
-@note @@|Bash Pitfall #4: [ $foo = "bar" ]|
+@note @%'Bash Pitfall #4: [ $foo = "bar" ]'
 @note --------------------------------------------------------------------------------
 #
 # In stitch the correct syntax is:
@@ -59,7 +59,7 @@ cp $file $target
 @assert @not $foo @eq bar
 
 @note --------------------------------------------------------------------------------
-@note @@'Bash Pitfall #5: cd $(dirname "$f")'
+@note @%'Bash Pitfall #5: cd $(dirname "$f")'
 @note --------------------------------------------------------------------------------
 # Right now stitch does not support a `cd` command. The example below demonstrates
 # the alternatives in order of preference:
@@ -85,7 +85,7 @@ mkdir $scriptdir/scratch
 ls $dir
 
 @note --------------------------------------------------------------------------------
-@note @@'Bash Pitfall #6: [ "$foo" = bar && "$bar" = foo ]'
+@note @%'Bash Pitfall #6: [ "$foo" = bar && "$bar" = foo ]'
 @note --------------------------------------------------------------------------------
 # In stitch the equivalent command would be:
 #
@@ -102,7 +102,7 @@ ls $dir
 @assert ($foo @eq bar) @and ($bar @eq foo)
 
 @note --------------------------------------------------------------------------------
-@note @@'Bash Pitfall #7: [[ $foo > 7 ]]'
+@note "Bash Pitfall #7: [[ $foo > 7 ]]"
 @note --------------------------------------------------------------------------------
 # This one looks like a problem with the '[[' program rather than with BASH itself.
 # However, stitch's binary comparison operators return Bool objects that cannot
@@ -112,7 +112,7 @@ ls $dir
 @assert $foo @gt 7
 
 @note --------------------------------------------------------------------------------
-@note @@'Bash Pitfall #8: grep foo bar | while read -r; do ((count++)); done'
+@note "Bash Pitfall #8: grep foo bar | while read -r; do ((count++)); done"
 @note --------------------------------------------------------------------------------
 # we don't have loops yet, but the underlying problem is that `count++` is
 # executed in a subshell, however, this script doesn't do that so it shouldn't

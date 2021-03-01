@@ -12,11 +12,11 @@
 @set env.TEXTDOMAIN libc
 @set env.TEXTDOMAINDIR /nix/store/xg6ilb9g9zhi2zg1dpi4zcp288rhnvns-glibc-2.30/share/locale
 
-@set env.RTLDLIST @@"/nix/store/xg6ilb9g9zhi2zg1dpi4zcp288rhnvns-glibc-2.30/lib/ld-linux.so.2 /nix/store/xg6ilb9g9zhi2zg1dpi4zcp288rhnvns-glibc-2.30/lib64/ld-linux-x86-64.so.2 /nix/store/xg6ilb9g9zhi2zg1dpi4zcp288rhnvns-glibc-2.30/libx32/ld-linux-x32.so.2"
+@set env.RTLDLIST "/nix/store/xg6ilb9g9zhi2zg1dpi4zcp288rhnvns-glibc-2.30/lib/ld-linux.so.2 /nix/store/xg6ilb9g9zhi2zg1dpi4zcp288rhnvns-glibc-2.30/lib64/ld-linux-x86-64.so.2 /nix/store/xg6ilb9g9zhi2zg1dpi4zcp288rhnvns-glibc-2.30/libx32/ld-linux-x32.so.2"
 
-@set warn @@""
-@set bind_now @@""
-@set verbose @@""
+@set warn ""
+@set bind_now ""
+@set verbose ""
 
 #while test $# -gt 0; do
 #  case "$1" in

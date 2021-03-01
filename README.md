@@ -39,7 +39,7 @@ These are the special characters that cause stitch to deviate from the normal mo
 Char | Description
 -----|-------------
 `#`  | a single-line comment, escape with `@#`
-`@`  | start a builtin expression and/or access a builtin object, escape with `$@`
+`@`  | start a builtin expression and/or access a builtin object, escape with `@@`
 `$`  | access a user object `@$`
 `"`  | delimits a string literal, escape with `@"`
 `(`  | start a command substitution, escape with `@(`
@@ -72,7 +72,7 @@ Char | Description
 #
 # 3. use a "Delimited String Literal"
 #
-@echolines @@"arg 1" @@"arg 2" @@"arg 3"
+@echolines @%"arg 1" @%"arg 2" @%"arg 3"
 ```
 
 > NOTE: consider adding support for `@_` so you could do `@echolines arg@_1 arg@_2
@@ -83,7 +83,7 @@ Char | Description
 # awk is a good example to demonstrate because it also makes use of $
 awk "{print $1 $2}"
 
-awk @@|{print "$1" "$2"}|
+awk @%|{print "$1" "$2"}|
 ```
 
 # When not to use stitch
@@ -254,18 +254,18 @@ Assuming programs are located the same way as BASH and/or execve, I should expos
 
 WYSIWYG strings make it easier to write correct code because they are easy for humans to verify and copy between applications. Requiring manual edits to escape special characters on strings copied to and from stitch scripts would be error prone. To avoid this, we need syntax to disable the special characters `#`, `@`, `$`, `(` and `)`.
 
-The solution for stitch is "Delimited String Literals".  They start with the sequence `@@` followed by a delimiter character.  The string continues until it sees the delimiter character again.  Here are some examples:
+The solution for stitch is "Delimited String Literals".  They start with the sequence `@%` followed by a delimiter character.  The string continues until it sees the delimiter character again.  Here are some examples:
 
 ```sh
-@echo @@"I can use #, @, $, ( and ) in here but not a double-quote"
+@echo @%"I can use #, @, $, ( and ) in here but not a double-quote"
 # prints:
 #   I can use #, @, $, ( and ) in here but not a double-quote
 
-@echo @@'I can use #, @, $, (, ) and " but not single-quote'
+@echo @%'I can use #, @, $, (, ) and " but not single-quote'
 # prints:
 #   I can use #, @, $, (, ) and " but not single-quote
 
-@echo @@|I can use #, @, $, (, ), " and ' but not a pipe character in here|
+@echo @%|I can use #, @, $, (, ), " and ' but not a pipe character in here|
 # prints:
 #   I can use #, @, $, (, ), " and ' but not a pipe character in here
 ```
@@ -314,7 +314,7 @@ What likely happened here is the user copied a string and pasted it into stitch 
 ```sh
 "foo"bar          # syntax error: replace "foo"bar with foobar
 "foo""bar"        # syntax error: replace "foo""bar" with foobar
-"foo"@@"bar"      # syntax error: replace "foo"@@"bar" with foobar
+"foo"@%"bar"      # syntax error: replace "foo"@%"bar" with foobar
 
 "foo"$bar         # OK
 "foo"(@echo bar)  # OK

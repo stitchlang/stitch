@@ -21,7 +21,7 @@
 @echo (date +%H:%M)
 
 @note Print full date
-@echo (date @@"+%A %d %b %Y %H:%M:%S")
+@echo (date "+%A %d %b %Y %H:%M:%S")
 
 @note Nanoseconds
 @echo Nanoseconds: (date +%s-%N)

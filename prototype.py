@@ -116,14 +116,12 @@ def parseAtExpr(src, i):
     c_ord = ord(src[i])
     if c_ord == ord("#"):
         return NodeToken("@#", "#"), i+1
-    # NOTE: I'm using @@ for delimited strings for now
-    #       I could use $@ for escaping '@' we'll see
-    #if c_ord == ord("@"):
-    #    return NodeToken("@@", "@"), i+1
     if c_ord == ord("@"):
+        return NodeToken("@@", "@"), i+1
+    if c_ord == ord("%"):
         if i+1 == len(src):
-            sys.exit("Error: got '@@' with nothing after it")
-        return parseDelimitedString(src, i+1, "@@")
+            sys.exit("Error: got '@%' with nothing after it")
+        return parseDelimitedString(src, i+1, "@%")
     if c_ord == ord("$"):
         return NodeToken("@$", "$"), i+1
     if c_ord == ord('"'):
