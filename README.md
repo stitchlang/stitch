@@ -176,7 +176,9 @@ Environment variables are accessed through the `env` scope.
 
 # Command Substitution
 
-Command Subtitution is expected to be a very common construct in this language.  Note that Command Substitution runs a command and returns stdout of that command as a string.  Unlike other scripting languages, the command is executed within the current process environment, it is not executed in a subprocess so it has very low overhead.
+> NOTE: is Command Substitution a good name?  What about "Inline Command"?
+
+Command Subtitution is expected to be a common construct in this language.  Note that Command Substitution runs a command and returns stdout of that command as a string.  Unlike other scripting languages, the command is executed within the current process environment, it is not executed in a subprocess so it has very low overhead.
 
 ```sh
 # run command and return one line of output as a string with no trailing newline
@@ -199,6 +201,10 @@ This default behavior is overriden by prefixing the comand with `@multiline`.  T
 # Example
 make -j(nproc)
 ```
+
+#### Idea
+
+I may want to modify Command Substitution to only capture stdout when the context it is used in requires a `String`.  When a `Bool` is expected, stdout is just going to get forwarded so this is wasting memory and cpu cycles to copy it.
 
 # Examples
 
