@@ -247,6 +247,59 @@ If a feature is "simple" and provides some sort of benefit, then there's not muc
 
 If a feature is not so simple, then it still may be a candidate for inclusion if it is common and/or generally useful enough.
 
+# Builtin Argument Expansion
+
+Builtin programs accept arguments that have been expanded to various levels:
+
+1. AstNodes
+2. ExpandNodesResult
+3. Objects (Bool, String, CommandResult, Array, etc)
+4. Strings
+
+At the lowest level 1 we have AstNodes.  These arguments are left in their unprocessed form where they have been categorized into Tokens, Variables and Command Subtitutions. Builtins like `@note`, `@multiline` and `@call` accept AstNodes.  Binary Operators also keep their operands in AstNode form to support "shortcircuting" where the right operand may not be expanded if the final result is already determined from the left operand (note: this is disabled in verification mode).
+
+Skipping past level 2 for now, we have level 3 "Objects" that are accepted by builtins like `@set`, which takes a `String` for its first argument, and either `String`, `Bool` or `CommandResult` for its second.
+
+At the final level we have "Strings".  This is the same form that external programs accept and also builtins like `@echo`.
+
+The following lists some of the Builtins and the argument form they take:
+
+```
+@note AstNode...
+@echo String...
+
+# NOTE: set/settmp will coerce CommandResult object to Strings in the symbol table
+@set String (String|Bool|CommandResult)
+@settmp String (String|Bool|CommandResult) AstNode...
+
+@multiline AstNode...
+@call String AstNode...
+
+@assert ExpandNodesResult
+@not ExpandNodesResult
+```
+
+At level 2 we have the `ExpandNodesResult` form.  This is an internal form of the arguments that the default command handler creates before deciding what to do next with the command.  Its is a union type with the following cases:
+
+* `ExpandNodesResult.Builtin`
+* `ExpandNodesResult.BinaryExpression`
+* `ExpandNodesResult.Bool`
+* `ExpandNodesResult.ExternalProgram`
+
+Currently `@assert` and `@not` take this form because it allows them to either interpret 1 object as a `Bool`, or multiple arguments as a command or expression to expand and retrieve the result.  Supporting multiple arguments means we don't have to use parenthesis when they are not necessary:
+
+```
+# instead of this
+@assert (@not (@isfile $f))
+
+# we can do this
+@assert @not @isfile $f
+```
+
+# List of Builtin Programs
+
+> NOTE: this list is sorely lacking and out-of-date, will work on this later when language is more refined
+
 #### @multiline PROG ARGS...
 
 Runs the given program output wrapped in an internal "MultilineResult" object that allows strings with mulitple lines to be returned from a command-substitution.
