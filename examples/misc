@@ -3,7 +3,7 @@
 true
 @assert @true
 @assert @not @false
-@assert @not (@not @true)
+@assert @not @not @true
 @assert @false @or @true
 @assert (true) @and @true
 @assert (false) @or (false) @or (true)

@@ -3,6 +3,7 @@ import sys
 import os
 import subprocess
 import re
+from enum import Enum
 from typing import List, Dict, Union, Tuple
 
 class Node:
@@ -439,18 +440,31 @@ class ScriptContext:
             return SemanticError("too many '@end'")
 
 class CommandContext:
-    def __init__(self, script: ScriptContext, parent: 'CommandContext', capture_stdout: bool, depth: int = 0,
-                 builtin_prefix_count: int = 0, var_map: Dict[str,StitchObject] = {}):
+    def __init__(
+            self,
+            script: ScriptContext,
+            parent: 'CommandContext',
+            depth: int,
+            capture_stdout: bool,
+            builtin_prefix_count: int,
+            ambiguous_op: Union[None,str],
+            var_map: Dict[str,StitchObject] = {}
+    ):
         self.script = script
         self.parent = parent
-        self.capture_stdout = capture_stdout
         self.depth = depth
+        self.capture_stdout = capture_stdout
         self.builtin_prefix_count = builtin_prefix_count
+        # true if the current command is inside an ambiguous operator (currently just @not)
+        self.ambiguous_op = ambiguous_op
         self.var_map = var_map
-    def nextDepth(self) -> 'CommandContext':
-        return type(self)(self.script, self, True, self.depth + 1, 0)
-    def nextBuiltin(self) -> 'CommandContext':
-        return type(self)(self.script, self.parent, self.capture_stdout, self.depth, self.builtin_prefix_count + 1, self.var_map)
+    def createChild(self) -> 'CommandContext':
+        # Note: come back to setting capture_stdout, do not set it if we are going to be returning a Bool
+        capture_stdout = True
+        return type(self)(self.script, self, self.depth+1, capture_stdout=True, builtin_prefix_count=0, ambiguous_op=None)
+    def nextBuiltin(self, ambiguous_op: Union[None,str]) -> 'CommandContext':
+        return type(self)(self.script, self.parent, self.depth, self.capture_stdout,
+                          self.builtin_prefix_count + 1, ambiguous_op, self.var_map)
     def handleBuiltinOutput(self, output: str):
         if self.capture_stdout:
             return output
@@ -485,16 +499,16 @@ class BuiltinMethods:
         if isinstance(is_unknown_command_result, Error):
             return is_unknown_command_result
         #print("DEBUG: settmp '{}' to '{}'".format(varname, value))
-        return runCommandNodes(cmd_ctx.nextBuiltin(), nodes[2:])
+        return runCommandNodes(cmd_ctx.nextBuiltin(ambiguous_op=None), nodes[2:])
 
     def multiline(cmd_ctx: CommandContext, nodes: List[Node]):
         if len(nodes) == 0:
             return SemanticError("@multiline requires at least 1 argument")
-        if cmd_ctx.depth == 0:
+        if cmd_ctx.parent == None:
             return SemanticError("the @multiline builtin is only supported within an (..inline command..)")
         # this should always be true when cmd_ctx.depth > 0
         assert(cmd_ctx.capture_stdout)
-        result = runCommandNodes(cmd_ctx.nextBuiltin(), nodes)
+        result = runCommandNodes(cmd_ctx.nextBuiltin(ambiguous_op=None), nodes)
         if isinstance(result, Error) or type(result) == UnknownCommandResult or type(result) == UnknownBool:
             return result
         if type(result) == Bool:
@@ -503,7 +517,7 @@ class BuiltinMethods:
         result.multiline = True
         return result
     def not_(cmd_ctx: CommandContext, nodes: List[Node]):
-        result = expandOneNodeToBool(cmd_ctx, nodes, "@not")
+        result = expandNodesToBool(cmd_ctx.nextBuiltin(ambiguous_op="@not"), nodes, "@not", True)
         if isinstance(result, Error) or isinstance(result, UnknownBool):
             return result
         assert(type(result) == Bool)
@@ -518,7 +532,7 @@ class BuiltinMethods:
         assert(cmd_ctx.script.verification_mode)
         return UNKNOWN_BOOL
     def assert_(cmd_ctx: CommandContext, nodes: List[Node]):
-        result = expandNodesToBool(cmd_ctx, nodes, "@assert", False)
+        result = expandNodesToBool(cmd_ctx.nextBuiltin(ambiguous_op=None), nodes, "@assert", False)
         if isinstance(result, Error):
             return result
         if type(result) == UnknownBool:
@@ -528,7 +542,7 @@ class BuiltinMethods:
             return AssertError(" ".join([n.src for n in nodes]))
         return CommandResult(0, cmd_ctx.handleBuiltinOutput(""), None, False)
     def if_(cmd_ctx: CommandContext, nodes: List[Node]):
-        result = expandNodesToBool(cmd_ctx, nodes, "@if", True)
+        result = expandNodesToBool(cmd_ctx.nextBuiltin(ambiguous_op=None), nodes, "@if", True)
         if isinstance(result, Error):
             return result
         if type(result) == Bool:
@@ -768,27 +782,30 @@ def expandNodesToBool(cmd_ctx: CommandContext, nodes: List[Node], builtin_name: 
         raise Exception("TODO")
     return BOOL_TRUE if (result.exitcode == 0) else BOOL_FALSE
 
-def expandOneNodeToBool(cmd_ctx: CommandContext, nodes: List[Node], builtin_name: str) -> Union[Error,Bool,UnknownBool]:
-    if len(nodes) != 1:
-        return SemanticError("{} accepts 1 argument but got {}".format(builtin_name, len(nodes)))
-
-    obj = expandNode(cmd_ctx, nodes[0])
-    if isinstance(obj, Error):
-        return obj
-    if type(obj) == Bool:
-        return obj
-    if type(obj) == CommandResult:
-        if result.stdout:
-            raise Exception("TODO")
-        if result.stderr:
-            raise Exception("TODO")
-        return BOOL_TRUE if (result.exitcode == 0) else BOOL_FALSE
-
-    if type(obj) == UnknownBool or type(obj) == UnknownCommandResult:
-        assert(cmd_ctx.script.verification_mode)
-        return UNKNOWN_BOOL
-
-    return SemanticError("'{}' expects Bool but got {}".format(builtin_name, obj.userTypeDescriptor()))
+#
+# is no longer used, but I think it might be later so keeping for now
+#
+#def expandOneNodeToBool(cmd_ctx: CommandContext, nodes: List[Node], builtin_name: str) -> Union[Error,Bool,UnknownBool]:
+#    if len(nodes) != 1:
+#        return SemanticError("{} accepts 1 argument but got {}".format(builtin_name, len(nodes)))
+#
+#    obj = expandNode(cmd_ctx, nodes[0])
+#    if isinstance(obj, Error):
+#        return obj
+#    if type(obj) == Bool:
+#        return obj
+#    if type(obj) == CommandResult:
+#        if result.stdout:
+#            raise Exception("TODO")
+#        if result.stderr:
+#            raise Exception("TODO")
+#        return BOOL_TRUE if (result.exitcode == 0) else BOOL_FALSE
+#
+#    if type(obj) == UnknownBool or type(obj) == UnknownCommandResult:
+#        assert(cmd_ctx.script.verification_mode)
+#        return UNKNOWN_BOOL
+#
+#    return SemanticError("'{}' expects Bool but got {}".format(builtin_name, obj.userTypeDescriptor()))
 
 def expandOneNodeToString(cmd_ctx: CommandContext, nodes: List[Node], builtin_name: str) -> Union[Error,String,UnknownString]:
     if len(nodes) != 1:
@@ -953,7 +970,7 @@ def expandNode(cmd_ctx: CommandContext, node: Node) -> StitchObject:
         return obj
 
     if type(node) is NodeInlineCommand:
-        return runCommandNodes(cmd_ctx.nextDepth(), node.nodes)
+        return runCommandNodes(cmd_ctx.createChild(), node.nodes)
 
     if type(node) is NodeMultiple:
         args = []
@@ -965,6 +982,9 @@ def expandNode(cmd_ctx: CommandContext, node: Node) -> StitchObject:
     raise Exception("codebug, unhandled node type {}".format(type(node)))
 
 def runBinaryExpression(cmd_ctx: CommandContext, nodes: List[Node], first_obj: StitchObject, op: BinaryOperator):
+    if cmd_ctx.ambiguous_op:
+        return SemanticError("got binary expression inside ambiguous operator '{}', wrap inside (..parenthesis..)".format(cmd_ctx.ambiguous_op))
+
     stdout_handler = StdoutCaptureHandler() if cmd_ctx.capture_stdout else StdoutPrintHandler()
 
     expression_result = op.initialValue(stdout_handler, first_obj)
@@ -1017,7 +1037,14 @@ def runLine(script_ctx: ScriptContext, line, print_trace, capture_stdout) -> Uni
     #    else:
     #        print(msg)
 
-    result = runCommandNodes(CommandContext(script_ctx, None, capture_stdout), nodes)
+    result = runCommandNodes(CommandContext(
+        script_ctx,
+        parent=None,
+        depth=0,
+        capture_stdout=capture_stdout,
+        builtin_prefix_count=0,
+        ambiguous_op=None
+    ), nodes)
     if (isinstance(result, Error) or
         type(result) == Bool or
         type(result) == UnknownBool or

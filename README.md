@@ -436,7 +436,7 @@ If the final result of a binary expression has been determined before it has bee
 
 * Top Level Handling?
 
-How should Boolean objects be handled at the top-level?  For now I've just made them an error "uhandled Bool".  `@assert` can be used to handle them by asserting they are true, and `@assert (@not ...)` can handle assertig they are false.
+How should Boolean objects be handled at the top-level?  For now I've just made them an error "uhandled Bool".  `@assert` can be used to handle them by asserting they are true, and `@assert @not ...` can handle assertig they are false.
 
 * Unary Expressions?
 
@@ -448,28 +448,19 @@ I don't think the language needs an special handling for unary expressions.  I b
 @isfile PATH
 ```
 
-Note that we currently have `@assert ...` and `@not ...`.  However, take a look at this:
+# Ambiguous Operators
 
+Currently the only ambiguous operator is `@not` (will probably be more later).  During expansion, stitch tracks when a command is inside an ambiguous operator (like `@not`) and will raise a SemanticError if it encounters a BinaryExpression.  This is to prevent ambiguous commands like this:
 
 ```sh
-@not $foo @and $bar @and $baz
+@not $foo @and $bar
 ```
 
-This does not look clear.  However here's the assert:
-```sh
-@assert $foo @and $bar @and $baz
+The ambiguity can be corrected with one of these 2 variations:
 ```
-
-This one much more clear.  It seems obvious that `@assert` would have lower precedence than the binary expressions that follow it, this is not so clear with `@not`.  I think the way to address this is that `@not` will behave like a binary operator, in that it may only accept 1 node as an argument, and `@assert` will work more like a typical builtin, that can accept any number of nodes.
-
-UPDATE: I've found another use case
-
+(@not $foo) @and $bar
+@not ($foo @and $bar)
 ```
-@if @not @isfile $f
-```
-
-This is a case that is clear what's going on.  Extra parenthesis are needed for `@not (@isfile $f)`.  So I think what I need to do is keep track of a variable that indicates what "operator" is currently active.  Once `@not` is found, it sets this context to something that indicates we can't have any binary operators.
-
 
 # Control Flow
 
