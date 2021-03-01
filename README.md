@@ -13,7 +13,10 @@ A scripting language that creates programs by "stitching" other programs togethe
 @echo Hello $name
 
 # command substitution
-@set arch (uname -m)
+@if @haveprog uname
+    @set arch (uname -m)
+    @echo $arch
+@end
 
 # arrays
 @setarray names args Fred Lisa Joey

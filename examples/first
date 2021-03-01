@@ -9,8 +9,10 @@
 @echo Hello $name
 
 # command substitution
-@set arch (uname -m)
-@echo $arch
+@if @haveprog uname
+    @set arch (uname -m)
+    @echo $arch
+@end
 
 # arrays
 # NOT IMPLEMENTED @setarray names args Fred Lisa Joey

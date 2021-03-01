@@ -220,6 +220,9 @@ def main():
 
     testSemanticError("@emptyarray", "got a command with no arguments, what should the language do here?")
 
+    testSemanticError("@haveprog", "'@haveprog' expects 1 arg but got 0")
+    testSemanticError("@haveprog a b", "'@haveprog' expects 1 arg but got 2")
+
     runStitchTests()
 
     print("test: success")

@@ -31,9 +31,11 @@ true
 @end
 @assert $if_block_executed @eq 0
 
-@set direct_which (which ls)
+@if @haveprog which
+    @set direct_which (which ls)
 
-@set which which
-@set indirect_which ($which ls)
+    @set which which
+    @set indirect_which ($which ls)
 
-test $direct_which = $indirect_which
+    test $direct_which = $indirect_which
+@end

@@ -407,6 +407,7 @@ class ScriptContext:
         self.doverify = doverify
         self.script_specific_builtin_objects = {
             "scriptfile": String(scriptfile),
+            "scriptdir": String(os.path.dirname(scriptfile)),
             # NOTE: callerworkdir will need to be forwarded to any sub-scripts
             #       maybe I can just use an environment variable
             "callerworkdir": String(callerworkdir),
@@ -546,6 +547,15 @@ class BuiltinMethods:
                        cmd_ctx.script.script_specific_builtin_objects["callerworkdir"].value,
                        cmd_ctx.capture_stdout)
 
+    def haveprog(cmd_ctx: CommandContext, nodes: List[Node]):
+        args = []
+        error = nodesToArgs(cmd_ctx, nodes, args)
+        if error:
+            return error
+        if len(args) != 1:
+            return SemanticError("'@haveprog' expects 1 arg but got {}".format(len(args)))
+        return BOOL_TRUE if which(args[0]) else BOOL_FALSE
+
 def opInvalidTypeError(op, operand):
     return SemanticError("'{}' does not accept objects of type {}".format(op, operand.userTypeDescriptor()))
 
@@ -581,6 +591,7 @@ builtin_objects = {
     "assert": Builtin("assert_"),
     "if": Builtin("if_"),
     "end": Builtin("end"),
+    "haveprog": Builtin("haveprog"),
     "false": BOOL_FALSE,
     "true": BOOL_TRUE,
     "not": Builtin("not_"),
