@@ -252,7 +252,7 @@ Assuming programs are located the same way as BASH and/or execve, I should expos
 
 # Delimited String Literals
 
-WYSIWYG strings make it easier to write correct code because they are easy for humans to verify and copy between applications. Requiring manual edits to escape special characters on strings copied to and from stitch scripts would be error prone. To avoid this, we need syntax to disable the special characters `#`, `@`, `$`, `(` and `)`.
+WYSIWYG strings make it easier to write correct code because they are easy for humans to verify and copy between applications. Requiring manual edits to escape special characters on strings copied to and from stitch scripts would be error prone. To avoid this, we need syntax to disable the special characters `#`, `@`, `$`, `"`, `(` and `)`.
 
 The solution for stitch is "Delimited String Literals".  They start with the sequence `@%` followed by a delimiter character.  The string continues until it sees the delimiter character again.  Here are some examples:
 
