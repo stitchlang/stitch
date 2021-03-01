@@ -75,7 +75,7 @@ Char | Description
 #
 # 3. use a "Delimited String Literal"
 #
-@echolines @%"arg 1" @%"arg 2" @%"arg 3"
+@echolines @%"arg 1" @%"arg 2"
 ```
 
 > NOTE: consider adding support for `@_` so you could do `@echolines arg@_1 arg@_2
