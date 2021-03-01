@@ -751,10 +751,6 @@ I should consider whether it is better to require all builtin's to be qualified 
 
 I want to make a distinction between "incorrect code" and "buggy code".  Incorrect code due to a syntax or semantic error is better than "bugggy code".  Buggy code is code that "sometimes works", but "incorrect code" always fails.  This language is designed to avoid "buggy code", but is less concerned about avoiding obviously "incorrect code".  Incorrect code is still a concern, but sometimes this is in conflict with language simplicity.  For example, adding keywords might make it easier to avoid incorrect code because of a missing `@` in some cases, however, that is obviously incorrect code that can be checked before executing it.  The complexity cost of adding keywords needs to be weighed against this.  Also note that I'm favoring reading code over writing code, so making something more readable takes priority over how hard it is to type.
 
-### Custom Special Character
-
-Maybe a script or line should be able to change their special symbols from `@` and `$` to something else?  For example, you could have something like this `$->! !echo your balance is $1.25`.  The single-line case may be tenuous, but if there is a domain where the `$` symbol needs to be escaped alot, maybe allowing it to be subtituted is worthwhile.
-
 ### The `=` character
 
 Consider making `=` a special character:
