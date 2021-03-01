@@ -93,16 +93,17 @@
 @set add_env (@echo $add_env LD_LIBRARY_VERSION=@$verify_out)
 @set add_env (@echo $add_env LD_VERBOSE=$verbose)
 @echo $add_env
-#if test "$unused" = yes; then
-#  add_env="$add_env LD_DEBUG=\"$LD_DEBUG${LD_DEBUG:+,}unused\""
-#fi
-#
-## The following command substitution is needed to make ldd work in SELinux
-## environments where the RTLD might not have permission to write to the
-## terminal.  The extra "x" character prevents the shell from trimming trailing
-## newlines from command substitution results.  This function is defined as a
-## subshell compound list (using "(...)") to prevent parameter assignments from
-## affecting the calling shell execution environment.
+@if $unused
+    # TODO: figure out what this is doing...???
+    #@set add_env (@echo $add_env LD_DEBUG=\"$LD_DEBUG${LD_DEBUG:+,}unused\"")
+@end
+
+# The following command substitution is needed to make ldd work in SELinux
+# environments where the RTLD might not have permission to write to the
+# terminal.  The extra "x" character prevents the shell from trimming trailing
+# newlines from command substitution results.  This function is defined as a
+# subshell compound list (using "(...)") to prevent parameter assignments from
+# affecting the calling shell execution environment.
 #try_trace() (
 #  output=$(eval $add_env '"$@"' 2>&1; rc=$?; printf 'x'; exit $rc)
 #  rc=$?

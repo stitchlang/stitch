@@ -618,6 +618,17 @@ By default, "Script Verification" is performed on every script before it is exec
 @noverify 03299287e43dc67cf0f177aa85031a43
 ```
 
+
+### Idea Embedded Programs
+
+This would be the analogue to "Bash Functions"
+
+```
+@program foo
+    @echo this is the "foo" program
+@end
+```
+
 # TODO:
 
 * as a test, I should run a script, output all the commands that were run to another script, then run that script a second time and it should still work.  Assuming there is a `--dump-commands-to FILE` command-line option:
