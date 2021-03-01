@@ -206,6 +206,18 @@ def main():
     testSemanticError("@not @emptyarray", "'@not' expects Bool but got Array")
     testExpression("@not @false", True)
 
+    testSemanticError("@if", "@if requires at least 1 argument")
+    testCommand("@if @false", 0, "")
+    testCommand("@if @true", 0, "")
+    testCommand("@if false", 0, "")
+    testCommand("@if true", 0, "")
+    # TODO: I need to call something like testFile to test "need more '@end'"
+
+    testSemanticError("@end", "too many '@end'")
+    # need multiple lines to test this otherwise I just get "too many '@end'"
+    #testSemanticError("@assert @end", "")
+    #testSemanticError("@not @end", "")
+
     testSemanticError("@emptyarray", "got a command with no arguments, what should the language do here?")
 
     runStitchTests()

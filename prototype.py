@@ -368,9 +368,41 @@ class UnknownBool(Unknown):
         return "Bool"
 UNKNOWN_BOOL = UnknownBool()
 
-
+# TODO: not sure if the Error types will be exposed to stitch yet, or if they
+#       are just an internal detail
+class Error:
+    def __init__(self, msg):
+        self.msg = msg
+class SemanticError(Error):
+    def __init__(self, msg):
+        Error.__init__(self, msg)
+    def __repr__(self):
+        return "SemanticError: {}".format(self.msg)
+class AssertError(Error):
+    def __init__(self, src):
+        Error.__init__(self, "@assert failed")
+        self.src = src
+    def __repr__(self):
+        return "AssertError"
+class NonZeroExitCodeError(Error):
+    def __init__(self, cmd_result: CommandResult):
+        assert(cmd_result.exitcode != 0)
+        Error.__init__(self, "command failed with exit code {}".format(cmd_result.exitcode))
+        self.cmd_result = cmd_result
+class MissingProgramError(Error):
+    def __init__(self, prog):
+        Error.__init__(self, "unable to find program '{}' in PATH".format(prog))
+class UnexpectedMultilineError(Error):
+    def __init__(self, cmd_result: CommandResult):
+        output = cmd_result.stdout if (cmd_result.stdout[-1] == "\n") else (cmd_result.stdout + "\n")
+        Error.__init__(self, "missing '@multiline', got this multiline output\n----\n{}----\n".format(output))
+        self.cmd_result = cmd_result
 
 class ScriptContext:
+    class Block:
+        def __init__(self, enabled: Union[None,Bool]):
+            self.enabled = enabled
+
     def __init__(self, doverify, scriptfile, callerworkdir, verification_mode):
         self.doverify = doverify
         self.script_specific_builtin_objects = {
@@ -382,6 +414,13 @@ class ScriptContext:
         self.var_map = {}
         self.verify_started = {}
         self.verification_mode = verification_mode
+        self.blockStack = [ScriptContext.Block(enabled=True)]
+    def pushBlock(self, enabled: bool) -> None:
+        self.blockStack.append(ScriptContext.Block(enabled))
+    def popBlock(self) -> Union[None,Error]:
+        self.blockStack.pop()
+        if len(self.blockStack) == 0:
+            return SemanticError("too many '@end'")
 
 class CommandContext:
     def __init__(self, script: ScriptContext, parent: 'CommandContext', capture_stdout: bool, depth: int = 0,
@@ -454,8 +493,15 @@ class BuiltinMethods:
         assert(type(result) == CommandResult)
         result.multiline = True
         return result
+    def not_(cmd_ctx: CommandContext, nodes: List[Node]):
+        result = expandOneNodeToBool(cmd_ctx, nodes, "@not")
+        if isinstance(result, Error) or isinstance(result, UnknownBool):
+            return result
+        assert(type(result) == Bool)
+        return BOOL_FALSE if result.value else BOOL_TRUE
+
     def assert_(cmd_ctx: CommandContext, nodes: List[Node]):
-        result = expandNodesToBool(cmd_ctx, nodes, "@assert")
+        result = expandNodesToBool(cmd_ctx, nodes, "@assert", False)
         if isinstance(result, Error):
             return result
         if type(result) == UnknownBool:
@@ -464,12 +510,25 @@ class BuiltinMethods:
         if not result.value:
             return AssertError(" ".join([n.src for n in nodes]))
         return CommandResult(0, cmd_ctx.handleBuiltinOutput(""), None, False)
-    def not_(cmd_ctx: CommandContext, nodes: List[Node]):
-        result = expandOneNodeToBool(cmd_ctx, nodes, "@not")
-        if isinstance(result, Error) or isinstance(result, UnknownBool):
+    def if_(cmd_ctx: CommandContext, nodes: List[Node]):
+        result = expandNodesToBool(cmd_ctx, nodes, "@if", True)
+        if isinstance(result, Error):
             return result
-        assert(type(result) == Bool)
-        return BOOL_FALSE if result.value else BOOL_TRUE
+        if type(result) == Bool:
+            cmd_ctx.script.pushBlock(enabled=result.value)
+            return CommandResult(0, cmd_ctx.handleBuiltinOutput(""), None, False)
+        assert(cmd_ctx.script.verification_mode and (
+            type(result) == UnknownBool or
+            type(result) == UnknownCommandResult))
+        cmd_ctx.script.pushBlock(enabled=True)
+        return UNKNOWN_COMMAND_RESULT
+    def end(cmd_ctx: CommandContext, nodes: List[Node]):
+        if len(nodes) != 0:
+            return SemanticError("'@end' does not accept any arguments")
+        error = cmd_ctx.script.popBlock()
+        if error:
+            return error
+        return CommandResult(0, cmd_ctx.handleBuiltinOutput(""), None, False)
     def call(cmd_ctx: CommandContext, nodes: List[Node]):
         args = []
         error = nodesToArgs(cmd_ctx, nodes, args)
@@ -486,37 +545,6 @@ class BuiltinMethods:
                        program_file,
                        cmd_ctx.script.script_specific_builtin_objects["callerworkdir"].value,
                        cmd_ctx.capture_stdout)
-
-
-# TODO: not sure if the Error types will be exposed to stitch yet, or if they
-#       are just an internal detail
-class Error:
-    def __init__(self, msg):
-        self.msg = msg
-class SemanticError(Error):
-    def __init__(self, msg):
-        Error.__init__(self, msg)
-    def __repr__(self):
-        return "SemanticError: {}".format(self.msg)
-class AssertError(Error):
-    def __init__(self, src):
-        Error.__init__(self, "@assert failed")
-        self.src = src
-    def __repr__(self):
-        return "AssertError"
-class NonZeroExitCodeError(Error):
-    def __init__(self, cmd_result: CommandResult):
-        assert(cmd_result.exitcode != 0)
-        Error.__init__(self, "command failed with exit code {}".format(cmd_result.exitcode))
-        self.cmd_result = cmd_result
-class MissingProgramError(Error):
-    def __init__(self, prog):
-        Error.__init__(self, "unable to find program '{}' in PATH".format(prog))
-class UnexpectedMultilineError(Error):
-    def __init__(self, cmd_result: CommandResult):
-        output = cmd_result.stdout if (cmd_result.stdout[-1] == "\n") else (cmd_result.stdout + "\n")
-        Error.__init__(self, "missing '@multiline', got this multiline output\n----\n{}----\n".format(output))
-        self.cmd_result = cmd_result
 
 def opInvalidTypeError(op, operand):
     return SemanticError("'{}' does not accept objects of type {}".format(op, operand.userTypeDescriptor()))
@@ -551,6 +579,8 @@ builtin_objects = {
     "multiline": Builtin("multiline"),
     "call": Builtin("call"),
     "assert": Builtin("assert_"),
+    "if": Builtin("if_"),
+    "end": Builtin("end"),
     "false": BOOL_FALSE,
     "true": BOOL_TRUE,
     "not": Builtin("not_"),
@@ -649,7 +679,7 @@ def expandNodes(cmd_ctx: CommandContext, nodes: List[Node]) -> Union[Error,Expan
 
     return ExpandNodes.ExternalProgram(args)
 
-def expandNodesToBool(cmd_ctx: CommandContext, nodes: List[Node], builtin_name: str) -> Union[Error,Bool,UnknownBool]:
+def expandNodesToBool(cmd_ctx: CommandContext, nodes: List[Node], builtin_name: str, allow_cmd_result: bool) -> Union[Error,Bool,UnknownBool]:
     if len(nodes) == 0:
         return SemanticError("{} requires at least 1 argument".format(builtin_name))
 
@@ -673,7 +703,15 @@ def expandNodesToBool(cmd_ctx: CommandContext, nodes: List[Node], builtin_name: 
         return result
     is_unknown_cmd_result = type(result) == UnknownCommandResult
     assert(type(result) == CommandResult or is_unknown_cmd_result)
-    return SemanticError("{} expects a Bool but got a CommandResult".format(builtin_name))
+    if not allow_cmd_result:
+        return SemanticError("{} expects a Bool but got a CommandResult".format(builtin_name))
+    if is_unknown_cmd_result:
+        return UNKNOWN_BOOL
+    if result.stdout:
+        raise Exception("TODO")
+    if result.stderr:
+        raise Exception("TODO")
+    return BOOL_TRUE if (result.exitcode == 0) else BOOL_FALSE
 
 def expandOneNodeToBool(cmd_ctx: CommandContext, nodes: List[Node], builtin_name: str) -> Union[Error,Bool,UnknownBool]:
     if len(nodes) == 0:
@@ -701,11 +739,25 @@ def expandOneNodeToBool(cmd_ctx: CommandContext, nodes: List[Node], builtin_name
 
 def runCommandNodes(cmd_ctx: CommandContext, nodes: List[Node]) -> Union[Error,Bool,CommandResult,UnknownBool,UnknownCommandResult]:
     assert(len(nodes) > 0)
+    # TODO: maybe enable printing this in verification_mode to assist
+    #       in triaging SemanticErrors
     if not cmd_ctx.script.verification_mode and cmd_ctx.builtin_prefix_count == 0:
         # todo: is ("+" * (depth+1)) too inneficient?
         msg = "{} {}".format("+" * (cmd_ctx.depth+1), " ".join([n.src for n in nodes]))
         # NOTE: ignore capture_stdout, just always print to console for now
         print(msg)
+
+    # handle @end if we are disabled
+    if not cmd_ctx.script.blockStack[-1].enabled:
+        first = nodes[0]
+        if (type(first) == NodeVariable) and (first.id == "end"):
+            if len(nodes) > 1:
+                return SemanticError("'@end' does not accept any arguments")
+            error = cmd_ctx.script.popBlock()
+            if error:
+                return error
+        return CommandResult(0, cmd_ctx.handleBuiltinOutput(""), None, False)
+
     result = expandNodes(cmd_ctx, nodes)
     if isinstance(result, Error):
         return result
@@ -941,6 +993,8 @@ def runFileHelper(script_ctx: ScriptContext, filename: str, capture_stdout: bool
                     type(result) == UnknownCommandResult
                 ))
 
+    if len(script_ctx.blockStack) != 1:
+        return SemanticError("need more '@end'")
     return CommandResult(0, output if capture_stdout else None, None, multiline=False)
 
 def normalizeFilename(filename):
