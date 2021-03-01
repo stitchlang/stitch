@@ -1100,6 +1100,49 @@ def runFile(doverify: bool, full_filename: str, callerworkdir: str, capture_stdo
 
     return runFileHelper(script_ctx, full_filename, capture_stdout)
 
+def resolveCallerWorkdir(sandbox_path: str) -> str:
+    # TODO: is this the same var on all posix operating systems?
+    env_dir_varname = "PWD"
+
+    cwd = os.getcwd()
+    env_dir = os.environ.get(env_dir_varname)
+
+    if cwd == sandbox_path:
+        if not env_dir:
+            # NOTE: we make a concession here that makes it illegal to run stitch scripts from inside the sandbox
+            #       path directly, but I think the benefit outweighs it.
+            sys.exit("the current directory is the sandbox path '{}' and {} is not set, unable to recover @callerworkdir".format(sandbox_path, env_dir_varname))
+
+        if env_dir == sandbox_path:
+            sys.exit("the current directory and {} are the sandbox path '{}', unable to recover @callerworkdir".format(env_dir_varname, sandbox_path))
+
+        return env_dir
+
+    if not env_dir:
+        if os.name == "nt":
+            os.environ[env_dir_varname] = cwd
+            return cwd
+        sys.exit("TODO: {} is not set, should we just set it?  Or maybe this OS puts {} into a different variable?".format(env_dir_varname, env_dir_varname))
+
+    if cwd != env_dir:
+        sys.exit("the current directory '{}' and {} '{}' don't agree".format(cwd, env_dir_varname, env_dir))
+
+    return cwd
+
+# try to get rid of CWD state by going to a temporary readonly directory
+def sandboxCallerWorkdir() -> str:
+    if os.name == "nt":
+        sandbox_path = os.path.join(os.getenv("TEMP"), "stitch-sandbox")
+    else:
+        sandbox_path = "/tmp/stitch-sandbox"
+
+    callerworkdir = resolveCallerWorkdir(sandbox_path)
+
+    if not os.path.exists(sandbox_path):
+        os.mkdir(sandbox_path)
+    os.chdir(sandbox_path)
+    return callerworkdir
+
 
 def main():
     cmd_args = sys.argv[1:]
@@ -1110,16 +1153,7 @@ def main():
     filename = cmd_args[0]
     full_filename = os.path.abspath(filename)
 
-    # try to get rid of CWD state by going to a temporary readonly directory
-    if os.name == "nt":
-        sandbox_path = os.path.join(os.getenv("TEMP"), "stitch-sandbox")
-    else:
-        sandbox_path = "/tmp/stitch-sandbox"
-
-    if not os.path.exists(sandbox_path):
-        os.mkdir(sandbox_path)
-    callerworkdir = os.getcwd()
-    os.chdir(sandbox_path)
+    callerworkdir = sandboxCallerWorkdir()
 
     doverify = True
     result = runFile(doverify, full_filename, callerworkdir, capture_stdout=False)
