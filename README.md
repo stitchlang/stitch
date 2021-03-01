@@ -764,3 +764,7 @@ $arch = (uname -m)
 ```
 
 With this variation it would have to be clear that `$VAR = VALUE` is not a command, but a different syntax node.  This would complicate the syntax of the language, but that complexity could be outweighed by the "readability" and "familiarity".
+
+# Idea: Multiple debug/log formats
+
+Maybe stitch should support logging commands using multiple output formats (like BASH, etc).  The problematic part of this would be the builtins, one way to address this would be to also output the builtins required as they are being used. Another idea would be to provide a BASH script that provides all the builtins as BASH functions.
