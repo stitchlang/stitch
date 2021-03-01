@@ -21,12 +21,12 @@ class NodeVariable(Node):
         self.is_at = is_at
     def __repr__(self):
         return "Variable({}{})".format("@" if self.is_at else "$", self.id)
-class NodeCommandSub(Node):
+class NodeInlineCommand(Node):
     def __init__(self, src, nodes):
         Node.__init__(self, src)
         self.nodes = nodes
     def __repr__(self):
-        return "NodeCommandSub({})".format(", ".join([str(n) for n in self.nodes]))
+        return "NodeInlineCommand({})".format(", ".join([str(n) for n in self.nodes]))
 class NodeMultiple(Node):
     def __init__(self, src, nodes):
         Node.__init__(self, src)
@@ -180,14 +180,13 @@ def parseNode(src, i):
             if i > mark:
                 s = src[mark:i]
                 node = combineNodes(node, NodeToken(s, s))
-            cmd_start = i+1
-            cmd_subst_nodes, cmd_subst_limit = parseCommand(src, cmd_start)
-            if cmd_subst_limit == len(src) or ord(src[cmd_subst_limit]) != ord(")"):
+            inline_cmd_nodes, inline_cmd_limit = parseCommand(src, i+1)
+            if inline_cmd_limit == len(src) or ord(src[inline_cmd_limit]) != ord(")"):
                 # TODO: add test for this error
                 sys.exit("Error: '(' is missing the closing paren ')'")
-            node = combineNodes(node, NodeCommandSub(src[i:cmd_subst_limit+1], cmd_subst_nodes))
-            mark = cmd_subst_limit + 1
-            i = cmd_subst_limit + 1
+            node = combineNodes(node, NodeInlineCommand(src[i:inline_cmd_limit+1], inline_cmd_nodes))
+            mark = inline_cmd_limit + 1
+            i = inline_cmd_limit + 1
             continue
         if isspaceOrd(c_ord) or c_ord == ord("#") or c_ord == ord(")"):
             break
@@ -492,7 +491,7 @@ class BuiltinMethods:
         if len(nodes) == 0:
             return SemanticError("@multiline requires at least 1 argument")
         if cmd_ctx.depth == 0:
-            return SemanticError("the @multiline builtin is only supported inside a command-substitution")
+            return SemanticError("the @multiline builtin is only supported within an (..inline command..)")
         # this should always be true when cmd_ctx.depth > 0
         assert(cmd_ctx.capture_stdout)
         result = runCommandNodes(cmd_ctx.nextBuiltin(), nodes)
@@ -953,7 +952,7 @@ def expandNode(cmd_ctx: CommandContext, node: Node) -> StitchObject:
             return SemanticError("'{}' is undefined".format(node.src, node.id))
         return obj
 
-    if type(node) is NodeCommandSub:
+    if type(node) is NodeInlineCommand:
         return runCommandNodes(cmd_ctx.nextDepth(), node.nodes)
 
     if type(node) is NodeMultiple:

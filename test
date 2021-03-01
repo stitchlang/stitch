@@ -107,7 +107,7 @@ def main():
         os.environ["PATH"] = path + ";" + os.environ["PATH"]
 
     testSemanticError("@multiline", "@multiline requires at least 1 argument")
-    testSemanticError("@multiline @true", "the @multiline builtin is only supported inside a command-substitution")
+    testSemanticError("@multiline @true", "the @multiline builtin is only supported within an (..inline command..)")
     testSemanticError("(@multiline @true @and @true)", "@multiline does not accept Bool")
 
     testSemanticError("@false", "unhandled Bool")

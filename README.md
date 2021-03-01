@@ -12,7 +12,7 @@ A scripting language that creates programs by "stitching" other programs togethe
 @set name Fred
 @echo Hello $name
 
-# command substitution
+# if statements and inline commands
 @if @haveprog uname
     @set arch (uname -m)
     @echo $arch
@@ -45,8 +45,8 @@ Char | Description
 `@`  | start a builtin expression and/or access a builtin object, escape with `@@`
 `$`  | access a user object `@$`
 `"`  | delimits a string literal, escape with `@"`
-`(`  | start a command substitution, escape with `@(`
-`)`  | ends a command substitution, escape with `@)`
+`(`  | start an inline command, escape with `@(`
+`)`  | ends an inline command, escape with `@)`
 
 # Arguments with Spaces
 
@@ -68,7 +68,7 @@ Char | Description
 @echolines "arg 1" "arg 2"
 
 #
-# 2. use "Command Substitution"
+# 2. use inline commands
 #
 @echolines (@echo arg 1) (@echo arg 2)
 
@@ -174,37 +174,38 @@ Environment variables are accessed through the `env` scope.
 @set env.VAR VALUE
 ```
 
-# Command Substitution
+# Inline Commands
 
-> NOTE: is Command Substitution a good name?  What about "Inline Command"?
+"Inline Commands" are commands contained within other commands.  They are delimited by `(` parenthesis `)`.  Inline commands can return both `CommandResult` objects and `Bool` objects.  How the inline command is handled will depend on where it is being invoked.  If its result is coerced to a `String`, then its exitcode will be checked to have been `0` lest an error be thrown, then its `stdout` will be interpreted as the `String`.
 
-Command Subtitution is expected to be a common construct in this language.  Note that Command Substitution runs a command and returns stdout of that command as a string.  Unlike other scripting languages, the command is executed within the current process environment, it is not executed in a subprocess so it has very low overhead.
+> NOTE: inline commands are executed within the current process environment, they are not executed in a subprocess
 
 ```sh
 # run command and return one line of output as a string with no trailing newline
 (PROG ARGS...)
 
+make -j(nproc)
+
+@set arch (uname -mm)
+@echo arch is $arch
+
+@set files_exist ((@isfile foo) @and (@isfile bar))
+```
+
+### @multiline
+
+In general, inline commands are commonly used to return strings that don't contain newlines.  Because of this, by default, inline commands only allow up to one line of output from stdout of the underlying command.  It also strips the trailing newline from the output before returning the string.  To disable this behavior, the `@multiline` builtin can be used to prefix the command:
+
+```
 # run the command and return any number of lines of output
 (@multiline PROG ARGS...)
+
+@set myfile_contents (@multiline cat myfile)
 ```
 
-In general Command Subtitution is commonly used to return strings that don't contain newlines.  Because of this, by default Command Substitution only allows up to one line of output from stdout of the underlying command.  It also strips the trailing newline from the output before returning the string.
+#### Idea, diable stdout capture when Bool expected?
 
-This default behavior is overriden by prefixing the comand with `@multiline`.  This will return stdout of the underlying process unmodified.
-
-```sh
-@echo you're arch is (uname -m)
-
-@set myfile_content (@multiline cat myfile)
-@set lsfile (which ls)
-
-# Example
-make -j(nproc)
-```
-
-#### Idea
-
-I may want to modify Command Substitution to only capture stdout when the context it is used in requires a `String`.  When a `Bool` is expected, stdout is just going to get forwarded so this is wasting memory and cpu cycles to copy it.
+I may want to modify inline commands to only capture stdout when the context it is used in requires a `String`.  When a `Bool` is expected, stdout is just going to get forwarded so this is wasting memory and cpu cycles to copy it.
 
 # Examples
 
@@ -275,6 +276,7 @@ The following lists some of the Builtins and the argument form they take:
 @multiline AstNode...
 @call String AstNode...
 
+@if ExpandNodesResult
 @assert ExpandNodesResult
 @not ExpandNodesResult
 ```
@@ -302,7 +304,7 @@ Currently `@assert` and `@not` take this form because it allows them to either i
 
 #### @multiline PROG ARGS...
 
-Runs the given program output wrapped in an internal "MultilineResult" object that allows strings with mulitple lines to be returned from a command-substitution.
+Modifies the CommandResult object of an inline command to accept multiple lines from stdout and disables stripping the trailing newline.
 
 #### @firstline/@lastline
 
@@ -310,7 +312,7 @@ Not sure if these should be added yet. I've included them to be considered.
 
 #### @findprog NAME
 
-Assuming programs are located the same way as BASH and/or execve, I should expose this logic through a builtin.
+Assuming programs are located the same way as BASH and/or execvp, I should expose this logic through a builtin.
 
 # Delimited String Literals
 
@@ -340,7 +342,7 @@ It might also be good to include some shorthand variations like this:
 @echo @' example 1 '
 @echo @| example 1 |
 
-# probably don't do @( ... ) because that could easily get confused with command-substitution
+# probably don't do @( ... ) because that could easily get confused with inline commands
 # maybe just @"..." and @'...'
 ```
 
@@ -406,7 +408,7 @@ grep foo bar @and $b
 
 Boolean binary operators like `@or` and `@and` can take a CommandResult object, and convert it to a Bool object based on it's exit code.
 
-When a binary operator receives a CommandResult object from a Command Substitition, it can handle it differently depending on the operator.  For the boolean binary operators `@or` and `@and`, it converts the exit code of the command to a boolean value, 0 indicates "success" which becomese `true`, and non-zero becomes `false`.  In this case, since stdout is ignored, it is printed to the current stdout handler instead.
+When a binary operator receives a CommandResult object from an inline command, it can handle it differently depending on the operator.  For the Bool binary operators like `@or` and `@and`, it converts the exit code of the command to a `Bool` where `0` (success) becomes `true` and non-zero (error) becomes `false``.  In this case, since stdout is ignored, it is printed to the current stdout handler instead (or I might modify inline commands to know beforehand they are going to become `Bool` and never capture it in the first place).
 
 Currently there are only 2 binary operators: `@and` and `@or`.  Here are some more candidates:
 
@@ -507,11 +509,15 @@ This is a case that is clear what's going on.  Extra parenthesis are needed for 
 @end
 ```
 
+## Use Cases
+
+> NOTE: this section is old and outdated
+
 ```sh
 # returns a CommandResult "top-level handler" which causes a fatal error on non-zero exit code
 grep needle file
 
-# @if will both zero and non-zero exit codes from a CommandResult and use it to decide on the brancht to execute
+# @if will accept both zero and non-zero exit codes from a CommandResult and use it to decide on the brancht to execute
 @if grep needle file
     @echo found needle!
 @else
@@ -547,7 +553,7 @@ So, unary operators are always higher precedence than binary operators.  What if
 @end
 ```
 
-I think the example above just WORKS.  Command substitution takes any Bool and propogates it up as a Bool.  If a Bool is attempted to be used as a string, it is an error, i.e.
+I think the example above just WORKS.  Inline commands take any Bool and propogate it up as a Bool.  If a Bool is attempted to be used as a string, it is an error, i.e.
 
 ```sh
 ls (@not grep needle file)
@@ -719,11 +725,11 @@ This scripting language is meant to represent coherent programs that live inside
 
 Having code that "sometimes works" is where bugs thrive.  It usually means the code will work in the test environment but then fail when it gets to the customer.  With this in mind, it's better to make features that either "fail all of the time" or "work all of the time".  If possible, avoid features that encourage code to "sometimes work".
 
-### Why Command Substitution is `(...)` rather than `@(...)` or `$(...)`
+### Why Inline Commands are `(...)` rather than `@(...)` or `$(...)`
 
 This syntax is a result of the following 3 observations:
 
-1. I don't want `)` to be treated differently inside or outside a command-substitution
+1. I don't want `)` to be treated differently inside or outside an inline command
 2. I don't want `(` and `)` to be treated differently from each other
 3. Given the above 2, I would need to use something like `@( ... @)` or `$( ... $)`, however, these look weird
 

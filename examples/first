@@ -1,14 +1,13 @@
 #!/usr/bin/env stitch
 
 # this is a comment
-
-@echo hello
+@echo Hello, World
 
 # variables
 @set name Fred
 @echo Hello $name
 
-# command substitution
+# if statements and inline commands
 @if @haveprog uname
     @set arch (uname -m)
     @echo $arch
