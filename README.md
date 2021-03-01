@@ -401,6 +401,14 @@ This does not look clear.  However here's the assert:
 
 This one much more clear.  It seems obvious that `@assert` would have lower precedence than the binary expressions that follow it, this is not so clear with `@not`.  I think the way to address this is that `@not` will behave like a binary operator, in that it may only accept 1 node as an argument, and `@assert` will work more like a typical builtin, that can accept any number of nodes.
 
+UPDATE: I've found another use case
+
+```
+@if @not @isfile $f
+```
+
+This is a case that is clear what's going on.  Extra parenthesis are needed for `@not (@isfile $f)`.  So I think what I need to do is keep track of a variable that indicates what "operator" is currently active.  Once `@not` is found, it sets this context to something that indicates we can't have any binary operators.
+
 
 # Control Flow
 

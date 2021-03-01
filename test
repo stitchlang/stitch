@@ -201,8 +201,8 @@ def main():
     testCommand("@assert @true", 0, "")
     testSemanticError("@assert true", "@assert expects a Bool but got a CommandResult")
 
-    testSemanticError("@not", "'@not' requires 1 node")
-    testSemanticError("@not @true @and @false", "'@not' only accepts 1 not but got multiple, consider wrapping them with in parens (...)")
+    testSemanticError("@not", "@not accepts 1 argument but got 0")
+    testSemanticError("@not @true @and @false", "@not accepts 1 argument but got 3")
     testSemanticError("@not @emptyarray", "'@not' expects Bool but got Array")
     testExpression("@not @false", True)
 
@@ -230,6 +230,9 @@ def main():
     testSemanticError("@set @echo bar", "@set requires a String for its 1st argument but got Builtin")
     testSemanticError("@set (@echo foo) bar", "@set requires a String for its 1st argument but got CommandResult")
     testCommand("@set foo @false", 0, "")
+
+    testSemanticError("@isfile", "@isfile accepts 1 argument but got 0")
+    testSemanticError("@isfile foo bar", "@isfile accepts 1 argument but got 2")
 
     runStitchTests()
 

@@ -310,13 +310,21 @@ class CompareOperator(BinaryOperator):
         if type(operand) == String:
             # TODO: return semantic error if not a valid integer
             return int(operand.value)
+        if type(operand) == UnknownString:
+            return None
         return opInvalidTypeError(self, operand)
     def apply(self, verification_mode: bool, stdout_handler, left, right):
+        if left == None:
+            if type(right) != String and type(right) != UnknownString:
+                return opInvalidTypeError(self, right)
+            return UNKNOWN_BOOL
         assert(type(left) == int)
         if type(right) == String:
             # TODO: return semantic error if not a valid integer
             right_int = int(right.value)
             return BOOL_TRUE if self.func(left, right_int) else BOOL_FALSE
+        if type(right) == UnknownString:
+            return UNKNOWN_BOOL
         return opInvalidTypeError(self, right)
 
 class CommandResult(StitchObject):
@@ -501,7 +509,15 @@ class BuiltinMethods:
             return result
         assert(type(result) == Bool)
         return BOOL_FALSE if result.value else BOOL_TRUE
-
+    def isfile(cmd_ctx: CommandContext, nodes: List[Node]):
+        s = expandOneNodeToString(cmd_ctx, nodes, "@isfile")
+        if isinstance(s, Error):
+            return s
+        if type(s) == String:
+            return BOOL_TRUE if os.path.isfile(s.value) else BOOL_FALSE
+        assert(type(s) == UnknownString)
+        assert(cmd_ctx.script.verification_mode)
+        return UNKNOWN_BOOL
     def assert_(cmd_ctx: CommandContext, nodes: List[Node]):
         result = expandNodesToBool(cmd_ctx, nodes, "@assert", False)
         if isinstance(result, Error):
@@ -623,6 +639,7 @@ builtin_objects = {
     "false": BOOL_FALSE,
     "true": BOOL_TRUE,
     "not": Builtin("not_"),
+    "isfile": Builtin("isfile"),
     "or": OrOperator(),
     "and": AndOperator(),
     "eq": EqOperator(),
@@ -753,10 +770,8 @@ def expandNodesToBool(cmd_ctx: CommandContext, nodes: List[Node], builtin_name: 
     return BOOL_TRUE if (result.exitcode == 0) else BOOL_FALSE
 
 def expandOneNodeToBool(cmd_ctx: CommandContext, nodes: List[Node], builtin_name: str) -> Union[Error,Bool,UnknownBool]:
-    if len(nodes) == 0:
-        return SemanticError("'{}' requires 1 node".format(builtin_name))
-    if len(nodes) > 1:
-        return SemanticError("'{}' only accepts 1 not but got multiple, consider wrapping them with in parens (...)".format(builtin_name))
+    if len(nodes) != 1:
+        return SemanticError("{} accepts 1 argument but got {}".format(builtin_name, len(nodes)))
 
     obj = expandNode(cmd_ctx, nodes[0])
     if isinstance(obj, Error):
@@ -775,6 +790,20 @@ def expandOneNodeToBool(cmd_ctx: CommandContext, nodes: List[Node], builtin_name
         return UNKNOWN_BOOL
 
     return SemanticError("'{}' expects Bool but got {}".format(builtin_name, obj.userTypeDescriptor()))
+
+def expandOneNodeToString(cmd_ctx: CommandContext, nodes: List[Node], builtin_name: str) -> Union[Error,String,UnknownString]:
+    if len(nodes) != 1:
+        return SemanticError("{} accepts 1 argument but got {}".format(builtin_name, len(nodes)))
+
+    obj = expandNode(cmd_ctx, nodes[0])
+    if isinstance(obj, Error):
+        return obj
+    if type(obj) == String:
+        return obj
+    if type(obj) == UnknownString:
+        assert(cmd_ctx.script.verification_mode)
+        return UNKNOWN_STRING
+    return SemanticError("'{}' expects String but got {}".format(builtin_name, obj.userTypeDescriptor()))
 
 def runCommandNodes(cmd_ctx: CommandContext, nodes: List[Node]) -> Union[Error,Bool,CommandResult,UnknownBool,UnknownCommandResult]:
     assert(len(nodes) > 0)
