@@ -754,3 +754,26 @@ I want to make a distinction between "incorrect code" and "buggy code".  Incorre
 ### Custom Special Character
 
 Maybe a script or line should be able to change their special symbols from `@` and `$` to something else?  For example, you could have something like this `$->! !echo your balance is $1.25`.  The single-line case may be tenuous, but if there is a domain where the `$` symbol needs to be escaped alot, maybe allowing it to be subtituted is worthwhile.
+
+### The `=` character
+
+Consider making `=` a special character:
+
+```sh
+@set foo bar
+@set arch (uname -m)
+```
+Versus
+```sh
+foo = bar
+arch = (uname -m)
+```
+
+Which is more readable? There's also this variation:
+
+```
+$foo = bar
+$arch = (uname -m)
+```
+
+With this variation it would have to be clear that `$VAR = VALUE` is not a command, but a different syntax node.  This would complicate the syntax of the language, but that complexity could be outweighed by the "readability" and "familiarity".
