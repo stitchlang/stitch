@@ -352,14 +352,6 @@ class Unknown(StitchObject):
     def __init__(self, stitch_type):
         self.stitch_type = stitch_type
 
-class UnknownCommandResult(Unknown):
-    def __init__(self):
-        Unknown.__init__(self, CommandResult)
-    @staticmethod
-    def userTypeDescriptor():
-        return "CommandResult"
-UNKNOWN_COMMAND_RESULT = UnknownCommandResult()
-
 class UnknownBool(Unknown):
     def __init__(self):
         Unknown.__init__(self, Bool)
@@ -367,6 +359,22 @@ class UnknownBool(Unknown):
     def userTypeDescriptor():
         return "Bool"
 UNKNOWN_BOOL = UnknownBool()
+
+class UnknownString(Unknown):
+    def __init__(self):
+        Unknown.__init__(self, String)
+    @staticmethod
+    def userTypeDescriptor():
+        return "String"
+UNKNOWN_STRING = UnknownString()
+
+class UnknownCommandResult(Unknown):
+    def __init__(self):
+        Unknown.__init__(self, CommandResult)
+    @staticmethod
+    def userTypeDescriptor():
+        return "CommandResult"
+UNKNOWN_COMMAND_RESULT = UnknownCommandResult()
 
 # TODO: not sure if the Error types will be exposed to stitch yet, or if they
 #       are just an internal detail
@@ -454,31 +462,24 @@ class BuiltinMethods:
             return error
         return CommandResult(0, cmd_ctx.handleBuiltinOutput(" ".join(args)), None, False)
     def set(cmd_ctx: CommandContext, nodes: List[Node]):
-        args = []
-        error = nodesToArgs(cmd_ctx, nodes, args)
-        if error:
-            return error
-        if len(args) == 0:
-            sys.exit("Error: the @set builtin requires at least one argument")
-        if len(args) > 2:
-            sys.exit("Error: the @set builtin can only accept 2 arguments but got {}".format(len(args)))
-        varname = args[0]
-        value = args[1]
-        #print("DEBUG: setting variable '{}' to '{}'".format(varname, value_string))
-        cmd_ctx.script.var_map[varname] = String(value)
+        if len(nodes) != 2:
+            return SemanticError("@set expects 2 arguments but got {}".format(len(nodes)))
+        is_unknown_command_result = expandSetArgs(cmd_ctx, nodes[0], nodes[1], "@set", cmd_ctx.script.var_map)
+        if isinstance(is_unknown_command_result, Error):
+            return is_unknown_command_result
+
+        if is_unknown_command_result:
+            return UNKNOWN_COMMAND_RESULT
         return CommandResult(0, cmd_ctx.handleBuiltinOutput(""), None, False)
     def settmp(cmd_ctx: CommandContext, nodes: List[Node]):
         if len(nodes) < 3:
             sys.exit("Error: the @settmp builtin requires at least 3 arguments")
-        varname = nodeToNonArrayArg(cmd_ctx, nodes[0])
-        if isinstance(varname, Error):
-            return varname
-        value = nodeToNonArrayArg(cmd_ctx, nodes[1])
-        if isinstance(value, Error):
-            return value
-        cmd_ctx.var_map[varname] = String(value)
+        is_unknown_command_result = expandSetArgs(cmd_ctx, nodes[0], nodes[1], "@settmp", cmd_ctx.var_map)
+        if isinstance(is_unknown_command_result, Error):
+            return is_unknown_command_result
         #print("DEBUG: settmp '{}' to '{}'".format(varname, value))
         return runCommandNodes(cmd_ctx.nextBuiltin(), nodes[2:])
+
     def multiline(cmd_ctx: CommandContext, nodes: List[Node]):
         if len(nodes) == 0:
             return SemanticError("@multiline requires at least 1 argument")
@@ -572,6 +573,33 @@ def operandToBool(stdout_handler, op, operand) -> Union[Error,Bool,UnknownBool]:
     if type(operand) == UnknownBool or type(operand) == UnknownCommandResult:
         return UNKNOWN_BOOL
     return opInvalidTypeError(op, operand)
+
+def expandSetArgs(cmd_ctx: CommandContext, arg1: Node, arg2: Node, builtin_name: str, var_map: Dict[str,StitchObject]) -> Union[Error,bool]:
+    name = expandNode(cmd_ctx, arg1)
+    if isinstance(name, Error):
+        return name
+    if type(name) != String:
+        return SemanticError("{} requires a String for its 1st argument but got {}".format(builtin_name, name.userTypeDescriptor()))
+    value = expandNode(cmd_ctx, arg2)
+    if isinstance(value, Error):
+        return value
+
+    is_unknown_command_result = (type(value) == UnknownCommandResult)
+    if is_unknown_command_result:
+        value = UNKNOWN_STRING
+    elif type(value) == CommandResult:
+        value = value.toStringArg()
+        if isinstance(value, Error):
+            return value
+        value = String(value)
+    elif ((type(value) != String) and
+          (type(value) != Bool) and
+          (type(value) != UnknownBool)):
+        return SemanticError("{} requires a String, Bool or CommandResult for its 2nd argument but got {}".format(
+            builtin_name, value.userTypeDescriptor()))
+
+    var_map[name.value] = value
+    return is_unknown_command_result
 
 class CompareOp:
     def gt(left, right):
@@ -817,7 +845,9 @@ def objectToArgs(obj: StitchObject, args: List[str]) -> Error:
     elif type(obj) == Array:
         args.extend(obj.elements)
     elif type(obj) == UnknownCommandResult:
-        args.append("UNKNOWN_COMMAND_RESULT")
+        args.append("<UNKNOWN_COMMAND_RESULT>")
+    elif type(obj) == UnknownString:
+        args.append("<UNKNOWN_STRING>")
     elif type(obj) == Bool or type(obj) == UnknownBool:
         return SemanticError("cannot coerce Bool to String")
     elif isinstance(obj, BinaryOperator):

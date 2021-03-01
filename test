@@ -223,6 +223,14 @@ def main():
     testSemanticError("@haveprog", "'@haveprog' expects 1 arg but got 0")
     testSemanticError("@haveprog a b", "'@haveprog' expects 1 arg but got 2")
 
+    testSemanticError("@set", "@set expects 2 arguments but got 0")
+    testSemanticError("@set foo", "@set expects 2 arguments but got 1")
+    testCommand("@set foo bar", 0, "")
+    testSemanticError("@set @false bar", "@set requires a String for its 1st argument but got Bool")
+    testSemanticError("@set @echo bar", "@set requires a String for its 1st argument but got Builtin")
+    testSemanticError("@set (@echo foo) bar", "@set requires a String for its 1st argument but got CommandResult")
+    testCommand("@set foo @false", 0, "")
+
     runStitchTests()
 
     print("test: success")

@@ -18,18 +18,18 @@ true
 @assert 2 @lt 3
 @assert @not (3 @lt 2)
 
-@set if_block_executed 0
+@set if_block_executed @false
 @if @true
-    @set if_block_executed 1
+    @set if_block_executed @true
 @end
-@assert $if_block_executed @eq 1
+@assert $if_block_executed
 
-@set if_block_executed 0
+@set if_block_executed @false
 @if @not @true
     # TODO: maybe there should be a @panic for this? That optionally takes a message?
     @assert @false
 @end
-@assert $if_block_executed @eq 0
+@assert @not $if_block_executed
 
 @if @haveprog which
     @set direct_which (which ls)

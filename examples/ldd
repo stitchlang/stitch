@@ -18,6 +18,8 @@
 @set bind_now ""
 @set verbose ""
 
+@set unused @false
+
 #while test $# -gt 0; do
 #  case "$1" in
 #  --vers | --versi | --versio | --version)
