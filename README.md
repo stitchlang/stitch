@@ -203,9 +203,27 @@ In general, inline commands are commonly used to return strings that don't conta
 @set myfile_contents (@multiline cat myfile)
 ```
 
-#### Idea, diable stdout capture when Bool expected?
+#### Idea, disable stdout capture when Bool expected?
 
-I may want to modify inline commands to only capture stdout when the context it is used in requires a `String`.  When a `Bool` is expected, stdout is just going to get forwarded so this is wasting memory and cpu cycles to copy it.
+I don't like that inline commands could be wasting memory and cpu cycles capturing stdout when it appears in a location where a `Bool` is expected and it's just going to get forwarded anyway.  We could make a rule that whenever an inline command appears in a context that requires a `Bool`, its stdout is not captured, however, I'm not sure I like this implicit difference in execution.  An alternative solution is to make this difference explicit.  This could be done by not allowing `CommandResult` objects to be implicitly converted to `Bool` objects.  Instead, a builtin can be used to perform this conversion, which would also trigger the command to be executed without capturing stdout.
+
+```sh
+@assert (grep foo bar) @and (grep bar foo)
+# this creates a SemanticError, cannot coerce CommandResult to Bool, use @tobool
+
+@assert (@tobool grep foo bar) @and (@tobool grep bar foo)
+# now it passes verification
+```
+
+Note that most inline commands don't get converted to a `Bool` like this so this syntax is not the norm.  This would also provide a syntax for setting a bool variable from an inline command:
+
+```sh
+@set matches (grep foo bar)
+
+# VS
+
+@set found (@tobool grep foo bar)
+```
 
 # Examples
 
