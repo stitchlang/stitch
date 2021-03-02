@@ -62,3 +62,5 @@ Maybe selective imports as well like this:
 ```
 
 With these combined features, maybe the language limits itself to only a few builtins, and the rest are imported?  This could remove the need for prefixing all the builtins with `@`, only the fundamental builtins need the prefix.
+
+Note that I would expect most "generally useful" builtins to be included in the `stitch` repository and would get deployed by default.  Excluding builtins would be an explicit decision to create a minimal interpreter.
