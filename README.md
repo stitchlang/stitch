@@ -654,6 +654,9 @@ foo @out @in2file myfile
 @run $foo
 ```
 
+NOTE: I think I should implement multi-command semantics for piping first.  This will help me setup the proper abstractions for piping before I tacke the interface for the shorthand version.
+
+
 # The Current Working Directory
 
 Having a current working directory as hidden state that affects all relative path names may be more trouble than it's worth.  One alterative is to use absolute path names.  However, some programs use the current working directory as an important input, in which case there needs to be a way to set it.  Here's a way we could set this and make it excplicit:
