@@ -64,3 +64,9 @@ Maybe selective imports as well like this:
 With these combined features, maybe the language limits itself to only a few builtins, and the rest are imported?  This could remove the need for prefixing all the builtins with `@`, only the fundamental builtins need the prefix.
 
 Note that I would expect most "generally useful" builtins to be included in the `stitch` repository and would get deployed by default.  Excluding builtins would be an explicit decision to create a minimal interpreter.
+
+### 6. Build Dependencies
+
+I like to have my cake and eat it too.  I want people to be able to be able to use whatever build tools they have on their system, but I don't want to have to manually maintain these build systems separately.  I want to configure the project in one place.  I also don't want to require people to have a specific tool to bootstrap their build system from something else.  So the idea I have is to configure the project in one location, probably a JSON file, and then generate any and all build systems that people might use (meson, cmake, Makefile, autotools?).  I imagine this "build generator" is written in Python, but I don't want to make Python a required dependency, so I'll commit the generated build files to the repository.  To keep these files in sync, the CI system will check that the main configuration file generates the build files the same way they appear within any commit.
+
+> note: the build generator would be tucked away in a subdirectory, not "up front and center" in the top-level directory.  This is because most people won't know or care about it, they will just want to know where their build system files are.
