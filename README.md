@@ -99,7 +99,7 @@ stitch has a basic type system with the following object types:
 
 | Name     |  Examples   | Description                                                                 |
 |----------|-------------|-----------------------------------------------------------------------------|
-| String   | `foo` "bar" | a sequence of characters, this is the default type of most tokens in stitch |
+| String   | `foo` `"bar"` | a sequence of characters, this is the default type of most tokens in stitch |
 | Array    | `@setarray foo args a b c` | an array of Strings |
 | CommandResult | `(@echo hello)` | an exitcode and optional Strings for stdout/stderr if they were captured |
 | Builtin  | `@echo` `@set`  | a "builtin program" that takes arguments and returns a CommandResult |
@@ -257,7 +257,7 @@ Builtin programs accept arguments that have been expanded to various levels:
 3. Objects (Bool, String, CommandResult, Array, etc)
 4. Strings
 
-At the lowest level 1 we have AstNodes.  These arguments are left in their unprocessed form where they have been categorized into Tokens, Variables and Command Subtitutions. Builtins like `@note`, `@multiline` and `@call` accept AstNodes.  Binary Operators also keep their operands in AstNode form to support "shortcircuting" where the right operand may not be expanded if the final result is already determined from the left operand (note: this is disabled in verification mode).
+At the lowest level 1 we have AstNodes.  These arguments are left in their unprocessed form where they have been categorized into Tokens, Variables and Inline Commands. Builtins like `@note`, `@multiline` and `@call` accept AstNodes.  Binary Operators also keep their operands in AstNode form to support "shortcircuting" where the right operand may not be expanded if the final result is already determined from the left operand (note: this is disabled in verification mode).
 
 Skipping past level 2 for now, we have level 3 "Objects" that are accepted by builtins like `@set`, which takes a `String` for its first argument, and either `String`, `Bool` or `CommandResult` for its second.
 
