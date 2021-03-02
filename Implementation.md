@@ -13,11 +13,39 @@ For now I think the best choice of langauge is C.  C is ubiquitous and the langu
 
 The interpreter should be configurable such that minimalistic systems can configure an interpreter to fit in their environment without hindering normal systems from having access to the full power of stitch with as many builtins as they desire.
 
-### 4. Plugins
+### 4. Modules
 
-Users should be able to implement their own builtins.  This would be a shared library that would look something like this:
+I should consider whether to support modules in stitch.  Modules allow symbols to be categorized which can help know where to look for things and keep the namespace clean. I imagine importing a module could look something like this:
 
-`stitchplugin.h`
+```
+@import core
+@import os
+@import fs
+```
+
+Maybe selective imports as well like this:
+
+```
+@import path dirname join basename
+```
+
+With modules, maybe the language limits itself to only a few fundamenatal builtins, and the rest are imported?  This could remove the need for prefixing all the builtins with `@`, only the fundamental builtins need the prefix.
+
+Note that I would expect most "generally useful" builtins to be included in the `stitch` repository and would get deployed by default.  Excluding builtins would be an explicit decision to create a minimal interpreter.
+
+### User Defined Modules?
+
+We need to find good use cases for this first, but if modules were implemented I imagine stitch could support custom modules through shared libraries:
+
+```
+@import (@sharedlibname @scriptdir/mystitchplugins/foo) customFooFunc
+
+customFooFunc
+```
+
+Note that stitch is meant to call other "programs" so there would have to be good use cases that custom builtins enable that normal programs couldn't.  A custom builtin would have more information than an external program as it could access the object Types and the state of the interpreter. I imagine a custom module would look something like this:
+
+`stitchmodule.h`
 
 ```c
 #define STITCH_ABI_VERSION 3
@@ -26,11 +54,11 @@ struct stitch_loader {
 };
 ```
 
-`myplugin.c`
+`mymodule.c`
 ```c
-#include <stitchplugin.h>
+#include <stitchmodule.h>
 
-int stitch_load_plugins(int version, struct stitch_loader *loader)
+int stitch_init_module(int version, struct stitch_loader *loader)
 {
     if (!loader)
     {
@@ -42,28 +70,8 @@ int stitch_load_plugins(int version, struct stitch_loader *loader)
 }
 ```
 
-I should use the same API to load plugins both dynamically and statically (like kernel modules).  This would allow systems to configure stitch with as many or as little builtins as they want and also allow those builtins to be added dynamically at runtime.
+If stitch were to support something like this, then one idea would be to implement all (or most) builtins through this module interface.  This would allow a user to configure stitch with modules statically compiled into the interpreter and one that are dynamically loaded without changing the source code.
 
-### 5. Using builtins/plugins
-
-With this amount of configuration, there needs to be an easy way for a script to declare what builtins they need, and how to load them if necessary.  For this I imagine a builtin like `@import`
-
-```
-@import core
-@import os
-@import fs
-@import (@sharedlibname @scriptdir/mystitchplugins/foo)
-```
-
-Maybe selective imports as well like this:
-
-```
-@import path dirname join basename
-```
-
-With these combined features, maybe the language limits itself to only a few builtins, and the rest are imported?  This could remove the need for prefixing all the builtins with `@`, only the fundamental builtins need the prefix.
-
-Note that I would expect most "generally useful" builtins to be included in the `stitch` repository and would get deployed by default.  Excluding builtins would be an explicit decision to create a minimal interpreter.
 
 ### 6. Build Dependencies
 
