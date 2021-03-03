@@ -464,6 +464,8 @@ Node @< Node
 Node @> Node
 ```
 
+Note that binary expressions always return `Bool` values.  This means that if they appear inside an "inline command", then the return channel is already used up, so boolean expressions always disable capturing stdout when inside an inline command.  They also don't work with command modifiers like `@exitcode`, `@stderr`, `@multiline`, etc.
+
 ### Short Circuting
 
 If the final result of a binary expression has been determined before it has been fully evaluated, the language does not expand the rest of the expression.  Because of this, commands must be checked for binary operators before expanding them.

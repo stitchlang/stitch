@@ -14,21 +14,25 @@ class CommandTest:
         self.line = line
 
 class BoolTest(CommandTest):
-    def __init__(self, line, bool_result):
+    def __init__(self, line, expect):
         CommandTest.__init__(self, line)
-        self.bool_result = bool_result
+        self.expect = expect
+    def __repr__(self):
+        return "BoolTest line='{}' expect={}'".format(self.line, self.expect)
     def verify(self, result, test_line):
         if type(result) != prototype.Bool:
             sys.exit("{}({}): Error: expected a Bool but got {}".format(__file__, test_line, result))
-        if result.value != self.bool_result:
+        if result.value != self.expect:
             sys.exit("{}({}): Error: expected line to return {} but returned {}: '{}'".format(
-                __file__, test_line, self.bool_result, result.value, line))
+                __file__, test_line, self.expect, result.value, line))
 
 class ErrorTest(CommandTest):
     def __init__(self, line, error_type, msg):
         CommandTest.__init__(self, line)
         self.error_type = error_type
         self.msg = msg
+    def __repr__(self):
+        return "{}Test line='{}' msg='{}'".format(self.error_type.__name__, self.line, self.msg)
     def verify(self, result, test_line):
         if type(result) != self.error_type:
             sys.exit("{}({}): Error: expected a {} but got {}: '{}'".format(__file__, test_line, self.error_type.__name__, result, result))
@@ -43,6 +47,8 @@ class CommandResultTest(CommandTest):
         CommandTest.__init__(self, line)
         self.exitcode = exitcode
         self.stdout = stdout
+    def __repr__(self):
+        return "CommandResultTest line='{}', exitcode={}, stdout='{}'".format(self.line, self.exitcode, self.stdout)
     def verify(self, result, test_line):
         if type(result) != prototype.CommandResult:
             sys.exit("{}({}): Error: expected a CommandResult but got {}".format(__file__, test_line, result))
@@ -57,30 +63,40 @@ class CommandResultTest(CommandTest):
 def runTests(commands: List[CommandTest], test_line: int, verification_mode: bool):
     context = prototype.ScriptContext(False, __file__, SCRIPT_DIR, verification_mode)
     for cmd in commands:
+        stdout_builder = prototype.StringBuilder()
+        stderr_builder = prototype.StringBuilder()
         try:
-            result = prototype.runLine(context, cmd.line, print_trace=False, capture_stdout=True)
+            result = prototype.runLine(context, cmd.line, stdout_builder, stderr_builder)
         except prototype.SyntaxError as e:
             result = e
+
+        if type(result) == prototype.ExitCode:
+            result = prototype.CommandResult(result.value, stdout_builder.output, stderr_builder.output)
+
         cmd.verify(result, test_line)
 
 def getCallerLine():
     return inspect.getframeinfo(inspect.stack()[2][0]).lineno
 
 def testSyntaxError(line, msg):
-    print("testSyntaxError('{}', '{}')".format(line, msg))
-    runTests([ErrorTest(line, prototype.SyntaxError, msg)], getCallerLine(), verification_mode=True)
+    test = ErrorTest(line, prototype.SyntaxError, msg)
+    print("test {}".format(test))
+    runTests([test], getCallerLine(), verification_mode=True)
 
 def testSemanticError(line, msg):
-    print("testSemanticError('{}', '{}')".format(line, msg))
-    runTests([ErrorTest(line, prototype.SemanticError, msg)], getCallerLine(), verification_mode=True)
+    test = ErrorTest(line, prototype.SemanticError, msg)
+    print("{}".format(test))
+    runTests([test], getCallerLine(), verification_mode=True)
 
 def testAssertError(line, msg):
-    print("testAssertError('{}', '{}')".format(line, msg))
-    runTests([ErrorTest(line, prototype.AssertError, msg)], getCallerLine(), verification_mode=False)
+    test = ErrorTest(line, prototype.AssertError, msg)
+    print("{}".format(test))
+    runTests([test], getCallerLine(), verification_mode=False)
 
 def testExpression(line, expected):
-    print("testExpression('{}', {})".format(line, expected))
-    runTests([BoolTest(line, expected)], getCallerLine(), verification_mode=False)
+    test = BoolTest(line, expected)
+    print("{}".format(test))
+    runTests([test], getCallerLine(), verification_mode=False)
 
 def testCommands(commands, verification_mode: bool):
     print("testCommands(verification_mode={}):".format(verification_mode))
@@ -89,8 +105,9 @@ def testCommands(commands, verification_mode: bool):
     runTests(commands, getCallerLine(), verification_mode)
 
 def testCommand(line, exitcode, stdout):
-    print("testCommand('{}', exitcode={}, stdout='{}')".format(line, exitcode, stdout))
-    runTests([CommandResultTest(line, exitcode, stdout)], getCallerLine(), verification_mode=False)
+    test = CommandResultTest(line, exitcode, stdout)
+    print("{}".format(test))
+    runTests([test], getCallerLine(), verification_mode=False)
 
 def runStitchTests():
     print("test: running stitch-tests...")
@@ -113,15 +130,15 @@ def main():
     testSemanticError("@true dat", "unexpected Bool at the start of a command")
 
     testCommand('@echo', 0, "")
-    testCommand('@echo foo', 0, "foo")
-    testCommand('@echo "foo"', 0, "foo")
+    testCommand('@echo foo', 0, "foo\n")
+    testCommand('@echo "foo"', 0, "foo\n")
     testSyntaxError('@echo "foo', "string literal '\"foo' is missing the terminating '\"' character")
     testSyntaxError('@echo "01234567890123456789012345678',
                     "string literal '\"01234567890123456789012345678' is missing the terminating '\"' character")
     testSyntaxError('@echo "012345678901234567890123456789',
                     "string literal '\"01234567890123456789012345678[..snip..]' is missing the terminating '\"' character")
-    testCommand('@echo @"', 0, '"')
-    testCommand('@echo "#@$()"', 0, '#@$()')
+    testCommand('@echo @"', 0, '"\n')
+    testCommand('@echo "#@$()"', 0, '#@$()\n')
 
     # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -135,39 +152,45 @@ def main():
     testSemanticError("@emptyarray @and @true", "'@and' does not accept objects of type Array")
     testSemanticError("@true @and @emptyarray", "'@and' does not accept objects of type Array")
     testSemanticError("@false @and", "missing operand after '@and'")
-    testSemanticError("(true) @and", "missing operand after '@and'")
-    testSemanticError("(false) @and", "missing operand after '@and'")
+    testSemanticError("(true) @and", "'@and' does not accept objects of type String")
+    testSemanticError("(false) @and", "'@and' does not accept objects of type String")
     testSemanticError("false false @or", "unexpected '@or'")
-    testSemanticError("(false) @or", "missing operand after '@or'")
-    testSemanticError("(@multiline true) @or", "missing operand after '@or'")
+    testSemanticError("(false) @or", "'@or' does not accept objects of type String")
+    testSemanticError("(@multiline true) @or", "'@or' does not accept objects of type String")
     testSemanticError("(@and)", "unexpected '@and'")
     testSemanticError("(@and) @or", "unexpected '@and'")
-    testSemanticError("(false) @and", "missing operand after '@and'")
-    testSemanticError("(false) @and false false", "'@and' does not accept objects of type String")
-    testSemanticError("(false) @and (false) false", "expected '@and' operator but got token 'false'; commands must be wrapped with (...)")
-    testSemanticError("(false) @and (false) @or false", "'@and' and '@or' cannot be chained")
+    testSemanticError("@false @and false false", "'@and' does not accept objects of type String")
+    testSemanticError("@false @and @false false", "expected '@and' operator but got token 'false'; commands must be wrapped with (...)")
+    testSemanticError("@false @and @false @or @false", "'@and' and '@or' cannot be chained")
     testSemanticError("true @and true", "'@and' does not accept objects of type String")
-    testSemanticError("(true) @and true", "'@and' does not accept objects of type String")
+    testSemanticError("@true @and true", "'@and' does not accept objects of type String")
     testSemanticError("true @and (true)", "'@and' does not accept objects of type String")
-    testSemanticError("(false) @or (false) @and (false)", "'@or' and '@and' cannot be chained")
-    testSemanticError("(true) @or (true) @and (true)", "'@or' and '@and' cannot be chained")
-    testSemanticError("(true) @and (true) @or (true)", "'@and' and '@or' cannot be chained")
-    testSemanticError("(false) @or (false) @or false", "'@or' does not accept objects of type String")
+    testSemanticError("@false @or @false @and @false", "'@or' and '@and' cannot be chained")
+    testSemanticError("@true @or @true @and @true", "'@or' and '@and' cannot be chained")
+    testSemanticError("@true @and @true @or @true", "'@and' and '@or' cannot be chained")
+    testSemanticError("@false @or @false @or false", "'@or' does not accept objects of type String")
 
     # TODO: implement stderr error messages
     testCommand("false", 1, "")
-    testExpression("(false) @or (false)", False)
-    testExpression("(false) @or (false)", False)
-    testExpression("(false) @or (true)", True)
-    testExpression("(true) @or (@undefined)", True)
-    # TODO: implement stderr error messages
-    testSemanticError("(true) @and ($missing)", "'$missing' is undefined")
-    testExpression("(true) @and (false)", False)
-    testExpression("(true) @and (true)", True)
-    testExpression("(false) @or (false) @or (false)", False)
-    testExpression("(false) @or (false) @or (true)", True)
-    testExpression("(true) @and (true) @and (false)", False)
-    testExpression("(true) @and (true) @and (true)", True)
+    testSemanticError("@false @or (false)", "'@or' does not accept objects of type String")
+    testSemanticError("(false) @or @false", "'@or' does not accept objects of type String")
+    testSemanticError("(false) @or (false)", "'@or' does not accept objects of type String")
+    testSemanticError("(true) @or (true)", "'@or' does not accept objects of type String")
+    testSemanticError("(false) @or (true)", "'@or' does not accept objects of type String")
+    testExpression("(@exitcode false) @or (@exitcode false)", False)
+    testExpression("(@exitcode false) @or (@exitcode true)", True)
+    testExpression("@true @or @undefined", True)
+    testExpression("@true @or $undefined", True)
+    testExpression("(@exitcode true) @or (@exitcode @undefined)", True)
+    testSemanticError("@true @and ($missing)", "'$missing' is undefined")
+    testSemanticError("(true) @and (false)", "'@and' does not accept objects of type String")
+    testExpression("(@exitcode true) @and (@exitcode false)", False)
+    testSemanticError("(true) @and (true)", "'@and' does not accept objects of type String")
+    testExpression("(@exitcode true) @and (@exitcode true)", True)
+    testExpression("(@exitcode false) @or (@exitcode false) @or (@exitcode false)", False)
+    testExpression("(@exitcode false) @or (@exitcode false) @or (@exitcode true)", True)
+    testExpression("(@exitcode true) @and (@exitcode true) @and (@exitcode false)", False)
+    testExpression("(@exitcode true) @and (@exitcode true) @and (@exitcode true)", True)
 
     testExpression("@false @and @false", False)
     testExpression("@false @and @true", False)
@@ -179,14 +202,26 @@ def main():
     testExpression("@true @or @false", True)
     testExpression("@true @or @true", True)
 
+    testCommand("(@echo true)", 0, "")
+
     testSemanticError("$missing @and @true", "'$missing' is undefined")
-    testExpression("(@echo hello) @and @true", True)
-    testExpression("((@echo true)) @and @true", True)
+    testSemanticError("(@echo hello) @and @true", "'@and' does not accept objects of type String")
+    testExpression("(@exitcode @echo hello) @and @true", True)
+
+    testSemanticError("((@echo true)) @and @true", "'@and' does not accept objects of type String")
+    testExpression("(@exitcode (@echo true)) @and @true", True)
+
     testSemanticError("abc@false @and @true", "cannot coerce Bool to String")
     testSemanticError("abc@scriptfile @and @true", "'@and' does not accept objects of type String")
 
-    testExpression("((true) @and (true)) @and (true)", True)
-    testExpression("((true) @and (true)) @and ((true) @and (false))", False)
+    testSemanticError("@assert (@exitcode @true @and @true)", "@exitcode is not compatible with binary expressions")
+    # todo: update this test when @stderr is defined
+    testSemanticError("@assert (@stderr @true @and @true)", "'@stderr' is undefined")
+
+    testSemanticError("@assert (@exitcode @haveprog foo)", "@exitcode is not compatible with @haveprog")
+
+    testExpression("((@exitcode true) @and (@exitcode true)) @and (@exitcode true)", True)
+    testExpression("((@exitcode true) @and (@exitcode true)) @and ((@exitcode true) @and (@exitcode false))", False)
 
     testExpression("foo @eq foo", True)
     testExpression("foo @eq bar", False)
@@ -226,7 +261,7 @@ def main():
     testCommand("@set foo bar", 0, "")
     testSemanticError("@set @false bar", "@set requires a String for its 1st argument but got Bool")
     testSemanticError("@set @echo bar", "@set requires a String for its 1st argument but got Builtin")
-    testSemanticError("@set (@echo foo) bar", "@set requires a String for its 1st argument but got CommandResult")
+    testCommand("@set (@echo foo) bar", 0, "")
     testCommand("@set foo @false", 0, "")
 
     testSemanticError("@isfile", "@isfile accepts 1 argument but got 0")
@@ -237,6 +272,27 @@ def main():
         CommandResultTest("@assert $foo @eq bar", 0, ""),
         ErrorTest        ("@assert @not ($foo @eq bar)", prototype.AssertError, "@assert failed"),
     ], verification_mode=False)
+
+    #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    # TODO: test all the inline command prefixes
+    #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    testSemanticError("@exitcode true", "the @exitcode builtin is only supported within an (..inline command..)")
+    testSemanticError("@assert (@exitcode)", "@exitcode requires at least 1 argument")
+    testSemanticError("@assert (@exitcode @exitcode true)", "@exitcode was given more than once in the same inline command")
+    testSemanticError("@assert (@exitcode true @exitcode)", "builtin program '@exitcode' cannot be coerced to a String")
+    testSemanticError("@assert (@exitcode @true)", "unhandled Bool")
+    #testSemanticError("@assert (@exitcode @multiline true)", "")
+    testCommand("@assert (@exitcode true)", 0, "")
+    testCommand("@assert @not (@exitcode false)", 0, "")
+
+    testCommand("@echo hello", 0, "hello\n")
+    testCommand("@assert (@exitcode @echo hello)", 0, "hello\n")
+    # todo: test the same things but with a real external program, I could use the stitch intepreter itself...
+    testCommand("@assert (@exitcode @echo hello)", 0, "hello\n")
+    #testCommand("@assert ("" @eq (@stderr @echo hello))", 0, "hello")
+    #testCommand("@assert ("" @eq (@stderr @echo hello)", "hello")
 
 
     runStitchTests()

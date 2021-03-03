@@ -5,9 +5,9 @@ true
 @assert @not @false
 @assert @not @not @true
 @assert @false @or @true
-@assert (true) @and @true
-@assert (false) @or (false) @or (true)
-@assert (true) @and (true) @and (true)
+@assert (@exitcode true) @and @true
+@assert (@exitcode false) @or (@exitcode false) @or (@exitcode true)
+@assert (@exitcode true) @and (@exitcode true) @and (@exitcode true)
 
 @assert foo @eq foo
 @assert @not (foo @eq bar)
