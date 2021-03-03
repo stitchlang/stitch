@@ -445,6 +445,7 @@ class CommandContext:
             script: ScriptContext,
             parent: 'CommandContext',
             depth: int,
+            # TODO: remove me !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
             capture_stdout: bool,
             builtin_prefix_count: int,
             ambiguous_op: Union[None,str],
@@ -453,6 +454,7 @@ class CommandContext:
         self.script = script
         self.parent = parent
         self.depth = depth
+        # TODO: remove me !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         self.capture_stdout = capture_stdout
         self.builtin_prefix_count = builtin_prefix_count
         # true if the current command is inside an ambiguous operator (currently just @not)
@@ -472,6 +474,33 @@ class CommandContext:
             if not self.script.verification_mode:
                 print(output, end="\n" if (output[-1] != "\n") else "")
         return None
+
+#class StringHandler:
+#    pass
+class StringBuilder:#(StringHandler):
+    def __init__(self):
+        self.output = ""
+#    def combine(self, s):
+#        return self.output + s
+#    def handle(self, s):
+#        if len(s) > 0:
+#            self.output = s
+#            if s[-1] != "\n":
+#                self.output += "\n"
+#class ConsolePrinter(StringHandler):
+#    def __init__(self):
+#        pass
+#    def combine(self, s):
+#        return s
+#    def handle(self, s):
+#        print(s)
+
+class Capture:
+    def __init__(self, exitcode: bool, stdout: Union[None,StringBuilder], stderr: Union[None,StringBuilder]):
+        self.exitcode = exitcode
+        self.stdout = stdout
+        self.stderr = stderr
+
 
 class BuiltinMethods:
     def note(cmd_ctx: CommandContext, nodes: List[Node]):
@@ -671,25 +700,6 @@ def which(name):
                 return filename
     return None
 
-class StdoutCaptureHandler:
-    def __init__(self):
-        self.output = ""
-    def combine(self, s):
-        return self.output + s
-    def handle(self, s):
-        if len(s) > 0:
-            self.output = s
-            if s[-1] != "\n":
-                self.output += "\n"
-
-class StdoutPrintHandler:
-    def __init__(self):
-        pass
-    def combine(self, s):
-        return s
-    def handle(self, s):
-        print(s)
-
 class ExpandNodesResult:
     pass
 class ExpandNodes:
@@ -707,7 +717,7 @@ class ExpandNodes:
         def __init__(self, args: List[str]):
             self.args = args
 
-def expandNodes(cmd_ctx: CommandContext, nodes: List[Node]) -> Union[Error,ExpandNodesResult]:
+def expandNodes(cmd_ctx: CommandContext, capture: Capture, nodes: List[Node]) -> Union[Error,ExpandNodesResult]:
     assert(len(nodes) > 0)
 
     obj = expandNode(cmd_ctx, nodes[0])
@@ -821,7 +831,7 @@ def expandOneNodeToString(cmd_ctx: CommandContext, nodes: List[Node], builtin_na
         return UNKNOWN_STRING
     return SemanticError("'{}' expects String but got {}".format(builtin_name, obj.userTypeDescriptor()))
 
-def runCommandNodes(cmd_ctx: CommandContext, nodes: List[Node]) -> Union[Error,Bool,CommandResult,UnknownBool,UnknownCommandResult]:
+def runCommandNodes(cmd_ctx: CommandContext, capture: Capture, nodes: List[Node]) -> Union[Error,Bool,CommandResult,UnknownBool,UnknownCommandResult]:
     assert(len(nodes) > 0)
     # TODO: maybe enable printing this in verification_mode to assist
     #       in triaging SemanticErrors
@@ -842,7 +852,7 @@ def runCommandNodes(cmd_ctx: CommandContext, nodes: List[Node]) -> Union[Error,B
                 return error
         return CommandResult(0, cmd_ctx.handleBuiltinOutput(""), None, False)
 
-    result = expandNodes(cmd_ctx, nodes)
+    result = expandNodes(cmd_ctx, capture, nodes)
     if isinstance(result, Error):
         return result
     if type(result) == ExpandNodes.Builtin:
@@ -852,7 +862,7 @@ def runCommandNodes(cmd_ctx: CommandContext, nodes: List[Node]) -> Union[Error,B
     if type(result) == ExpandNodes.Bool:
         return SemanticError("unhandled Bool")
     assert(type(result) == ExpandNodes.ExternalProgram)
-    return runExternalProgram(cmd_ctx.script.verification_mode, cmd_ctx.capture_stdout, result.args)
+    return runExternalProgram(cmd_ctx.script.verification_mode, capture, result.args)
 
 def nodesToArgs(cmd_ctx: CommandContext, nodes: List[Node], args: List[str], start: int = 0) -> Error:
     for i, node in enumerate(nodes[start:], start=start):
@@ -956,7 +966,7 @@ def tryLookupBuiltinVar(script_ctx: ScriptContext, name: str):
     return None
 
 # returns an array of strings and builtin objects
-def expandNode(cmd_ctx: CommandContext, node: Node) -> StitchObject:
+def expandNode(cmd_ctx: CommandContext, capture: Capture, node: Node) -> StitchObject:
     if type(node) is NodeToken:
         return String(node.s)
 
@@ -1044,7 +1054,7 @@ def runLine(script_ctx: ScriptContext, line, print_trace, capture_stdout) -> Uni
         capture_stdout=capture_stdout,
         builtin_prefix_count=0,
         ambiguous_op=None
-    ), nodes)
+    ), Capture(False, True, False), nodes)
     if (isinstance(result, Error) or
         type(result) == Bool or
         type(result) == UnknownBool or

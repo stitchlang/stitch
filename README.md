@@ -101,8 +101,7 @@ stitch has a basic type system with the following object types:
 |----------|-------------|-----------------------------------------------------------------------------|
 | String   | `foo` `"bar"` | a sequence of characters, this is the default type of most tokens in stitch |
 | Array    | `@setarray foo args a b c` | an array of Strings |
-| CommandResult | `(@echo hello)` | an exitcode and optional Strings for stdout/stderr if they were captured |
-| Builtin  | `@echo` `@set`  | a "builtin program" that takes arguments and returns a CommandResult |
+| Builtin  | `@echo` `@set`  | a "builtin program" |
 | Bool     | `@true` | used by binary expressions like `@true @and @false` and with `@assert @true` |
 
 > NOTE: Internally I also use an Error object with subclasses for different kinds of errors.  Not sure if this will be exposed to stitch scripts yet.  I also have an object for BinaryOperator along with subclasses, also not sure if this will be exposed to stitch scripts.
@@ -176,7 +175,7 @@ Environment variables are accessed through the `env` scope.
 
 # Inline Commands
 
-"Inline Commands" are commands contained within other commands.  They are delimited by `(` parenthesis `)`.  Inline commands can return both `CommandResult` objects and `Bool` objects.  How the inline command is handled will depend on where it is being invoked.  If its result is coerced to a `String`, then its exitcode will be checked to have been `0` lest an error be thrown, then its `stdout` will be interpreted as the `String`.
+"Inline Commands" are commands contained within other commands.  They are delimited by `(` parenthesis `)`.  By default, inline commands return a `String` created from capturing stdout of the underlying command.  
 
 > NOTE: inline commands are executed within the current process environment, they are not executed in a subprocess
 
@@ -203,27 +202,51 @@ In general, inline commands are commonly used to return strings that don't conta
 @set myfile_contents (@multiline cat myfile)
 ```
 
-#### Idea, disable stdout capture when Bool expected?
+### Capturing exitcode and/or stderr
 
-I don't like that inline commands could be wasting memory and cpu cycles capturing stdout when it appears in a location where a `Bool` is expected and it's just going to get forwarded anyway.  We could make a rule that whenever an inline command appears in a context that requires a `Bool`, its stdout is not captured, however, I'm not sure I like this implicit difference in execution.  An alternative solution is to make this difference explicit.  This could be done by not allowing `CommandResult` objects to be implicitly converted to `Bool` objects.  Instead, a builtin can be used to perform this conversion, which would also trigger the command to be executed without capturing stdout.
-
-```sh
-@assert (grep foo bar) @and (grep bar foo)
-# this creates a SemanticError, cannot coerce CommandResult to Bool, use @tobool
-
-@assert (@tobool grep foo bar) @and (@tobool grep bar foo)
-# now it passes verification
-```
-
-Note that most inline commands don't get converted to a `Bool` like this so this syntax is not the norm.  This would also provide a syntax for setting a bool variable from an inline command:
+The following examples show how to prefix an inline command to change whether the exitcode, stdout and/or stderr are captured.
 
 ```sh
-@set matches (grep foo bar)
+$set foo (COMMAND)
+# exitcode: non-zero is fatal
+# stdout: captured
+# stderr: not captured
+# foo is a String of COMMAND's stdout
 
-# VS
+$set foo (@exitcode COMMAND)
+# exitcode: captured
+# stdout: not captured
+# stderr: not captured
+# foo is a Bool based on COMMAND's exit code, 0 (success) maps to true, and non-zero maps to false
 
-@set found (@tobool grep foo bar)
+# NOTE: maybe I add @exitcodeint for capturing the exitcode as a String?
+
+$set foo (@stderr COMMAND)
+# exitcode: non-zero is fatal
+# stdout: not captured
+# stderr: captured
+# foo is a String of COMMAND's stderr
+
+$set foo (@stdout @stderr COMMAND)
+# exitcode: non-zero is fatal
+# stdout: captured
+# stderr: captured
+# foo is a CommandResult object with the "out" field set to stdout and the "err" field set to stderr
+
+$set foo (@exitcode @stderr COMMAND)
+# exitcode: captured
+# stdout: not captured
+# stderr: captured
+# foo is a CommandResult object with the "exitcode" field set to the exit code and the "err" field set to stderr
+
+$set foo (@exitcode @stdout @stderr COMMAND)
+# exitcode: captured
+# stdout: captured
+# stderr: captured
+# foo is a CommandResult object with the "exitcode" field set to the exit code, the "out" code set to stdout and the "err" field set to stderr
 ```
+
+> NOTE: multiline is probably going to be incompatible with these variations since I think it will be more common to keep newlines when stderr is captured.  Note that enforcing a single line can also be done after the fact if wanted.  So right now if the interpreter were to see `(@multiline @stderr COMMAND)`, then it would assert a Semantic error saying `@multiline and @stderr are redundant`.
 
 # Examples
 
@@ -272,12 +295,12 @@ Builtin programs accept arguments that have been expanded to various levels:
 
 1. AstNodes
 2. ExpandNodesResult
-3. Objects (Bool, String, CommandResult, Array, etc)
+3. Objects (Bool, String, Array, etc)
 4. Strings
 
 At the lowest level 1 we have AstNodes.  These arguments are left in their unprocessed form where they have been categorized into Tokens, Variables and Inline Commands. Builtins like `@note`, `@multiline` and `@call` accept AstNodes.  Binary Operators also keep their operands in AstNode form to support "shortcircuting" where the right operand may not be expanded if the final result is already determined from the left operand (note: this is disabled in verification mode).
 
-Skipping past level 2 for now, we have level 3 "Objects" that are accepted by builtins like `@set`, which takes a `String` for its first argument, and either `String`, `Bool` or `CommandResult` for its second.
+Skipping past level 2 for now, we have level 3 "Objects" that are accepted by builtins like `@set`, which takes a `String` for its first argument, and either `String`, `Bool` for for its second.
 
 At the final level we have "Strings".  This is the same form that external programs accept and also builtins like `@echo`.
 
@@ -287,9 +310,8 @@ The following lists some of the Builtins and the argument form they take:
 @note AstNode...
 @echo String...
 
-# NOTE: set/settmp will coerce CommandResult object to Strings in the symbol table
-@set String (String|Bool|CommandResult)
-@settmp String (String|Bool|CommandResult) AstNode...
+@set String (String|Bool)
+@settmp String (String|Bool) AstNode...
 
 @multiline AstNode...
 @call String AstNode...
@@ -322,7 +344,7 @@ Currently `@assert` and `@not` take this form because it allows them to either i
 
 #### @multiline PROG ARGS...
 
-Modifies the CommandResult object of an inline command to accept multiple lines from stdout and disables stripping the trailing newline.
+Modifies an inline command to return multiple lines.
 
 #### @firstline/@lastline
 
@@ -424,11 +446,7 @@ grep foo bar @and $b
 (grep foo bar) @and $b
 ```
 
-Boolean binary operators like `@or` and `@and` can take a CommandResult object, and convert it to a Bool object based on it's exit code.
-
-When a binary operator receives a CommandResult object from an inline command, it can handle it differently depending on the operator.  For the Bool binary operators like `@or` and `@and`, it converts the exit code of the command to a `Bool` where `0` (success) becomes `true` and non-zero (error) becomes `false``.  In this case, since stdout is ignored, it is printed to the current stdout handler instead (or I might modify inline commands to know beforehand they are going to become `Bool` and never capture it in the first place).
-
-Currently there are only 2 binary operators: `@and` and `@or`.  Here are some more candidates:
+Currently we have a few binary operators, `@and`, `@or`, `@eq`, `@gt` and `@lt`.  Here are some more candidates:
 
 ```sh
 Node @equals Node
@@ -518,81 +536,6 @@ The ambiguity can be corrected with one of these 2 variations:
 @end
 ```
 
-## Use Cases
-
-> NOTE: this section is old and outdated
-
-```sh
-# returns a CommandResult "top-level handler" which causes a fatal error on non-zero exit code
-grep needle file
-
-# @if will accept both zero and non-zero exit codes from a CommandResult and use it to decide on the brancht to execute
-@if grep needle file
-    @echo found needle!
-@else
-    @echo did not find needle
-@end
-
-# unary operator example
-
-# applying a "test operator" to a CommandResult returns a Bool
-grep needle file
-@not grep needle file
-
-# both of the commands above would cause an "unhandle Bool" if they appeared at the top-level
-```
-
-So any command that is given to a "test operator" must bubble up to a control flow builtin like `@if`, `@while`.
-
-```sh
-@if @not grep needle file @and @not grep needle2 file
-    @echo both needles are not found
-@else
-    @echo at least one needle is present
-@end
-```
-
-So, unary operators are always higher precedence than binary operators.  What if we want to override that?
-
-```sh
-@if @not (grep needle file @and grep needle2 file)
-    @echo at least one needle is missing
-@else
-    @echo both needls are present
-@end
-```
-
-I think the example above just WORKS.  Inline commands take any Bool and propogate it up as a Bool.  If a Bool is attempted to be used as a string, it is an error, i.e.
-
-```sh
-ls (@not grep needle file)
-#
-# error: expected a string but got Bool
-#
-```
-
-What if we required parenthesis around binary operators?
-
-```sh
-# maybe this is an error?
-@not grep needle file @and grep needle2 file
-
-# need this
-(@not grep needle file) @and (grep needle2 file)
-```
-
-I think this makes things more clear and readable.  After a command is expanded, binary operators only support one object to their left and right.  If there are more then it's an error.  What about chaining binary operators?
-
-```sh
-# OK
-foo @and bar @and baz
-
-# This looks confusing
-foo @or bar @and baz
-```
-
-I think the right thing to do here is to only allow chaining binary operators if they are the same operator.
-
 # Grammar
 
 What I've got so far
@@ -614,28 +557,6 @@ Operand ::= '(' Command ')' | Argument
 ```
 
 > NOTE: "BinaryExpression" takes "Operand" instead of "Argument"  because these nodes are evaluated differently
-
-# Idea: stderr/exitcode
-
-How to handle return code and stdout/stderr?  I could have a CommandResult type of object.
-```sh
-#
-# @captureouts PROG ARGS...
-# @captureall     PROG ARGS...
-#
-# the @capture* builtins will run the program/args that follow, and instead of just returning stdout, it will return
-# an object.  @capturestreams will capture stdout and stderr via the "out" and "err" fields.  @captureall will also capture
-# the exit code in the field `code`, note that this overrides the default behavior of exiting on a non-zero exit code.
-
-@set some_program_result (@captureouts some-program)
-@echo the stdout of some_program_result is: $some_program_result.out
-@echo the stderr of some_program_result is: $some_program_result.err
-
-@set another_program_result (@captureouts another-program)
-@echo the stdout of another_program_result is: $another_program_result.out
-@echo the stderr of another_program_result is: $another_program_result.err
-@echo the exit code of another_program_result is: $another_program_result.code
-```
 
 # Idea: piping
 
