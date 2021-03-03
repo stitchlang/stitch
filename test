@@ -3,97 +3,94 @@ import sys
 import os
 import subprocess
 import inspect
+from typing import List, Dict, Union, Tuple
 
 import prototype
 
 SCRIPT_DIR = os.path.dirname(__file__)
 
-def testSyntaxError(line, msg):
-    lineno = inspect.getframeinfo(inspect.stack()[1][0]).lineno
+class CommandTest:
+    def __init__(self, line):
+        self.line = line
 
-    print("testSyntaxError('{}', '{}')".format(line, msg))
-    context = prototype.ScriptContext(True, __file__, SCRIPT_DIR, verification_mode=True)
-    try:
-        result = prototype.runLine(context, line, print_trace=False, capture_stdout=True)
-        sys.exit("{}({}): Error: expected a SyntaxError but got {}: '{}'".format(__file__, lineno, result, result.msg))
-    except prototype.SyntaxError as err:
-        if err.msg != msg:
-            print("{}({}): Error: syntax error message does not match expected:".format(__file__, lineno))
-            print("expected: {}".format(msg))
-            print("actual  : {}".format(err.msg))
+class BoolTest(CommandTest):
+    def __init__(self, line, bool_result):
+        CommandTest.__init__(self, line)
+        self.bool_result = bool_result
+    def verify(self, result, test_line):
+        if type(result) != prototype.Bool:
+            sys.exit("{}({}): Error: expected a Bool but got {}".format(__file__, test_line, result))
+        if result.value != self.bool_result:
+            sys.exit("{}({}): Error: expected line to return {} but returned {}: '{}'".format(
+                __file__, test_line, self.bool_result, result.value, line))
+
+class ErrorTest(CommandTest):
+    def __init__(self, line, error_type, msg):
+        CommandTest.__init__(self, line)
+        self.error_type = error_type
+        self.msg = msg
+    def verify(self, result, test_line):
+        if type(result) != self.error_type:
+            sys.exit("{}({}): Error: expected a {} but got {}: '{}'".format(__file__, test_line, self.error_type.__name__, result, result))
+        if result.msg != self.msg:
+            print("{}({}): Error: semantic error message does not match expected:".format(__file__, test_line))
+            print("expected: {}".format(self.msg))
+            print("actual  : {}".format(result.msg))
             sys.exit(1)
 
-def testError(error_type, line, msg):
-    lineno = inspect.getframeinfo(inspect.stack()[2][0]).lineno
+class CommandResultTest(CommandTest):
+    def __init__(self, line, exitcode, stdout):
+        CommandTest.__init__(self, line)
+        self.exitcode = exitcode
+        self.stdout = stdout
+    def verify(self, result, test_line):
+        if type(result) != prototype.CommandResult:
+            sys.exit("{}({}): Error: expected a CommandResult but got {}".format(__file__, test_line, result))
+        if result.exitcode != self.exitcode:
+            sys.exit("{}({}): Error: expected Command to return exitcode {} but got {}".format(
+                __file__, test_line, self.exitcode, result.exitcode))
+        if result.stdout != self.stdout:
+            sys.exit("{}({}): Error: expected Command to print '{}' but got '{}'".format(
+                __file__, test_line, self.stdout, result.stdout))
 
-    print("test{}('{}', '{}')".format(error_type.__name__, line, msg))
-    context = prototype.ScriptContext(True, __file__, SCRIPT_DIR, verification_mode=True)
-    result = prototype.runLine(context, line, print_trace=False, capture_stdout=True)
-    if type(result) != error_type:
-        sys.exit("{}({}): Error: expected a {} but got {}: '{}'".format(__file__, lineno, error_type.__name__, result, result))
 
-    if result.msg != msg:
-        print("{}({}): Error: semantic error message does not match expected:".format(__file__, lineno))
-        print("expected: {}".format(msg))
-        print("actual  : {}".format(result.msg))
-        sys.exit(1)
+def runTests(commands: List[CommandTest], test_line: int, verification_mode: bool):
+    context = prototype.ScriptContext(False, __file__, SCRIPT_DIR, verification_mode)
+    for cmd in commands:
+        try:
+            result = prototype.runLine(context, cmd.line, print_trace=False, capture_stdout=True)
+        except prototype.SyntaxError as e:
+            result = e
+        cmd.verify(result, test_line)
+
+def getCallerLine():
+    return inspect.getframeinfo(inspect.stack()[2][0]).lineno
+
+def testSyntaxError(line, msg):
+    print("testSyntaxError('{}', '{}')".format(line, msg))
+    runTests([ErrorTest(line, prototype.SyntaxError, msg)], getCallerLine(), verification_mode=True)
 
 def testSemanticError(line, msg):
-    testError(prototype.SemanticError, line, msg)
+    print("testSemanticError('{}', '{}')".format(line, msg))
+    runTests([ErrorTest(line, prototype.SemanticError, msg)], getCallerLine(), verification_mode=True)
 
 def testAssertError(line, msg):
-    testError(prototype.AssertError, line, msg)
-
-def testRunError(line, stderr):
-    lineno = inspect.getframeinfo(inspect.stack()[1][0]).lineno
-
-    print("testRunError('{}', '{}')".format(line, stderr))
-    context = prototype.ScriptContext(False, __file__, SCRIPT_DIR, verification_mode=False)
-    result = prototype.runLine(context, line, print_trace=False, capture_stdout=True)
-    if type(result) != prototype.CommandResult:
-        sys.exit("{}({}): Error: expected a CommandResult but got {}".format(__file__, lineno, result))
-
-    if result.exitcode == 0:
-        sys.exit("{}({}): Error: expected line to fail but it passed: '{}'".format(line))
-
-    if len(result.stdout) > 0:
-        sys.exit("{}({}): this code that failed unexpectedly printed to stdout: {}".format(result.stdout))
-
-    print("TODO: verify stderr!!!!")
-    #    print("{}({}): Error: semantic error message does not match expected:".format(__file__, lineno))
-    #    print("expected: {}".format(msg))
-    #    print("actual  : {}".format(result.msg))
-    #    sys.exit(1)
+    print("testAssertError('{}', '{}')".format(line, msg))
+    runTests([ErrorTest(line, prototype.AssertError, msg)], getCallerLine(), verification_mode=False)
 
 def testExpression(line, expected):
-    lineno = inspect.getframeinfo(inspect.stack()[1][0]).lineno
-
     print("testExpression('{}', {})".format(line, expected))
-    context = prototype.ScriptContext(False, __file__, SCRIPT_DIR, verification_mode=False)
-    result = prototype.runLine(context, line, print_trace=False, capture_stdout=True)
-    if type(result) != prototype.Bool:
-        sys.exit("{}({}): Error: expected a Bool but got {}".format(__file__, lineno, result))
+    runTests([BoolTest(line, expected)], getCallerLine(), verification_mode=False)
 
-    if result.value != expected:
-        sys.exit("{}({}): Error: expected line to return {} but returned {}: '{}'".format(
-            __file__, lineno, expected, result.value, line))
+def testCommands(commands, verification_mode: bool):
+    print("testCommands(verification_mode={}):".format(verification_mode))
+    for cmd in commands:
+        print("    {}".format(cmd))
+    runTests(commands, getCallerLine(), verification_mode)
 
 def testCommand(line, exitcode, stdout):
-    lineno = inspect.getframeinfo(inspect.stack()[1][0]).lineno
-
     print("testCommand('{}', exitcode={}, stdout='{}')".format(line, exitcode, stdout))
-    context = prototype.ScriptContext(False, __file__, SCRIPT_DIR, verification_mode=False)
-    result = prototype.runLine(context, line, print_trace=False, capture_stdout=True)
-    if type(result) != prototype.CommandResult:
-        sys.exit("{}({}): Error: expected a CommandResult but got {}".format(__file__, lineno, result))
-
-    if result.exitcode != exitcode:
-        sys.exit("{}({}): Error: expected Command to return exitcode {} but got {}".format(
-            __file__, lineno, exitcode, result.exitcode))
-    if result.stdout != stdout:
-        sys.exit("{}({}): Error: expected Command to print '{}' but got '{}'".format(
-            __file__, lineno, stdout, result.stdout))
-
+    runTests([CommandResultTest(line, exitcode, stdout)], getCallerLine(), verification_mode=False)
 
 def runStitchTests():
     print("test: running stitch-tests...")
@@ -158,7 +155,7 @@ def main():
     testSemanticError("(false) @or (false) @or false", "'@or' does not accept objects of type String")
 
     # TODO: implement stderr error messages
-    testRunError("false", "")
+    testCommand("false", 1, "")
     testExpression("(false) @or (false)", False)
     testExpression("(false) @or (false)", False)
     testExpression("(false) @or (true)", True)
@@ -234,6 +231,13 @@ def main():
 
     testSemanticError("@isfile", "@isfile accepts 1 argument but got 0")
     testSemanticError("@isfile foo bar", "@isfile accepts 1 argument but got 2")
+
+    testCommands([
+        CommandResultTest("@set foo bar", 0, ""),
+        CommandResultTest("@assert $foo @eq bar", 0, ""),
+        ErrorTest        ("@assert @not ($foo @eq bar)", prototype.AssertError, "@assert failed"),
+    ], verification_mode=False)
+
 
     runStitchTests()
 
