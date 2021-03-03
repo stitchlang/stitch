@@ -165,12 +165,22 @@ Note that arrays cannot be used within another string.  They must be expanded on
 
 # Environment variables:
 
-Environment variables are accessed through the `env` scope.
+This is subject to change, but for now I'm just using a simple builtin to get/set environment variables:
 
-```sh
-@env.VAR
+```
+@echo your PATH is (@env PATH)
 
-@set env.VAR VALUE
+@setenv PATH (@env PATH):/home/mycoolprograms/bin
+```
+
+I've chosen this syntax for now because it requires no syntax changes and is simple to implement through a couple of new builtins.  The following shows some more ideas that could be done that require new syntax or new semantics that aren't implemented yet.
+
+```
+@echo your PATH is @env.PATH
+@echo your PATH is $$PATH
+@echo your PATH is $%PATH
+
+@set @env.PATH ...
 ```
 
 # Inline Commands
