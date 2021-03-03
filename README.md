@@ -43,7 +43,7 @@ Char | Description
 -----|-------------
 `#`  | a single-line comment, escape with `@#`
 `@`  | start a builtin expression and/or access a builtin object, escape with `@@`
-`$`  | access a user object `@$`
+`$`  | access a user object, escape with `@$`
 `"`  | delimits a string literal, escape with `@"`
 `(`  | start an inline command, escape with `@(`
 `)`  | ends an inline command, escape with `@)`
