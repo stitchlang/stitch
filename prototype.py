@@ -397,6 +397,10 @@ class MissingProgramError(Error):
 class UnexpectedMultilineError(Error):
     def __init__(self, stdout):
         Error.__init__(self, "missing '@multiline', got this multiline output\n----\n{}----\n".format(stdout))
+class UndefinedEnvironmentVariableError(Error):
+    def __init__(self, name):
+        Error.__init__(self, "undefined environment variable '{}'".format(name))
+        self.name = name
 
 # These ExitCode and UnknownExitCode types are currently only used internally
 class ExitCode:
@@ -526,7 +530,55 @@ class BuiltinMethods:
             return is_unknown
         #print("DEBUG: settmp '{}' to '{}'".format(varname, value))
         return runCommandNodes(cmd_ctx.nextBuiltin(ambiguous_op=None), nodes[2:])
-
+    def setenv(cmd_ctx: CommandContext, nodes: List[Node]):
+        if len(nodes) != 2:
+            return SemanticError("@setenv expects 2 arguments but got {}".format(len(nodes)))
+        name, value = expandSetArgsCommon(cmd_ctx, nodes[0], nodes[1], "@setenv")
+        if isinstance(name, Error):
+            return name
+        if type(value) == String:
+            is_unknown = False
+        elif type(value) == UNKNOWN_STRING:
+            is_unknown = True
+        else:
+            return SemanticError("@setenv requires a String for its 2nd argument but got {}".format(value.userTypeDescriptor()))
+        value = value.value
+        if not cmd_ctx.script.verification_mode:
+            os.environ[name] = value
+        return UNKNOWN_EXIT_CODE if is_unknown else ExitCode(0)
+    def unsetenv(cmd_ctx: CommandContext, nodes: List[Node]):
+        if len(nodes) != 1:
+            return SemanticError("@unsetenv expects 1 argument but got {}".format(len(nodes)))
+        name = expandNode(cmd_ctx, nodes[0])
+        if isinstance(name, Error):
+            return name
+        if type(name) == UnknownString:
+            return UNKNOWN_EXIT_CODE
+        if type(name) != String:
+            return SemanticError("@unsetenv requires a String but got {}".format(name.userTypeDescriptor()))
+        name = name.value
+        if not name in os.environ:
+            return UndefinedEnvironmentVariableError(name)
+        del os.environ[name]
+        return ExitCode(0)
+    def env(cmd_ctx: CommandContext, nodes: List[Node]):
+        if len(nodes) != 1:
+            return SemanticError("@env expects 1 argument but got {}".format(len(nodes)))
+        name = expandNode(cmd_ctx, nodes[0])
+        if isinstance(name, Error):
+            return name
+        if type(name) == UnknownString:
+            return UNKNOWN_EXIT_CODE
+        if type(name) != String:
+            return SemanticError("@env requires a String but got {}".format(name.userTypeDescriptor()))
+        if cmd_ctx.script.verification_mode:
+            return UNKNOWN_EXIT_CODE
+        name = name.value
+        value = os.environ.get(name)
+        if value == None:
+            return UndefinedEnvironmentVariableError(name)
+        cmd_ctx.capture.stdout.handle(value)
+        return ExitCode(0)
     def multiline(cmd_ctx: CommandContext, nodes: List[Node]):
         if len(nodes) == 0:
             return SemanticError("@multiline requires at least 1 argument")
@@ -646,15 +698,22 @@ def operandToBool(op, operand) -> Union[Error,Bool,UnknownBool]:
         return UNKNOWN_BOOL
     return opInvalidTypeError(op, operand)
 
-def expandSetArgs(cmd_ctx: CommandContext, arg1: Node, arg2: Node, builtin_name: str, var_map: Dict[str,StitchObject]) -> Union[Error,bool]:
+def expandSetArgsCommon(cmd_ctx: CommandContext, arg1: Node, arg2: Node, builtin_name: str) -> Tuple[Union[Error,str],Union[None,StitchObject]]:
     name = expandNode(cmd_ctx, arg1)
     if isinstance(name, Error):
-        return name
+        return name, None
     if type(name) != String:
-        return SemanticError("{} requires a String for its 1st argument but got {}".format(builtin_name, name.userTypeDescriptor()))
+        return SemanticError("{} requires a String for its 1st argument but got {}".format(builtin_name, name.userTypeDescriptor())), None
+    name = name.value
     value = expandNode(cmd_ctx, arg2)
     if isinstance(value, Error):
-        return value
+        return value, None
+    return name, value
+
+def expandSetArgs(cmd_ctx: CommandContext, arg1: Node, arg2: Node, builtin_name: str, var_map: Dict[str,StitchObject]) -> Union[Error,bool]:
+    name, value = expandSetArgsCommon(cmd_ctx, arg1, arg2, builtin_name)
+    if isinstance(name, Error):
+        return name
 
     if ((type(value) == String) or
         (type(value) == Bool)):
@@ -664,9 +723,9 @@ def expandSetArgs(cmd_ctx: CommandContext, arg1: Node, arg2: Node, builtin_name:
         is_unknown = True
     else:
         return SemanticError("{} requires a String or Bool for its 2nd argument but got {}".format(
-            builtin_name, value.userTypeDescriptor()))
+            builtin_name, value.userTypeDescriptor())), None
 
-    var_map[name.value] = value
+    var_map[name] = value
     return is_unknown
 
 class CompareOp:
@@ -689,6 +748,9 @@ builtin_objects = {
     "if": Builtin("if_"),
     "end": Builtin("end"),
     "haveprog": Builtin("haveprog"),
+    "setenv": Builtin("setenv"),
+    "unsetenv": Builtin("unsetenv"),
+    "env": Builtin("env"),
     "false": BOOL_FALSE,
     "true": BOOL_TRUE,
     "not": Builtin("not_"),
