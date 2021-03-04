@@ -68,7 +68,8 @@ def skipWhitespace(src, i):
 def preview(s, max_len):
     cutoff = s.find("\n")
     if cutoff == -1:
-        cutoff = min(len(s), max_len)
+        cutoff = len(s)
+    cutoff = min(len(s), max_len)
     return s[:cutoff] + ("[..snip..]" if (len(s) > cutoff) else "")
 
 class SyntaxError(Exception):
