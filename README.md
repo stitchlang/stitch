@@ -165,15 +165,39 @@ Note that arrays cannot be used within another string.  They must be expanded on
 
 # Environment variables:
 
-This is subject to change, but for now I'm just using a simple builtin to get/set environment variables:
+This is subject to change, but for now I've just added some builtins to manage environment variables:
 
-```
+```sh
+#
+# @env VARNAME
+#
+#     return the value of environment variable VARNAME, if VARNAME is not set then an error is thrown
+#
 @echo your PATH is (@env PATH)
 
+#
+# @setenv VARNAME VALUE
+#
+#    set environment variable VARNAME
+#
 @setenv PATH (@env PATH):/home/mycoolprograms/bin
+
+#
+# @unsetenv VARNAME
+#
+#    unset environment variable VARNAME
+#
+@unsetenv PATH
+
+#
+# @envdefault VARNAME DEFAULT_VALUE
+#
+#    returns the value of environment variable VARNAME if it exists, otherwise, returns DEFAULT_VALUE
+#
+@setenv PATH (@envdefault PATH /bin:/usr/bin)
 ```
 
-I've chosen this syntax for now because it requires no syntax changes and is simple to implement through a couple of new builtins.  The following shows some more ideas that could be done that require new syntax or new semantics that aren't implemented yet.
+I've chosen to use builtins for the time being instead of adding extra syntax because builtins are easy to add/experiment with.  The following shows some more ideas that could be done that require new syntax or new semantics that aren't implemented yet.
 
 ```
 @echo your PATH is @env.PATH

@@ -259,6 +259,27 @@ class Array(StitchObject):
     def userTypeDescriptor():
         return "Array"
 
+# an unknown value, this is used during verification
+class Unknown(StitchObject):
+    def __init__(self, stitch_type):
+        self.stitch_type = stitch_type
+
+class UnknownBool(Unknown):
+    def __init__(self):
+        Unknown.__init__(self, Bool)
+    @staticmethod
+    def userTypeDescriptor():
+        return "Bool"
+UNKNOWN_BOOL = UnknownBool()
+
+class UnknownString(Unknown):
+    def __init__(self):
+        Unknown.__init__(self, String)
+    @staticmethod
+    def userTypeDescriptor():
+        return "String"
+UNKNOWN_STRING = UnknownString()
+
 class BinaryOperator(StitchObject):
     def __init__(self, name):
         self.name = name
@@ -280,7 +301,7 @@ class ChainableBinaryOperator(BinaryOperator):
 class AndOperator(ChainableBinaryOperator):
     def __init__(self):
         ChainableBinaryOperator.__init__(self, "and")
-    def initialValue(self, operand):
+    def initialValue(self, operand: StitchObject):
         return operandToBool(self, operand)
     def apply(self, verification_mode: bool, left: Bool, right: StitchObject):
         assert(verification_mode or left.value)
@@ -309,11 +330,18 @@ class EqOperator(BinaryOperator):
     def initialValue(self, operand):
         if isinstance(operand, String):
             return operand
+        if isinstance(operand, UnknownString):
+            return UNKNOWN_STRING
         return opInvalidTypeError(self, operand)
     def apply(self, verification_mode: bool, left, right: StitchObject):
-        if isinstance(right, String):
-            return BOOL_TRUE if (left.value == right.value) else BOOL_FALSE
-        return opInvalidTypeError(self, right)
+        if isinstance(left, String):
+            if isinstance(right, String):
+                return BOOL_TRUE if (left.value == right.value) else BOOL_FALSE
+            if isinstance(right, UnknownString):
+                return UNKNOWN_STRING
+            return opInvalidTypeError(self, right)
+        assert(isinstance(left, UnknownString))
+        return UNKNOWN_BOOL
 class CompareOperator(BinaryOperator):
     def __init__(self, name, func):
         BinaryOperator.__init__(self, name)
@@ -350,27 +378,6 @@ class CommandResult(StitchObject):
     def __repr__(self):
         return "CommandResult(exit={},stderr='{}',stdout='{}')".format(
             self.exitcode, self.stderr, self.stdout)
-
-# an unknown value, this is used during verification
-class Unknown(StitchObject):
-    def __init__(self, stitch_type):
-        self.stitch_type = stitch_type
-
-class UnknownBool(Unknown):
-    def __init__(self):
-        Unknown.__init__(self, Bool)
-    @staticmethod
-    def userTypeDescriptor():
-        return "Bool"
-UNKNOWN_BOOL = UnknownBool()
-
-class UnknownString(Unknown):
-    def __init__(self):
-        Unknown.__init__(self, String)
-    @staticmethod
-    def userTypeDescriptor():
-        return "String"
-UNKNOWN_STRING = UnknownString()
 
 class UnknownCommandResult(Unknown):
     def __init__(self):
@@ -567,7 +574,8 @@ class BuiltinMethods:
         name, value = pair
         assert(value is not None)
         if isinstance(value, String):
-            os.environ[name] = value.value
+            if not cmd_ctx.script.verification_mode:
+                os.environ[name] = value.value
             return ExitCode(0)
         if isinstance(value, UnknownString):
             return UNKNOWN_EXIT_CODE
@@ -583,9 +591,10 @@ class BuiltinMethods:
             return UNKNOWN_EXIT_CODE
         if not isinstance(name, String):
             return SemanticError("@unsetenv requires a String but got {}".format(name.userTypeDescriptor()))
-        if not name.value in os.environ:
-            return UndefinedEnvironmentVariableError(name.value)
-        del os.environ[name.value]
+        if not cmd_ctx.script.verification_mode:
+            if not name.value in os.environ:
+                return UndefinedEnvironmentVariableError(name.value)
+            del os.environ[name.value]
         return ExitCode(0)
     @staticmethod
     def env(cmd_ctx: CommandContext, nodes: List[Node]):
@@ -604,6 +613,34 @@ class BuiltinMethods:
         if value is None:
             return UndefinedEnvironmentVariableError(name.value)
         cmd_ctx.capture.stdout.handle(value)
+        return ExitCode(0)
+    @staticmethod
+    def envdefault(cmd_ctx: CommandContext, nodes: List[Node]):
+        if len(nodes) != 2:
+            return SemanticError("@envdefault expects 2 arguments but got {}".format(len(nodes)))
+        name = expandNode(cmd_ctx, nodes[0])
+        if isinstance(name, Error):
+            return name
+        if not isinstance(name, String) and not isinstance(name, UnknownString):
+            return SemanticError("@envdefault requires a String for its first argument but got {}".format(name.userTypeDescriptor()))
+        if not cmd_ctx.script.verification_mode:
+            assert(isinstance(name, String))
+            env_value = os.environ.get(name.value)
+            if env_value:
+                cmd_ctx.capture.stdout.handle(env_value)
+                return ExitCode(0)
+
+        # NOTE: we only expand the default value if the environment variable does not exist
+        default = expandNode(cmd_ctx, nodes[1])
+        if isinstance(default, Error):
+            return default
+        if not isinstance(default, String) and not isinstance(default, UnknownString):
+            return SemanticError("@envdefault requires a String for its second argument but got {}".format(default.userTypeDescriptor()))
+        if cmd_ctx.script.verification_mode:
+            return UNKNOWN_EXIT_CODE
+        assert(isinstance(name, String))
+        assert(isinstance(default, String))
+        cmd_ctx.capture.stdout.handle(default.value)
         return ExitCode(0)
     @staticmethod
     def multiline(cmd_ctx: CommandContext, nodes: List[Node]):
@@ -735,10 +772,11 @@ class BuiltinMethods:
             return SemanticError("'@haveprog' expects 1 arg but got {}".format(len(args)))
         return BOOL_TRUE if which(args[0]) else BOOL_FALSE
 
-def opInvalidTypeError(op, operand):
+def opInvalidTypeError(op: BinaryOperator, operand: StitchObject):
+    #raise Exception("'{}' does not accept objects of type {}".format(op, operand.userTypeDescriptor()))
     return SemanticError("'{}' does not accept objects of type {}".format(op, operand.userTypeDescriptor()))
 
-def operandToBool(op, operand) -> Union[Error,Bool,UnknownBool]:
+def operandToBool(op: BinaryOperator, operand: StitchObject) -> Union[Error,Bool,UnknownBool]:
     if isinstance(operand, Error):
         return operand
     if isinstance(operand, Bool):
@@ -798,6 +836,7 @@ builtin_objects = {
     "setenv": Builtin("setenv"),
     "unsetenv": Builtin("unsetenv"),
     "env": Builtin("env"),
+    "envdefault": Builtin("envdefault"),
     "false": BOOL_FALSE,
     "true": BOOL_TRUE,
     "not": Builtin("not_"),
@@ -949,14 +988,6 @@ def expandOneNodeToString(cmd_ctx: CommandContext, nodes: List[Node], builtin_na
 
 def runCommandNodes(cmd_ctx: CommandContext, nodes: List[Node]) -> Union[Error,Bool,ExitCode,UnknownBool,UnknownExitCode]:
     assert(len(nodes) > 0)
-    # TODO: maybe enable printing this in verification_mode to assist
-    #       in triaging SemanticErrors
-    if not cmd_ctx.script.verification_mode and cmd_ctx.builtin_prefix_count == 0:
-        # todo: is ("+" * (depth+1)) too inneficient?
-        msg = "{} {}".format("+" * (cmd_ctx.depth+1), " ".join([n.src for n in nodes]))
-        # NOTE: ignore capture_stdout, just always print to console for now
-        print(msg, file=sys.stderr)
-
     # handle @end if we are disabled
     if not cmd_ctx.script.blockStack[-1].enabled:
         first = nodes[0]
@@ -967,6 +998,14 @@ def runCommandNodes(cmd_ctx: CommandContext, nodes: List[Node]) -> Union[Error,B
             if error:
                 return error
         return ExitCode(0)
+
+    # TODO: maybe enable printing this in verification_mode to assist
+    #       in triaging SemanticErrors
+    if not cmd_ctx.script.verification_mode and cmd_ctx.builtin_prefix_count == 0:
+        # todo: is ("+" * (depth+1)) too inneficient?
+        msg = "{} {}".format("+" * (cmd_ctx.depth+1), " ".join([n.src for n in nodes]))
+        # NOTE: ignore capture_stdout, just always print to console for now
+        print(msg, file=sys.stderr)
 
     result = expandNodes(cmd_ctx, nodes)
     if isinstance(result, Error):

@@ -1,0 +1,594 @@
+#!/usr/bin/env stitch
+# This tool is ported from https://github.com/bl0nd/chive/blob/master/chive
+# chive - Variant switcher
+
+@set prog_name chive
+@set version 0.1.0
+@setenv EDITOR (@envdefault EDITOR vi)
+
+@setenv XDG_CONFIG_HOME (@envdefault XDG_CONFIG_HOME (@env HOME)/.config)
+@set config_dir (@env XDG_CONFIG_HOME)/$prog_name
+
+# Speed up script by not using unicode.
+@setenv LC_ALL C
+@setenv LANG C
+
+
+# Print out help message and exit
+#usage() {
+#    printf '%s\n' "\
+#usage: chive [OPTION ...] [TARGET | VARIANT ...]
+#
+#Options:
+#
+#   -t, --target  TARGET ...            add targets
+#   -v, --variant [TARGET] VARIANT ...  add variants
+#   -e, --edit    [TARGET]              edit variants
+#   -d, --delete                        delete targets and variants
+#
+#   --help                              show version information of $prog_name
+#   --version                           show this help and exit"
+#    exit
+#}
+#
+#
+## Exit with an error
+#die() {
+#    printf 'error: %s\n' "$1" 1>&2
+#    exit 1
+#}
+#
+#
+## Colors the contents of its STDIN like so:
+##
+##  * Line characters: white
+##  * All other characters: blue
+##
+## This is typically used for the `tree` command, but is also used for `ls` to
+## color the filenames.
+#color_listing() {
+#    GREP_COLORS='sl=1;30:ms=01;34' grep --color '[^├─│└─]'
+#}
+#
+#
+## Outputs the final component of a file path passed to its STDIN
+#pathname() {
+#    awk -F/ '{print $NF}'
+#}
+#
+#
+## Checks to see if an element is in an array
+#in_array() {
+#    local arr=("${!1}")
+#    local val="$2"
+#
+#    for elem in "${arr[@]}"; do
+#        [[ "$elem" == "$val" ]] && return 0
+#    done
+#
+#    return 1
+#}
+#
+#
+## Does a general check on target and variant names
+#check_name() {
+#    if [[ ! "$1" =~ ^[[:alnum:]](.*) ]]; then
+#        die "targets and variants may only contain letters, numbers, \"_\", or \"-\""
+#    elif [[ ! "$1" =~ ^([[:alnum:]]+[_-]*)*$ ]]; then
+#        die "targets and variants must start with a letter or number"
+#    fi
+#}
+#
+#
+## Trim leading and trailing blank lines
+#no_file_blanks() {
+#    tac "$1" | sed '/./,$!d' | tac | sed '/./,$!d'
+#}
+#
+#
+## Lists out variants in FZF
+#v_fzf() {
+#    local chosen height rows cmd="$2" opts="$3"
+#    local arr=("${!1}") copy=("${arr[@]}")
+#
+#    for i in "${!copy[@]}"; do
+#        # If --edit was specified, use fzf to show relevant variants
+#        rows="$(tr ' ' '\n' <<< "${copy[@]}" | awk 'NF')"
+#        height=$(($(wc -l <<< "$rows") + 2))
+#        chosen="$(fzf -0 --height="$height" <<< "$rows")"
+#
+#        (( "${#chosen}" == 0 )) && break
+#
+#        # Edit variant
+#        if [[ -n "$opts" ]]; then
+#            "$cmd" "$opts" "$config_dir/$chosen"
+#        else
+#            "$cmd" "$config_dir/$chosen"
+#        fi
+#
+#        # Remove already selected entries from listing
+#        copy=( "${copy[@]/"$chosen"}" )
+#    done
+#}
+#
+#
+## Add target files
+#t_add() {
+#    local targets=() t_paths=() new_targets=() v_all_copy=()
+#    local cfg i line name old path pattern
+#
+#    # Exit if no targets are specified
+#    (( "$#" == 0 )) && die "no targets specified"
+#
+#    # Read arguments into array
+#    IFS=' ' read -r -a targets <<< "$@"
+#
+#    # Store STDIN data, if any
+#    if ! test -t 0; then
+#        while read -r line; do
+#            t_paths+=("$line")
+#        done
+#    fi
+#
+#    # Add targets
+#    for i in "${!targets[@]}"; do
+#        name="${targets[i]}"
+#        cfg="$config_dir/$name/.config"
+#
+#        # reset
+#        new=0
+#
+#        check_name "$name"
+#
+#        IFS=' ' read -r -a v_all_copy <<< "${ALL_VARIANTS[@]//*\//}"
+#        if in_array v_all_copy[@] "$name"; then
+#            die "\"$name\" is an existing variant"
+#        fi
+#
+#        # Create target directory and config file
+#        [[ ! -d "$config_dir/$name" ]] && {
+#            mkdir -p "$config_dir/$name"
+#            touch "$cfg"
+#            new_targets+=("$name")
+#        }
+#
+#        if (( "${#t_paths[@]}" > 0 )); then
+#            # Handle custom target paths
+#            old="$(sha1sum "$cfg" | cut -d' ' -f1)"
+#
+#            # If targets > paths, use the last path for any remaining targets
+#            (( "$i" < "${#t_paths[@]}" )) && path="${t_paths[i]}"
+#
+#            # Write path to target config
+#            printf '%s' "$path" > "$cfg"
+#
+#            # Check if new config is different from old one for highlighting
+#            new="$(sha1sum "$cfg" | cut -d' ' -f1)"
+#            [[ "$old" != "$new" ]] && new_targets+=("$name")
+#        fi
+#    done
+#
+#    # Show targets
+#    if (( "${#new_targets[@]}" == 0 )); then
+#        # No new targets were added, so just list all targets in the same color
+#        (cd "$config_dir" && ls -1 -d -- */ | sed 's/.$//' | color_listing)
+#    else
+#        # New targets were found, so highlight the new targets
+#        pattern="$(sed 's/ /|/g' <<< "${new_targets[@]}" | xargs printf '^(%s)$')"
+#        (cd "$config_dir" && ls -1 | GREP_COLORS='cx=01;34' grep --color -E "$pattern" -A100 -B100)
+#    fi
+#}
+#
+#
+## Create variants
+#v_create() {
+#    local stdin_data v_path variant
+#    local arr=("${!1}")
+#
+#    # Check if STDIN has data
+#    if ! test -t 0; then
+#        stdin_data=$(</dev/stdin)
+#    fi
+#
+#    for target in "${arr[@]}"; do
+#        for variant in "${variants[@]}"; do
+#            v_path="$config_dir/$target/$variant"
+#
+#            # Create either default or custom variant
+#            # TODO (?): Replace the "added" messages with a highlighted tree
+#            #           like in t_add().
+#            if [[ -z "$stdin_data" ]]; then
+#                if [[ ! -f "$v_path" ]]; then
+#                    touch "$v_path"
+#                    new+=("$target/$variant")
+#                fi
+#            elif [[ ! -f "$v_path" ]]; then
+#                printf '%s\n' "$stdin_data" > "$v_path"
+#                new+=("$target/$variant")
+#            fi
+#        done
+#    done
+#}
+#
+## Add variants
+#v_add() {
+#    local arg args chosen height i rows tv variant
+#    local new=() targets=() variants=()
+#
+#    (( "$#" == 0 )) && die "no variants specified"
+#
+#    IFS=' ' read -r -a args <<< "$*"
+#
+#    for arg in "${args[@]}"; do
+#        check_name "$arg"
+#
+#        if in_array ALL_TARGETS[@] "$arg"; then
+#            targets+=("$arg")
+#        else
+#            variants+=("$arg")
+#        fi
+#    done
+#
+#    # If no targets are specified, create variants for all targets
+#    if [[ "${#targets[@]}" -eq 0 ]]; then
+#        v_create ALL_TARGETS[@]
+#    else
+#        v_create targets[@]
+#    fi
+#
+#    [[ "$EDIT" -eq 1 ]] && v_fzf new[@] "$EDITOR"
+#
+#    for tv in "${new[@]}"; do
+#        printf '%s"\n' "$(sed 's/\//: added \"/' <<< "$tv")"
+#    done
+#}
+#
+#
+## Set variants for specific targets
+#v_setsome() {
+#    local copy=() current_targets=() done_targets=()
+#    local first flag last
+#
+#    first="$(cut -d' ' -f1 <<< "$@")"
+#    last="$(awk '{print $NF}' <<< "$@")"
+#
+#    if in_array variants[@] "$first"; then
+#        # If first name is variant
+#        die "missing target for variant \"$first\""
+#    elif in_array targets[@] "$last"; then
+#        # If last name is target
+#        die "missing variant for target \"$last\""
+#    fi
+#
+#    for name in "$@"; do
+#        if in_array targets[@] "$name"; then
+#            current_targets+=("$name")
+#            flag=0
+#            continue
+#        fi
+#
+#        [[ "$flag" -eq 1 ]] && die "attempted multi-variant switch"
+#
+#        if (( "${#current_targets[@]}" > 0 )); then
+#            v_switch current_targets[@] "$name"
+#
+#            for t in "${current_targets[@]}"; do
+#                if ! in_array done_targets[@] "$t"; then
+#                    done_targets+=("$t")
+#                fi
+#            done
+#
+#            current_targets=()
+#        elif (( "${#current_targets[@]}" == 0 )); then
+#            copy=("${ALL_TARGETS[@]}")
+#
+#            for del in "${done_targets[@]}"; do
+#                copy=("${copy[@]/"$del"}")
+#            done
+#
+#            v_switch copy[@] "$name"
+#        fi
+#
+#        flag=1
+#    done
+#}
+#
+#
+## Set a variant for all targets
+#v_setall() {
+#    local variant
+#
+#    # Prevent multiple variants from being specified for all targets
+#    (( "${#variants[@]}" > 1 )) && die "attempted multi-variant switch"
+#
+#    for variant in "${variants[@]}"; do
+#        v_switch ALL_TARGETS[@] "$variant"
+#    done
+#}
+#
+#
+#v_set() {
+#    local name variant
+#    local targets=() variants=()
+#
+#    # Classify names as either targets or variants
+#    for name in "${@}"; do
+#        if in_array ALL_TARGETS[@] "$name"; then
+#            targets+=("$name")
+#        else
+#            variants+=("$name")
+#        fi
+#    done
+#
+#    if (( "${#targets}" == 0 )); then
+#        # No targets were specified, so set the variant for all
+#        v_setall
+#    else
+#        # Targets were specified, so set variants appropriately
+#        v_setsome "$@"
+#    fi
+#}
+#
+#
+## Switch to a particular variant for targets
+#v_switch() {
+#    local alt_body alt_body_pattern alt_vpath begin body body_pattern end match offset t_path target v_path
+#    local arr=("${!1}")
+#    local variant="$2"
+#
+#    for target in "${arr[@]}"; do
+#        v_path="$config_dir/$target/$variant"
+#
+#        # reset
+#        match=0
+#
+#        # Skip targets that don't have the current variant or if their
+#        # variants are empty
+#        [[ ! -f "$v_path" || ! -s "$v_path" ]] && continue
+#
+#        # Get target file name
+#        t_path="$(head -n 1 "$config_dir/$target/.config")"
+#
+#        # If target file doesn't exist, die
+#        [[ ! -f "$t_path" ]] && die "file \"$t_path\" does not exist\n" "$t_path"
+#
+#        # Get variant body
+#        body="$(no_file_blanks "$v_path")"
+#        body_pattern="$(sed 's/[][\.|$(){}?+*^]/\\&/g' <<< "$body")"
+#
+#        # See if the variant's body is being used
+#        if pcregrep -M -q "$body_pattern" "$t_path"; then
+#            continue
+#        else
+#            # The variant is currently not being used, so check if another
+#            # variant is in use. If so, we can replace it. If not, then
+#            # there's nothing we can do so we'll consider this variant
+#            # invalid.
+#            for alt_vpath in "$config_dir"/"$target"/*; do
+#                # Skip empty/duplicate variants
+#                [[ ! -s "$alt_vpath" || "$alt_vpath" == "$v_path" ]] && continue;
+#
+#                # Get variant body
+#                alt_body="$(no_file_blanks "$alt_vpath")"
+#                alt_body_pattern="$(sed 's/[][\.|$(){}?+*^]/\\&/g' <<< "$alt_body")"
+#
+#                # Check if variant has a match
+#                #
+#                # Note that we use t_path instead of t_path2. That's
+#                # because while this variant has a match, its target
+#                # path may be invalid or different (though I don't
+#                # really see that happening). So just to be safe, we
+#                # use t_path.
+#                if pcregrep -M -q "$alt_body_pattern" "$t_path"; then
+#                    match=1
+#                    break
+#                fi
+#            done
+#
+#            if [[ "$match" -eq 1 ]]; then
+#                # Another variant that has a match, so we can switch
+#                begin="$(pcregrep -M -n "$alt_body_pattern" "$t_path" | head -n 1 | cut -d: -f1)"
+#                offset="$(wc -l <<< "$alt_body")"
+#                end=$((begin + offset - 1))
+#
+#                sed -i "${begin},${end}d" "$t_path"
+#                length="$(wc -l "$t_path" | cut -d' ' -f1)"
+#
+#                if (( "$begin" > "$length" )); then
+#                    printf '%s' "$body" >> "$t_path"
+#                else
+#                    awk -i inplace -v a="$begin" -v b="$body" "NR==a{print b}1" "$t_path"
+#                fi
+#            else
+#                # There was no match, so die
+#                die "invalid variant: $target-$variant"
+#            fi
+#        fi
+#    done
+#}
+#
+#
+## Zero or more arguments were given but no options were specified, so either:
+##
+##  1. List variants of all/some targets.
+##  2. Set variants for all/some targets.
+##
+## The decision process is as follows:
+##
+##  * If no arguments are given, assume the user wants to see the variants for
+##    all targets.
+##
+##  * If existing targets are specified, assume the user wants to see the
+##    variants for those targets.
+##
+##  * If an existing variant is specified, assume the user wants to set that
+##    variant for all targets.
+##
+##  * If existing variants and targets are specified, assume the user wants to
+##    set some variants for some targets, and other variants for other targets.
+#v_start() {
+#    local f name nontargets target v
+#    local fzf_arr=()
+#
+#    [[ ! "${ALL_TARGETS[*]}" ]] && {
+#        printf '%s\n' "No targets or variants."
+#        exit 0
+#    }
+#
+#    if (( "$#" == 0 )); then
+#        # No arguments provided
+#
+#        if [[ "$EDIT" -eq 1 ]]; then
+#            # Edit all existing variants
+#            for v in "${ALL_VARIANTS[@]}"; do
+#                fzf_arr+=("$v")
+#            done
+#
+#            v_fzf fzf_arr[@] "$EDITOR"
+#        else
+#            # List out all variants
+#            (cd "$config_dir" && tree -L 1 --charset=utf-8 --noreport -- * | color_listing)
+#        fi
+#    else
+#        # Arguments were specified
+#
+#        # Run names through some general checks
+#        for name in "${@}"; do
+#            check_name "$name"
+#        done
+#
+#        # See if any of the names aren't target names; if so, collect them
+#        nontargets="$(cd "$config_dir" && file "$@" | grep "cannot open" | cut -d: -f1)"
+#
+#        if [[ -z "$nontargets" ]]; then
+#            if [[ "$EDIT" -eq 1 ]]; then
+#                # Edit all variants of listed targets
+#                for target in "$@"; do
+#                    for f in "$config_dir/$target"/*; do
+#                        fzf_arr+=("$(sed "s/${config_dir//\//\\\/}\///" <<< "$f")")
+#                    done
+#                done
+#
+#                v_fzf fzf_arr[@] "$EDITOR"
+#            else
+#                # Only targets were specified, so list their variants
+#                (cd "$config_dir" && tree -L 1 --charset=utf-8 --noreport -- "$@" | color_listing)
+#            fi
+#        else
+#            # Nontargets were found!
+#
+#            # Clean up the name of nontargets a bit
+#            read -r -a nontargets <<< "$(tr '\n' ' ' <<< "$nontargets" | sed 's/[ ]*$//')"
+#
+#            # Check if any nontargets are not variants
+#            for target in "${nontargets[@]}"; do
+#                [[ "$(find "$config_dir"/* -name "$target" 2>/dev/null | wc -l)" == 0 ]] && die "unknown target or variant \"$target\""
+#            done
+#
+#            [[ "$EDIT" -eq 1 ]] && {
+#                printf '%s\n' "To edit variants, use \"chive -e\" or \"chive -e TARGET ...\""
+#                exit 1
+#            }
+#
+#            v_set "$@"
+#        fi
+#    fi
+#}
+#
+#
+#tv_delete() {
+#    local chosen height rows variant
+#
+#    [[ "${#@}" -gt 0 ]] && die "--delete does not accept any arguments"
+#
+#    # Gather all targets and variants
+#    readarray -t fzf_arr <<< "$(find "$config_dir"/* -name ".*" -prune -o -print | sed "s/${config_dir//\//\\\/}\///")"
+#
+#    # List targets and variants
+#    local copy=("${fzf_arr[@]}")
+#
+#    for i in "${!copy[@]}"; do
+#        rows="$(tr ' ' '\n' <<< "${copy[@]}" | awk 'NF')"
+#        height=$(($(wc -l <<< "$rows") + 2))
+#        chosen="$(fzf -0 --height="$height" <<< "$rows")"
+#
+#        (( "${#chosen}" == 0 )) && break
+#
+#        if in_array ALL_TARGETS[@] "$chosen"; then
+#            # Delete all of the variants and .config of this target, then
+#            # delete the target itself with rmdir. This is to avoid `rm -rf`.
+#            for variant in "${fzf_arr[@]}"; do
+#                if [[ "$variant" == $chosen/* ]]; then
+#                    rm "$config_dir/$variant" 2>/dev/null
+#                    copy=( "${copy[@]/"$variant"}" )
+#                fi
+#            done
+#
+#            rm "$config_dir/$chosen/.config" 2>/dev/null
+#            rmdir "$config_dir/$chosen" 2>/dev/null
+#        else
+#            # Delete variant
+#            rm "$config_dir/$chosen"
+#        fi
+#
+#        # Remove already selected entries from listing
+#        copy=( "${copy[@]/"$chosen"}" )
+#    done
+#}
+#
+#
+# NOTE: this is the old main function, I don't think we need
+#       to put the main code in a function in stittch, there's
+#       no global scope leakage
+#
+#if [[ ! -d "$config_dir" ]]; then
+#    # Create configuration directory, if needed
+#    mkdir -p "$config_dir"
+#fi
+#
+#readarray -t ALL_VARIANTS <<< "$(find "$config_dir" -maxdepth 2 -mindepth 2 ! -path "$config_dir/.*" ! -path "$config_dir/*/.config" | sed "s/${config_dir//\//\\\/}\///")"
+#readarray -t ALL_TARGETS <<< "$(find "$config_dir" -maxdepth 1 -type d ! -path "$config_dir" ! -path "$config_dir/.*" | pathname)"
+#
+## Process command-line options/arguments
+#while [[ "$1" ]]; do
+#    case $1 in
+#        "--version")
+#            printf '%s\n' "$prog_name $version"
+#            exit
+#        ;;
+#        "--help") usage ;;
+#        "--target" | "-t")
+#            shift
+#            t_add "$@"
+#            exit
+#        ;;
+#        "--variant" | "-v")
+#            [[ ! "${ALL_TARGETS[*]}" ]] && die "no targets available"
+#
+#            shift
+#            v_add "$@"
+#            exit
+#        ;;
+#        "--edit" | "-e")
+#            EDIT=1
+#        ;;
+#        "--delete" | "-d")
+#            shift
+#            tv_delete "$@"
+#            exit
+#        ;;
+#        #"--list" | "-l")
+#            #shift
+#            #v_list "$@"
+#            #exit
+#        #;;
+#        *)
+#            break
+#        ;;
+#    esac
+#
+#    shift
+#done
+#
+#v_start "$@"
+#
