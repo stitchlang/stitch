@@ -3,8 +3,9 @@ import sys
 import os
 import subprocess
 import re
+from abc import ABC, abstractmethod
 from enum import Enum
-from typing import List, Dict, Union, Tuple
+from typing import List, Dict, Set, Union, Tuple, Optional
 
 class Node:
     def __init__(self, src):
@@ -38,7 +39,7 @@ class NodeMultiple(Node):
 def combineNodes(existing_node, new_node):
     if not existing_node:
         return new_node
-    if type(existing_node) is NodeMultiple:
+    if isinstance(existing_node, NodeMultiple):
         existing_node.nodes.append(new_node)
         return existing_node
     return NodeMultiple(existing_node.src + new_node.src, [existing_node, new_node])
@@ -224,7 +225,9 @@ def stripNewline(s):
     return s
 
 class StitchObject:
-    pass
+    @staticmethod
+    def userTypeDescriptor():
+        raise Exception("this Object has not implemented the userTypeDescriptor method")
 
 class Bool(StitchObject):
     def __init__(self, value):
@@ -262,18 +265,27 @@ class BinaryOperator(StitchObject):
         self.src_name = "@" + name
     def __repr__(self):
         return self.src_name
+    @abstractmethod
+    def initialValue(self, operand: StitchObject):
+        pass
+    @abstractmethod
+    def apply(self, verification_mode: bool, left: Bool, right: StitchObject):
+        pass
 class ChainableBinaryOperator(BinaryOperator):
     def __init__(self, name):
         BinaryOperator.__init__(self, name)
+    @abstractmethod
+    def shortcircuit(self, result: Bool):
+        return not result.value
 class AndOperator(ChainableBinaryOperator):
     def __init__(self):
         ChainableBinaryOperator.__init__(self, "and")
     def initialValue(self, operand):
         return operandToBool(self, operand)
-    def apply(self, verification_mode: bool, left: Bool, right):
+    def apply(self, verification_mode: bool, left: Bool, right: StitchObject):
         assert(verification_mode or left.value)
         right_result = operandToBool(self, right)
-        if isinstance(right_result, Error) or type(right_result) == UnknownBool:
+        if isinstance(right_result, Error) or isinstance(right_result, UnknownBool):
             return right_result
         return right_result
     def shortcircuit(self, result: Bool):
@@ -283,10 +295,10 @@ class OrOperator(ChainableBinaryOperator):
         ChainableBinaryOperator.__init__(self, "or")
     def initialValue(self, operand):
         return operandToBool(self, operand)
-    def apply(self, verification_mode: bool, left: Bool, right):
+    def apply(self, verification_mode: bool, left: Bool, right: StitchObject):
         assert(verification_mode or not left.value)
         right_result = operandToBool(self, right)
-        if isinstance(right_result, Error) or type(right_result) == UnknownBool:
+        if isinstance(right_result, Error) or isinstance(right_result, UnknownBool):
             return right_result
         return right_result
     def shortcircuit(self, result: Bool):
@@ -295,11 +307,11 @@ class EqOperator(BinaryOperator):
     def __init__(self):
         BinaryOperator.__init__(self, "eq")
     def initialValue(self, operand):
-        if type(operand) == String:
+        if isinstance(operand, String):
             return operand
         return opInvalidTypeError(self, operand)
-    def apply(self, verification_mode: bool, left, right):
-        if type(right) == String:
+    def apply(self, verification_mode: bool, left, right: StitchObject):
+        if isinstance(right, String):
             return BOOL_TRUE if (left.value == right.value) else BOOL_FALSE
         return opInvalidTypeError(self, right)
 class CompareOperator(BinaryOperator):
@@ -307,28 +319,28 @@ class CompareOperator(BinaryOperator):
         BinaryOperator.__init__(self, name)
         self.func = func
     def initialValue(self, operand):
-        if type(operand) == String:
+        if isinstance(operand, String):
             # TODO: return semantic error if not a valid integer
             return int(operand.value)
-        if type(operand) == UnknownString:
+        if isinstance(operand, UnknownString):
             return None
         return opInvalidTypeError(self, operand)
-    def apply(self, verification_mode: bool, left, right):
-        if left == None:
-            if type(right) != String and type(right) != UnknownString:
+    def apply(self, verification_mode: bool, left, right: StitchObject):
+        if left is None:
+            if (not isinstance(right, String)) and (not isinstance(right, UnknownString)):
                 return opInvalidTypeError(self, right)
             return UNKNOWN_BOOL
-        assert(type(left) == int)
-        if type(right) == String:
+        assert(isinstance(left, int))
+        if isinstance(right, String):
             # TODO: return semantic error if not a valid integer
             right_int = int(right.value)
             return BOOL_TRUE if self.func(left, right_int) else BOOL_FALSE
-        if type(right) == UnknownString:
+        if isinstance(right, UnknownString):
             return UNKNOWN_BOOL
         return opInvalidTypeError(self, right)
 
 class CommandResult(StitchObject):
-    def __init__(self, exitcode: int, stdout: Union[None,str], stderr: Union[None,str]):
+    def __init__(self, exitcode: int, stdout: Optional[str], stderr: Optional[str]):
         self.exitcode = exitcode
         self.stdout = stdout
         self.stderr = stderr
@@ -385,7 +397,7 @@ class AssertError(Error):
     def __repr__(self):
         return "AssertError"
 class NonZeroExitCodeError(Error):
-    def __init__(self, exitcode: int, stdout: Union[None,str], stderr: Union[None,str]):
+    def __init__(self, exitcode: int, stdout: Optional[str], stderr: Optional[str]):
         assert(exitcode != 0)
         Error.__init__(self, "command failed with exit code {}".format(exitcode))
         self.exitcode = exitcode
@@ -418,11 +430,11 @@ class GlobalContext:
     def __init__(self, doverify: bool, callerworkdir: str):
         self.doverify = doverify
         self.callerworkdir = callerworkdir
-        self.verify_started = {}
+        self.verify_started: Set[str] = set()
 
 class ScriptContext:
     class Block:
-        def __init__(self, enabled: Union[None,Bool]):
+        def __init__(self, enabled: Optional[bool]):
             self.enabled = enabled
 
     # TODO: add fields for logging/tracing options?
@@ -435,41 +447,44 @@ class ScriptContext:
             #       maybe I can just use an environment variable
             "callerworkdir": String(global_ctx.callerworkdir),
         }
-        self.var_map = {}
+        self.var_map: Dict[str,StitchObject] = {}
         self.verification_mode = verification_mode
-        self.blockStack = [ScriptContext.Block(enabled=True)]
+        self.blockStack: List[ScriptContext.Block] = [ScriptContext.Block(enabled=True)]
     def pushBlock(self, enabled: bool) -> None:
         self.blockStack.append(ScriptContext.Block(enabled))
-    def popBlock(self) -> Union[None,Error]:
+    def popBlock(self) -> Optional[Error]:
         self.blockStack.pop()
         if len(self.blockStack) == 0:
             return SemanticError("too many '@end'")
+        return None
 
-class DataHandler:
-    pass
+class DataHandler(ABC):
+    @abstractmethod
+    def isEmpty(self):
+        pass
+    @abstractmethod
+    def handle(self, s: str):
+        pass
 class StringBuilder(DataHandler):
     def __init__(self):
         self.output = ""
-    def isEmpty(self):
-        return len(self.output) == 0
     @staticmethod
     def descriptor():
         return "capture"
-    def captured(self):
-        return self.output
-    def handle(self, s):
+    def isEmpty(self):
+        return len(self.output) == 0
+    def handle(self, s: str):
         if len(s) > 0:
             self.output += s
             if s[-1] != "\n":
                 self.output += "\n"
 class ConsolePrinter(DataHandler):
-    def isEmpty(self):
-        return True
+    @staticmethod
     def descriptor():
         return "console"
-    def captured(self):
-        return None
-    def handle(self, s):
+    def isEmpty(self):
+        return True
+    def handle(self, s: str):
         if len(s) > 0:
             if s[-1] == '\n':
                 print(s, end='')
@@ -490,11 +505,11 @@ class CommandContext:
     def __init__(
             self,
             script: ScriptContext,
-            parent: 'CommandContext',
+            parent: Optional['CommandContext'],
             depth: int,
             capture: Capture,
             builtin_prefix_count: int,
-            ambiguous_op: Union[None,str],
+            ambiguous_op: Optional[str],
             var_map: Dict[str,StitchObject] = {}
     ):
         self.script = script
@@ -509,20 +524,23 @@ class CommandContext:
         return type(self)(self.script, self, self.depth+1,
                           Capture(exitcode=False,stdout=StringBuilder(),stderr=self.capture.stderr),
                           builtin_prefix_count=0, ambiguous_op=None)
-    def nextBuiltin(self, ambiguous_op: Union[None,str]) -> 'CommandContext':
+    def nextBuiltin(self, ambiguous_op: Optional[str]) -> 'CommandContext':
         return type(self)(self.script, self.parent, self.depth, self.capture,
                           self.builtin_prefix_count + 1, ambiguous_op, self.var_map)
 
 class BuiltinMethods:
+    @staticmethod
     def note(cmd_ctx: CommandContext, nodes: List[Node]):
         return ExitCode(0)
+    @staticmethod
     def echo(cmd_ctx: CommandContext, nodes: List[Node]):
-        args = []
+        args: List[str] = []
         error = nodesToArgs(cmd_ctx, nodes, args)
         if error:
             return error
         cmd_ctx.capture.stdout.handle(" ".join(args))
         return ExitCode(0)
+    @staticmethod
     def set(cmd_ctx: CommandContext, nodes: List[Node]):
         if len(nodes) != 2:
             return SemanticError("@set expects 2 arguments but got {}".format(len(nodes)))
@@ -530,6 +548,7 @@ class BuiltinMethods:
         if isinstance(is_unknown, Error):
             return is_unknown
         return UNKNOWN_EXIT_CODE if is_unknown else ExitCode(0)
+    @staticmethod
     def settmp(cmd_ctx: CommandContext, nodes: List[Node]):
         if len(nodes) < 3:
             sys.exit("Error: the @settmp builtin requires at least 3 arguments")
@@ -538,74 +557,75 @@ class BuiltinMethods:
             return is_unknown
         #print("DEBUG: settmp '{}' to '{}'".format(varname, value))
         return runCommandNodes(cmd_ctx.nextBuiltin(ambiguous_op=None), nodes[2:])
+    @staticmethod
     def setenv(cmd_ctx: CommandContext, nodes: List[Node]):
         if len(nodes) != 2:
             return SemanticError("@setenv expects 2 arguments but got {}".format(len(nodes)))
-        name, value = expandSetArgsCommon(cmd_ctx, nodes[0], nodes[1], "@setenv")
-        if isinstance(name, Error):
-            return name
-        if type(value) == String:
-            is_unknown = False
-        elif type(value) == UNKNOWN_STRING:
-            is_unknown = True
-        else:
-            return SemanticError("@setenv requires a String for its 2nd argument but got {}".format(value.userTypeDescriptor()))
-        value = value.value
-        if not cmd_ctx.script.verification_mode:
-            os.environ[name] = value
-        return UNKNOWN_EXIT_CODE if is_unknown else ExitCode(0)
+        pair = expandSetArgsCommon(cmd_ctx, nodes[0], nodes[1], "@setenv")
+        if isinstance(pair, Error):
+            return pair
+        name, value = pair
+        assert(value is not None)
+        if isinstance(value, String):
+            os.environ[name] = value.value
+            return ExitCode(0)
+        if isinstance(value, UnknownString):
+            return UNKNOWN_EXIT_CODE
+        return SemanticError("@setenv requires a String for its 2nd argument but got {}".format(value.userTypeDescriptor()))
+    @staticmethod
     def unsetenv(cmd_ctx: CommandContext, nodes: List[Node]):
         if len(nodes) != 1:
             return SemanticError("@unsetenv expects 1 argument but got {}".format(len(nodes)))
         name = expandNode(cmd_ctx, nodes[0])
         if isinstance(name, Error):
             return name
-        if type(name) == UnknownString:
+        if isinstance(name, UnknownString):
             return UNKNOWN_EXIT_CODE
-        if type(name) != String:
+        if not isinstance(name, String):
             return SemanticError("@unsetenv requires a String but got {}".format(name.userTypeDescriptor()))
-        name = name.value
-        if not name in os.environ:
-            return UndefinedEnvironmentVariableError(name)
-        del os.environ[name]
+        if not name.value in os.environ:
+            return UndefinedEnvironmentVariableError(name.value)
+        del os.environ[name.value]
         return ExitCode(0)
+    @staticmethod
     def env(cmd_ctx: CommandContext, nodes: List[Node]):
         if len(nodes) != 1:
             return SemanticError("@env expects 1 argument but got {}".format(len(nodes)))
         name = expandNode(cmd_ctx, nodes[0])
         if isinstance(name, Error):
             return name
-        if type(name) == UnknownString:
+        if isinstance(name, UnknownString):
             return UNKNOWN_EXIT_CODE
-        if type(name) != String:
+        if not isinstance(name, String):
             return SemanticError("@env requires a String but got {}".format(name.userTypeDescriptor()))
         if cmd_ctx.script.verification_mode:
             return UNKNOWN_EXIT_CODE
-        name = name.value
-        value = os.environ.get(name)
-        if value == None:
-            return UndefinedEnvironmentVariableError(name)
+        value = os.environ.get(name.value)
+        if value is None:
+            return UndefinedEnvironmentVariableError(name.value)
         cmd_ctx.capture.stdout.handle(value)
         return ExitCode(0)
+    @staticmethod
     def multiline(cmd_ctx: CommandContext, nodes: List[Node]):
         if len(nodes) == 0:
             return SemanticError("@multiline requires at least 1 argument")
-        if cmd_ctx.parent == None:
+        if cmd_ctx.parent is None:
             return SemanticError("the @multiline builtin is only supported within an (..inline command..)")
         if cmd_ctx.capture.stdout == cmd_ctx.parent.capture.stdout:
             return SemanticError("got @multiline but stdout is not being captured?  what's going on?")
         result = runCommandNodes(cmd_ctx.nextBuiltin(ambiguous_op=None), nodes)
-        if isinstance(result, Error) or type(result) == UnknownExitCode or type(result) == UnknownBool:
+        if isinstance(result, Error) or isinstance(result, UnknownExitCode) or isinstance(result, UnknownBool):
             return result
-        if type(result) == Bool:
+        if isinstance(result, Bool):
             return SemanticError("@multiline does not accept Bool")
-        assert(type(result) == ExitCode)
+        assert(isinstance(result, ExitCode))
         result.multiline = True
         return result
+    @staticmethod
     def exitcode(cmd_ctx: CommandContext, nodes: List[Node]):
         if len(nodes) == 0:
             return SemanticError("@exitcode requires at least 1 argument")
-        if cmd_ctx.parent == None:
+        if cmd_ctx.parent is None:
             return SemanticError("the @exitcode builtin is only supported within an (..inline command..)")
         if cmd_ctx.capture.exitcode:
             return SemanticError("@exitcode was given more than once in the same inline command")
@@ -613,16 +633,18 @@ class BuiltinMethods:
         if cmd_ctx.capture.stdout == cmd_ctx.parent.capture.stdout:
             # I might be able to just ignore this
             sys.exit("stdout has already been 'uncaptured', maybe by another directive?")
-        assert(type(cmd_ctx.capture.stdout) == StringBuilder)
+        assert(isinstance(cmd_ctx.capture.stdout, StringBuilder))
         assert(len(cmd_ctx.capture.stdout.output) == 0)
         cmd_ctx.capture.stdout = cmd_ctx.parent.capture.stdout
         return runCommandNodes(cmd_ctx.nextBuiltin(ambiguous_op=None), nodes)
+    @staticmethod
     def not_(cmd_ctx: CommandContext, nodes: List[Node]):
         result = expandNodesToBool(cmd_ctx.nextBuiltin(ambiguous_op="@not"), nodes, "@not", True)
         if isinstance(result, Error) or isinstance(result, UnknownBool):
             return result
-        assert(type(result) == Bool)
+        assert(isinstance(result, Bool))
         return BOOL_FALSE if result.value else BOOL_TRUE
+    @staticmethod
     def isfile(cmd_ctx: CommandContext, nodes: List[Node]):
         error = disableIncompatibleCapture(cmd_ctx, "@isfile")
         if error:
@@ -630,33 +652,36 @@ class BuiltinMethods:
         s = expandOneNodeToString(cmd_ctx, nodes, "@isfile")
         if isinstance(s, Error):
             return s
-        if type(s) == String:
+        if isinstance(s, String):
             return BOOL_TRUE if os.path.isfile(s.value) else BOOL_FALSE
-        assert(type(s) == UnknownString)
+        assert(isinstance(s, UnknownString))
         assert(cmd_ctx.script.verification_mode)
         return UNKNOWN_BOOL
+    @staticmethod
     def assert_(cmd_ctx: CommandContext, nodes: List[Node]):
         result = expandNodesToBool(cmd_ctx.nextBuiltin(ambiguous_op=None), nodes, "@assert", False)
         if isinstance(result, Error):
             return result
-        if type(result) == UnknownBool:
+        if isinstance(result, UnknownBool):
             return UNKNOWN_EXIT_CODE
-        assert(type(result) == Bool)
+        assert(isinstance(result, Bool))
         if not result.value:
             return AssertError(" ".join([n.src for n in nodes]))
         return ExitCode(0)
+    @staticmethod
     def if_(cmd_ctx: CommandContext, nodes: List[Node]):
         result = expandNodesToBool(cmd_ctx.nextBuiltin(ambiguous_op=None), nodes, "@if", True)
         if isinstance(result, Error):
             return result
-        if type(result) == Bool:
+        if isinstance(result, Bool):
             cmd_ctx.script.pushBlock(enabled=result.value)
             return ExitCode(0)
         assert(cmd_ctx.script.verification_mode and (
-            type(result) == UnknownBool or
-            type(result) == UnknownCommandResult))
+            isinstance(result, UnknownBool) or
+            isinstance(result, UnknownCommandResult)))
         cmd_ctx.script.pushBlock(enabled=True)
         return UNKNOWN_EXIT_CODE
+    @staticmethod
     def end(cmd_ctx: CommandContext, nodes: List[Node]):
         if len(nodes) != 0:
             return SemanticError("'@end' does not accept any arguments")
@@ -664,8 +689,9 @@ class BuiltinMethods:
         if error:
             return error
         return ExitCode(0)
+    @staticmethod
     def call(cmd_ctx: CommandContext, nodes: List[Node]):
-        args = []
+        args: List[str] = []
         error = nodesToArgs(cmd_ctx, nodes, args)
         if error:
             return error
@@ -693,14 +719,15 @@ class BuiltinMethods:
 
         if isinstance(result, Error):
             return result
-        assert(type(result) == ExitCode)
+        assert(isinstance(result, ExitCode))
         return result
 
+    @staticmethod
     def haveprog(cmd_ctx: CommandContext, nodes: List[Node]):
         error = disableIncompatibleCapture(cmd_ctx, "@haveprog")
         if error:
             return error
-        args = []
+        args: List[str] = []
         error = nodesToArgs(cmd_ctx, nodes, args)
         if error:
             return error
@@ -714,38 +741,36 @@ def opInvalidTypeError(op, operand):
 def operandToBool(op, operand) -> Union[Error,Bool,UnknownBool]:
     if isinstance(operand, Error):
         return operand
-    if type(operand) == Bool:
+    if isinstance(operand, Bool):
         return operand
-    if type(operand) == UnknownBool:
+    if isinstance(operand, UnknownBool):
         return UNKNOWN_BOOL
     return opInvalidTypeError(op, operand)
 
-def expandSetArgsCommon(cmd_ctx: CommandContext, arg1: Node, arg2: Node, builtin_name: str) -> Tuple[Union[Error,str],Union[None,StitchObject]]:
+def expandSetArgsCommon(cmd_ctx: CommandContext, arg1: Node, arg2: Node, builtin_name: str) -> Union[Error,Tuple[str,StitchObject]]:
     name = expandNode(cmd_ctx, arg1)
     if isinstance(name, Error):
-        return name, None
-    if type(name) != String:
-        return SemanticError("{} requires a String for its 1st argument but got {}".format(builtin_name, name.userTypeDescriptor())), None
-    name = name.value
+        return name
+    if not isinstance(name, String):
+        return SemanticError("{} requires a String for its 1st argument but got {}".format(builtin_name, name.userTypeDescriptor()))
     value = expandNode(cmd_ctx, arg2)
     if isinstance(value, Error):
-        return value, None
-    return name, value
+        return value
+    return (name.value, value)
 
 def expandSetArgs(cmd_ctx: CommandContext, arg1: Node, arg2: Node, builtin_name: str, var_map: Dict[str,StitchObject]) -> Union[Error,bool]:
-    name, value = expandSetArgsCommon(cmd_ctx, arg1, arg2, builtin_name)
-    if isinstance(name, Error):
-        return name
+    pair = expandSetArgsCommon(cmd_ctx, arg1, arg2, builtin_name)
+    if isinstance(pair, Error):
+        return pair
 
-    if ((type(value) == String) or
-        (type(value) == Bool)):
+    name, value = pair
+    if isinstance(value, String) or isinstance(value, Bool):
         is_unknown = False
-    elif ((type(value) == UnknownBool) or
-          (type(value) == UnknownString)):
+    elif isinstance(value, UnknownBool) or isinstance(value, UnknownString):
         is_unknown = True
     else:
         return SemanticError("{} requires a String or Bool for its 2nd argument but got {}".format(
-            builtin_name, value.userTypeDescriptor())), None
+            builtin_name, value.userTypeDescriptor()))
 
     var_map[name] = value
     return is_unknown
@@ -835,17 +860,17 @@ def expandNodes(cmd_ctx: CommandContext, nodes: List[Node]) -> Union[Error,Expan
         obj_list = [first_obj, obj]
 
     # TODO: are there other special types to handle here?
-    if type(first_obj) == Bool:
+    if isinstance(first_obj, Bool):
         if len(nodes) != 1:
             return SemanticError("unexpected Bool at the start of a command")
         return ExpandNodes.Bool(first_obj)
 
     # we must be running an external program
-    args = []
+    args: List[str] = []
     for obj in obj_list:
-        error = objectToArgs(obj, args)
-        if error:
-            return error
+        obj_args_error = objectToArgs(obj, args)
+        if obj_args_error:
+            return obj_args_error
 
     error = nodesToArgs(cmd_ctx, nodes, args, start=len(obj_list))
     if error:
@@ -857,31 +882,31 @@ def expandNodesToBool(cmd_ctx: CommandContext, nodes: List[Node], builtin_name: 
     if len(nodes) == 0:
         return SemanticError("{} requires at least 1 argument".format(builtin_name))
 
-    result = expandNodes(cmd_ctx, nodes)
-    if isinstance(result, Error):
-        return result
-    if type(result) == ExpandNodes.Bool:
-        return result.value
-    if type(result) == ExpandNodes.BinaryExp:
-        return runBinaryExpression(cmd_ctx, nodes, result.first, result.op)
+    expand_result = expandNodes(cmd_ctx, nodes)
+    if isinstance(expand_result, Error):
+        return expand_result
+    if isinstance(expand_result, ExpandNodes.Bool):
+        return expand_result.value
+    if isinstance(expand_result, ExpandNodes.BinaryExp):
+        return runBinaryExpression(cmd_ctx, nodes, expand_result.first, expand_result.op)
 
-    if type(result) == ExpandNodes.Builtin:
-        result = getattr(BuiltinMethods, result.builtin.name)(cmd_ctx, nodes[1:])
-        if type(result) == Bool or type(result) == UnknownBool:
-            return result
+    if isinstance(expand_result, ExpandNodes.Builtin):
+        next_result = getattr(BuiltinMethods, expand_result.builtin.name)(cmd_ctx, nodes[1:])
+        if isinstance(next_result, Bool) or isinstance(next_result, UnknownBool):
+            return next_result
         # TODO: there are probably more types to handle here
     else:
-        assert(type(result) == ExpandNodes.ExternalProgram)
-        result = runExternalProgram(cmd_ctx.script.verification_mode, cmd_ctx.capture.stdout, cmd_ctx.capture.stderr, result.args)
-    if isinstance(result, Error):
-        return result
-    is_unknown_exit_code = type(result) == UnknownExitCode
-    assert(type(result) == ExitCode or is_unknown_exit_code)
+        assert(isinstance(expand_result, ExpandNodes.ExternalProgram))
+        next_result = runExternalProgram(cmd_ctx.script.verification_mode, cmd_ctx.capture.stdout, cmd_ctx.capture.stderr, expand_result.args)
+    if isinstance(next_result, Error):
+        return next_result
+    is_unknown_exit_code = isinstance(next_result, UnknownExitCode)
+    assert(isinstance(next_result, ExitCode) or is_unknown_exit_code)
     if not allow_cmd_result:
         return SemanticError("{} expects a Bool but got a CommandResult".format(builtin_name))
     if is_unknown_exit_code:
         return UNKNOWN_BOOL
-    return BOOL_TRUE if (result.value == 0) else BOOL_FALSE
+    return BOOL_TRUE if (next_result.value == 0) else BOOL_FALSE
 
 #
 # is no longer used, but I think it might be later so keeping for now
@@ -893,16 +918,16 @@ def expandNodesToBool(cmd_ctx: CommandContext, nodes: List[Node], builtin_name: 
 #    obj = expandNode(cmd_ctx, nodes[0])
 #    if isinstance(obj, Error):
 #        return obj
-#    if type(obj) == Bool:
+#    if isinstance(obj, Bool):
 #        return obj
-#    if type(obj) == CommandResult:
+#    if isinstance(obj, CommandResult):
 #        if result.stdout:
 #            raise Exception("TODO")
 #        if result.stderr:
 #            raise Exception("TODO")
 #        return BOOL_TRUE if (result.exitcode == 0) else BOOL_FALSE
 #
-#    if type(obj) == UnknownBool or type(obj) == UnknownCommandResult:
+#    if isinstance(obj, UnknownBool) or isinstance(obj, UnknownCommandResult):
 #        assert(cmd_ctx.script.verification_mode)
 #        return UNKNOWN_BOOL
 #
@@ -915,9 +940,9 @@ def expandOneNodeToString(cmd_ctx: CommandContext, nodes: List[Node], builtin_na
     obj = expandNode(cmd_ctx, nodes[0])
     if isinstance(obj, Error):
         return obj
-    if type(obj) == String:
+    if isinstance(obj, String):
         return obj
-    if type(obj) == UnknownString:
+    if isinstance(obj, UnknownString):
         assert(cmd_ctx.script.verification_mode)
         return UNKNOWN_STRING
     return SemanticError("'{}' expects String but got {}".format(builtin_name, obj.userTypeDescriptor()))
@@ -935,7 +960,7 @@ def runCommandNodes(cmd_ctx: CommandContext, nodes: List[Node]) -> Union[Error,B
     # handle @end if we are disabled
     if not cmd_ctx.script.blockStack[-1].enabled:
         first = nodes[0]
-        if (type(first) == NodeVariable) and (first.id == "end"):
+        if isinstance(first, NodeVariable) and (first.id == "end"):
             if len(nodes) > 1:
                 return SemanticError("'@end' does not accept any arguments")
             error = cmd_ctx.script.popBlock()
@@ -946,16 +971,16 @@ def runCommandNodes(cmd_ctx: CommandContext, nodes: List[Node]) -> Union[Error,B
     result = expandNodes(cmd_ctx, nodes)
     if isinstance(result, Error):
         return result
-    if type(result) == ExpandNodes.Builtin:
+    if isinstance(result, ExpandNodes.Builtin):
         return getattr(BuiltinMethods, result.builtin.name)(cmd_ctx, nodes[1:])
-    if type(result) == ExpandNodes.BinaryExp:
+    if isinstance(result, ExpandNodes.BinaryExp):
         return runBinaryExpression(cmd_ctx, nodes, result.first, result.op)
-    if type(result) == ExpandNodes.Bool:
+    if isinstance(result, ExpandNodes.Bool):
         return SemanticError("unhandled Bool")
-    assert(type(result) == ExpandNodes.ExternalProgram)
+    assert(isinstance(result, ExpandNodes.ExternalProgram))
     return runExternalProgram(cmd_ctx.script.verification_mode, cmd_ctx.capture.stdout, cmd_ctx.capture.stderr, result.args)
 
-def nodesToArgs(cmd_ctx: CommandContext, nodes: List[Node], args: List[str], start: int = 0) -> Error:
+def nodesToArgs(cmd_ctx: CommandContext, nodes: List[Node], args: List[str], start: int = 0) -> Optional[Error]:
     for i, node in enumerate(nodes[start:], start=start):
         obj = expandNode(cmd_ctx, node)
         if isinstance(obj, Error):
@@ -965,29 +990,18 @@ def nodesToArgs(cmd_ctx: CommandContext, nodes: List[Node], args: List[str], sta
             return error
     return None
 
-def nodeToNonArrayArg(cmd_ctx: CommandContext, node: Node):
-    obj = expandNode(cmd_ctx, node)
-    if isinstance(obj, Error):
-        return obj
-    if type(obj) == Array:
-        return SemanticError("unexpected Array")
-    args = []
-    error = objectToArgs(obj, args)
-    if error:
-        return error
-    # should be true because we verified this isn't an Array
-    assert(len(args) == 1)
-    return args[0]
-
-def objectToArgs(obj: StitchObject, args: List[str]) -> Error:
+def objectToArgs(obj: StitchObject, args: List[str]) -> Optional[Error]:
     assert(not isinstance(obj, Error))
-    if type(obj) == String:
+    if isinstance(obj, String):
         args.append(obj.value)
-    elif type(obj) == Array:
+        return None
+    elif isinstance(obj, Array):
         args.extend(obj.elements)
-    elif type(obj) == UnknownString:
+        return None
+    elif isinstance(obj, UnknownString):
         args.append("<UNKNOWN_STRING>")
-    elif type(obj) == Bool or type(obj) == UnknownBool:
+        return None
+    elif isinstance(obj, Bool) or isinstance(obj, UnknownBool):
         return SemanticError("cannot coerce Bool to String")
     elif isinstance(obj, BinaryOperator):
         return SemanticError("unexpected '{}'".format(obj))
@@ -1017,39 +1031,39 @@ def runExternalProgram(verification_mode: bool, stdout_handler: DataHandler,
         # TODO: on linux we can specify a program file, and not modify args
         args[0] = prog_filename
 
-    stdout = None if (type(stdout_handler) == ConsolePrinter) else subprocess.PIPE
-    stderr = None if (type(stderr_handler) == ConsolePrinter) else subprocess.PIPE
+    stdout = None if isinstance(stdout_handler, ConsolePrinter) else subprocess.PIPE
+    stderr = None if isinstance(stderr_handler, ConsolePrinter) else subprocess.PIPE
     result = subprocess.run(args, stdout=stdout, stderr=stderr)
-    if type(stdout_handler) != ConsolePrinter:
+    if not isinstance(stdout_handler, ConsolePrinter):
         stdout_handler.handle(result.stdout.decode("utf8"))
-    if type(stderr_handler) != ConsolePrinter:
+    if not isinstance(stderr_handler, ConsolePrinter):
         stderr_handler.handle(result.stderr.decode("utf8"))
     return ExitCode(result.returncode)
 
 def tryLookupCommandVar(cmd_ctx: CommandContext, name: str):
-    ctx = cmd_ctx
+    ctx: Optional[CommandContext] = cmd_ctx
     while ctx:
         obj = ctx.var_map.get(name)
         if obj:
             return obj
         ctx = ctx.parent
 
-def tryLookupUserVar(cmd_ctx: CommandContext, name: str):
-    obj = tryLookupCommandVar(cmd_ctx, name)
-    if obj:
-        return obj
-    obj = cmd_ctx.script.var_map.get(name)
-    if obj:
-        return obj
+def tryLookupUserVar(cmd_ctx: CommandContext, name: str) -> Optional[StitchObject]:
+    cmd_obj = tryLookupCommandVar(cmd_ctx, name)
+    if cmd_obj:
+        return cmd_obj
+    script_obj = cmd_ctx.script.var_map.get(name)
+    if script_obj:
+        return script_obj
     return None
 
-def tryLookupBuiltinVar(script_ctx: ScriptContext, name: str):
-    obj = script_ctx.script_specific_builtin_objects.get(name)
-    if obj:
-        return obj
-    obj = builtin_objects.get(name)
-    if obj:
-        return obj
+def tryLookupBuiltinVar(script_ctx: ScriptContext, name: str) -> Optional[StitchObject]:
+    script_obj = script_ctx.script_specific_builtin_objects.get(name)
+    if script_obj:
+        return script_obj
+    global_obj = builtin_objects.get(name)
+    if global_obj:
+        return global_obj
     return None
 
 def stdoutOnlyHandler(stdout, multiline):
@@ -1074,17 +1088,17 @@ def combineRunResultWithOutputs(cmd_ctx, result):
     stderr = None
     if cmd_ctx.parent:
         if cmd_ctx.capture.stdout != cmd_ctx.parent.capture.stdout:
-            assert(type(cmd_ctx.capture.stdout) == StringBuilder)
+            assert(isinstance(cmd_ctx.capture.stdout, StringBuilder))
             stdout = cmd_ctx.capture.stdout.output
         if cmd_ctx.capture.stderr != cmd_ctx.parent.capture.stderr:
-            assert(type(cmd_ctx.capture.stderr) == StringBuilder)
+            assert(isinstance(cmd_ctx.capture.stderr, StringBuilder))
             stderr = cmd_ctx.capture.stderr.output
 
     exitcode = None
-    if type(result) == ExitCode:
+    if isinstance(result, ExitCode):
         is_unknown = False
         exitcode = result.value
-    elif type(result) == UnknownExitCode:
+    elif isinstance(result, UnknownExitCode):
         is_unknown = True
         exitcode = 0
 
@@ -1110,7 +1124,7 @@ def combineRunResultWithOutputs(cmd_ctx, result):
             return UNKNOWN_COMMAND_RESULT
         return CommandResult(result.value, stdout, stderr)
 
-    if type(result) == Bool:
+    if isinstance(result, Bool):
         if cmd_ctx.capture.exitcode or isCaptured(stdout) or isCaptured(stderr):
             raise Exception("ec={} stdout={} stderr={}".format(cmd_ctx.capture.exitcode, isCaptured(stdout), isCaptured(stderr)))
         return result
@@ -1119,26 +1133,26 @@ def combineRunResultWithOutputs(cmd_ctx, result):
 
 
 # returns an array of strings and builtin objects
-def expandNode(cmd_ctx: CommandContext, node: Node) -> StitchObject:
-    if type(node) is NodeToken:
+def expandNode(cmd_ctx: CommandContext, node: Node) -> Union[Error,StitchObject]:
+    if isinstance(node, NodeToken):
         return String(node.s)
 
-    if type(node) is NodeVariable:
+    if isinstance(node, NodeVariable):
         if node.is_at:
             obj = tryLookupBuiltinVar(cmd_ctx.script, node.id)
         else:
             obj = tryLookupUserVar(cmd_ctx, node.id)
         if not obj:
-            return SemanticError("'{}' is undefined".format(node.src, node.id))
+            return SemanticError("'{}' is undefined".format(node.src))
         return obj
 
-    if type(node) is NodeInlineCommand:
+    if isinstance(node, NodeInlineCommand):
         inline_cmd_ctx = cmd_ctx.createChild()
         result = runCommandNodes(inline_cmd_ctx, node.nodes)
         return combineRunResultWithOutputs(inline_cmd_ctx, result)
 
-    if type(node) is NodeMultiple:
-        args = []
+    if isinstance(node, NodeMultiple):
+        args: List[str] = []
         error = nodesToArgs(cmd_ctx, node.nodes, args)
         if error:
             return error
@@ -1149,9 +1163,9 @@ def expandNode(cmd_ctx: CommandContext, node: Node) -> StitchObject:
 def disableIncompatibleCapture(cmd_ctx: CommandContext, error_context: str):
     if cmd_ctx.capture.exitcode:
         return SemanticError("@exitcode is not compatible with {}".format(error_context))
-    if cmd_ctx.parent != None and cmd_ctx.capture.stderr != cmd_ctx.parent.capture.stderr:
+    if cmd_ctx.parent is not None and cmd_ctx.capture.stderr is not cmd_ctx.parent.capture.stderr:
         return SemanticError("@stderr is not compatible with {}".format(error_context))
-    if cmd_ctx.parent != None and cmd_ctx.capture.stdout != cmd_ctx.parent.capture.stdout:
+    if cmd_ctx.parent is not None and cmd_ctx.capture.stdout is not cmd_ctx.parent.capture.stdout:
         cmd_ctx.capture.stdout = cmd_ctx.parent.capture.stdout
     return None
 
@@ -1176,7 +1190,7 @@ def runBinaryExpression(cmd_ctx: CommandContext, nodes: List[Node], first_obj: S
             return SemanticError("missing operand after '{}'".format(op))
 
         operand_result = expandNode(cmd_ctx, nodes[index+1])
-        if type(operand_result) == SemanticError:
+        if isinstance(operand_result, Error):
             return operand_result
         expression_result = op.apply(cmd_ctx.script.verification_mode, expression_result, operand_result)
         if isinstance(expression_result, Error):
@@ -1189,8 +1203,8 @@ def runBinaryExpression(cmd_ctx: CommandContext, nodes: List[Node], first_obj: S
             return expression_result
 
         next_op = nodes[index]
-        if type(next_op) != NodeVariable:
-            if type(next_op) == NodeToken:
+        if not isinstance(next_op, NodeVariable):
+            if isinstance(next_op, NodeToken):
                 return SemanticError("expected '{}' operator but got token '{}'; commands must be wrapped with (...)".format(op, next_op.s))
             return SemanticError("TODO: good error message for node that was expected to be an operand: {}".format(next_op))
         if next_op.id != op.name:
@@ -1223,7 +1237,12 @@ def runLine(script_ctx: ScriptContext, line: str, stdout_handler: DataHandler, s
 
 
 class LineReader:
-    pass
+    @abstractmethod
+    def reset(self):
+        pass
+    @abstractmethod
+    def readline(self):
+        pass
 class StringLinesReader(LineReader):
     def __init__(self, lines):
         self.lines = lines
@@ -1244,7 +1263,7 @@ class FileLineReader(LineReader):
     def readline(self):
         return self.open_file.readline()
 
-def runFileHelper(script_ctx: ScriptContext, line_reader: LineReader, stdout_handler: DataHandler, stderr_handler: DataHandler) -> ExitCode:
+def runFileHelper(script_ctx: ScriptContext, line_reader: LineReader, stdout_handler: DataHandler, stderr_handler: DataHandler) -> Union[Error,ExitCode]:
     while True:
         line = line_reader.readline()
         if not line:
@@ -1253,15 +1272,15 @@ def runFileHelper(script_ctx: ScriptContext, line_reader: LineReader, stdout_han
         result = runLine(script_ctx, line, stdout_handler, stderr_handler)
         if isinstance(result, Error):
             return result
-        if type(result) == Bool:
+        if isinstance(result, Bool):
             return SemanticError("unhandled Bool whose value is {}".format(result.value))
-        if type(result) == ExitCode:
+        if isinstance(result, ExitCode):
             if result.value != 0:
                 return result
         else:
             assert(script_ctx.verification_mode and (
-                type(result) == UnknownBool or
-                type(result) == UnknownExitCode
+                isinstance(result, UnknownBool) or
+                isinstance(result, UnknownExitCode)
             ))
 
     if len(script_ctx.blockStack) != 1:
@@ -1273,13 +1292,13 @@ def normalizeFilename(filename):
     return filename
 
 def runFile(global_ctx: GlobalContext, full_filename: str, line_reader: LineReader,
-            stdout_handler: DataHandler, stderr_handler: DataHandler) -> ExitCode:
+            stdout_handler: DataHandler, stderr_handler: DataHandler) -> Union[Error,ExitCode]:
     output = ""
 
     if global_ctx.doverify:
         normalized_filename = normalizeFilename(full_filename)
         if not normalized_filename in global_ctx.verify_started:
-            global_ctx.verify_started[normalized_filename] = True
+            global_ctx.verify_started.add(normalized_filename)
             print("stitch: DEBUG: verifying '{}'".format(full_filename), file=sys.stderr)
             stdout_builder = StringBuilder()
             stderr_builder = StringBuilder()
@@ -1288,10 +1307,10 @@ def runFile(global_ctx: GlobalContext, full_filename: str, line_reader: LineRead
             if isinstance(result, Error):
                 # This can happen if the arguments of an assert are known at "verification time"
                 # i.e. @assert @true
-                if type(result) == AssertError:
+                if isinstance(result, AssertError):
                     print("{}: AssertError: {}".format(full_filename, result.src))
                 else:
-                    assert(type(result) == SemanticError)
+                    assert(isinstance(result, SemanticError))
                     print("{}: SemanticError: {}".format(full_filename, result.msg))
                 return result
             # I'm allowing things to print to stdout during verification mode
@@ -1340,10 +1359,12 @@ def resolveCallerWorkdir(sandbox_path: str) -> str:
 # try to get rid of CWD state by going to a temporary readonly directory
 def sandboxCallerWorkdir() -> str:
     if os.name == "nt":
-        sandbox_path = os.path.join(os.getenv("TEMP"), "stitch-sandbox")
+        temp_dir = os.getenv("TEMP")
+        if not temp_dir:
+            sys.exit("ERROR: environment variable %TEMP% is not set")
     else:
-        sandbox_path = "/tmp/stitch-sandbox"
-
+        temp_dir = "/tmp"
+    sandbox_path = os.path.join(temp_dir, "stitch-sandbox")
     callerworkdir = resolveCallerWorkdir(sandbox_path)
 
     if not os.path.exists(sandbox_path):
@@ -1378,11 +1399,11 @@ def main():
     global_ctx = GlobalContext(doverify, sandboxCallerWorkdir())
     result = runFile(global_ctx, full_filename, line_reader, CONSOLE_PRINTER, CONSOLE_PRINTER)
     if isinstance(result, Error):
-        prefix = "Semantic" if (type(result) == SemanticError) else ""
+        prefix = "Semantic" if isinstance(result, SemanticError) else ""
         print("{}: {}Error: {}".format(filename, prefix, result.msg))
         sys.exit(1)
 
-    assert(type(result) == ExitCode)
+    assert(isinstance(result, ExitCode))
     if result.value != 0:
         sys.exit("Error: the last progam exited with code {}".format(result.value))
 
