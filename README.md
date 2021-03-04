@@ -200,6 +200,27 @@ expand | Scope to expand arrays through.
 
 Arrays are important because they provide a way to represent one or more strings without requiring them to be delimited.  Not having an array type and requiring a delimiter instead is the source of many pitfalls with other scripting languages.
 
+Like other features, this syntax is subject to change.  I'm opting to implement array semantics using existing syntax with builtins for the moment.
+
+```
+$set files (@array a b c)
+
+ls (@index files 0)
+# same as: ls a
+
+ls $files
+# same as: ls a b c
+
+@push files d
+ls (@index files 3)
+# same as: ls d
+
+@pop files
+# files is now [a, b, c]
+```
+
+For now I'm limiting arrays to strings only.  Below is the initial syntax that I cam up with, maybe I will come back to it:
+
 ```sh
 #
 # VARNAME = (@array VALUES...)

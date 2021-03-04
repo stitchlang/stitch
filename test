@@ -502,6 +502,17 @@ def main():
     testSemanticError(b"@call @false", "@call requires Strings but got Bool")
     testError(b"@call this-file-does-not-exist", prototype.MissingStitchScript, "stitch script 'this-file-does-not-exist' does not exist")
 
+    #
+    # Arrays
+    #
+#    testSemanticError(b"@array", b"")
+#    #testSemanticError(b"@array a", b"")
+#    testSemanticError(b"(@array)", b"")
+#    testSemanticError(b"(@array a)", b"")
+    #testCommand(b"a = (@array)", 0, b"")
+    #testCommand(b"a = (@array a)", 0, b"")
+    #testCommand(b"a = (@array a b c)", 0, b"")
+
     runStitchTests()
 
     print("test: success")
