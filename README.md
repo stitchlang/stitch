@@ -20,7 +20,7 @@ name = Fred
 
 # arrays
 names = (@array Fred Lisa Joey)
-@echo Hello @expand.names
+@echo Hello $names
 ```
 
 stitch scripts primarily consist of commands containing one or more arguments.  The first argument is inspected to determine how the command is invoked; it can be:
@@ -160,7 +160,7 @@ stitch has a basic type system with the following object types:
 |----------|----------------|-----------------------------------------------------------------------------|
 | String   | `foo` `"bar"`  | a sequence of characters, this is the default type of most tokens in stitch |
 | Array    | `(@array a b c)` | an array of Strings |
-| Builtin  | `@echo` `@set` | a "builtin program" |
+| Builtin  | `@echo` `@assert` | a "builtin program" |
 | Bool     | `@true`        | used by binary expressions like `@true @and @false` and with `@assert @true` |
 
 > NOTE: Internally I also use an Error object with subclasses for different kinds of errors.  Not sure if this will be exposed to stitch scripts yet.  I also have an object for BinaryOperator along with subclasses, also not sure if this will be exposed to stitch scripts.
@@ -199,6 +199,27 @@ expand | Scope to expand arrays through.
 # Arrays
 
 Arrays are important because they provide a way to represent one or more strings without requiring them to be delimited.  Not having an array type and requiring a delimiter instead is the source of many pitfalls with other scripting languages.
+
+Like other features, this syntax is subject to change.  I'm opting to implement array semantics using existing syntax with builtins for the moment.
+
+```
+files = (@array a b c)
+
+ls (@index files 0)
+# same as: ls a
+
+ls $files
+# same as: ls a b c
+
+@push files d
+ls (@index files 3)
+# same as: ls d
+
+@pop files
+# files is now [a, b, c]
+```
+
+For now I'm limiting arrays to strings only.  Below is the initial syntax that I cam up with, maybe I will come back to it:
 
 ```sh
 #

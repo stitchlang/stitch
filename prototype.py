@@ -40,28 +40,34 @@ class BuiltinExpandType(Enum):
     ExpandNodesResult = 1
     Objects = 2
     Strings = 3
+class BuiltinReturnType:
+    ExitCode = 0
+    Bool = 1
+    Array = 2
+
 class Builtin(StitchObject):
-    def __init__(self, python_name_str: str, expand_type: BuiltinExpandType, returns_bool: bool, arg_count: Optional[int] = None):
+    def __init__(self, python_name_str: str, expand_type: BuiltinExpandType, return_type: BuiltinReturnType, arg_count: Optional[int] = None):
         name_str = python_name_str.rstrip("_")
         self.name = name_str.encode('utf8')
         self.python_name_str = python_name_str
         self.atname_str = "@" + name_str
         self.expand_type = expand_type
-        self.returns_bool = returns_bool
         self.arg_count = arg_count
+        self.return_type = return_type
     def __repr__(self):
         return self.atname_str
     @staticmethod
     def userTypeDescriptor():
         return "Builtin"
 class String(StitchObject):
-    def __init__(self, value):
+    def __init__(self, value: bytes):
+        assert(type(value) == bytes)
         self.value = value
     @staticmethod
     def userTypeDescriptor():
         return "String"
 class Array(StitchObject):
-    def __init__(self, elements):
+    def __init__(self, elements: List[bytes]):
         self.elements = elements
     @staticmethod
     def userTypeDescriptor():
@@ -87,6 +93,14 @@ class UnknownString(Unknown):
     def userTypeDescriptor():
         return "String"
 UNKNOWN_STRING = UnknownString()
+
+class UnknownArray(Unknown):
+    def __init__(self):
+        Unknown.__init__(self, Array)
+    @staticmethod
+    def userTypeDescriptor():
+        return "Array"
+UNKNOWN_ARRAY = UnknownArray()
 
 class BinaryOperator(StitchObject):
     def __init__(self, name: bytes):
@@ -368,7 +382,8 @@ class BuiltinMethods:
         return ExitCode(0)
     @staticmethod
     def echo(cmd_ctx: CommandContext, args: List[bytes]):
-        cmd_ctx.capture.stdout.handle(b" ".join(args))
+        if len(args) > 0:
+            cmd_ctx.capture.stdout.handle(b" ".join(args))
         return ExitCode(0)
     # TODO: maybe remove this?  Maybe @pushscope/@popscope?
     @staticmethod
@@ -552,6 +567,15 @@ class BuiltinMethods:
         assert(isinstance(result, ExitCode))
         return result
 
+    # arrays are limited to strings only right now, so we can expand all arguments to strings
+    @staticmethod
+    def array(cmd_ctx: CommandContext, args: List[bytes]):
+        return Array(args)
+    @staticmethod
+    def lines2array(cmd_ctx: CommandContext, args: List[bytes]):
+        assert(len(args) == 1)
+        return Array(args[0].splitlines())
+
 def opInvalidTypeError(op: BinaryOperator, operand: StitchObject):
     #raise Exception("'{}' does not accept objects of type {}".format(op, operand.userTypeDescriptor()))
     return SemanticError("'{}' does not accept objects of type {}".format(op, operand.userTypeDescriptor()))
@@ -603,34 +627,34 @@ class CompareOp:
 
 # builtin objects that do not change and are the same for all scripts
 builtin_objects = {
-    b"allstringliterals": Builtin("allstringliterals", BuiltinExpandType.ParseNodes, returns_bool=False, arg_count=0),
-    b"note": Builtin("note", BuiltinExpandType.ParseNodes, returns_bool=False),
-    b"echo": Builtin("echo", BuiltinExpandType.Strings, returns_bool=False),
-    b"settmp": Builtin("settmp", BuiltinExpandType.ParseNodes, returns_bool=False),
-    b"multiline": Builtin("multiline", BuiltinExpandType.ParseNodes, returns_bool=False),
-    b"exitcode": Builtin("exitcode", BuiltinExpandType.ParseNodes, returns_bool=True),
-    b"call": Builtin("call", BuiltinExpandType.Strings, returns_bool=False),
-    b"assert": Builtin("assert_", BuiltinExpandType.ParseNodes, returns_bool=False),
-    b"if": Builtin("if_", BuiltinExpandType.ParseNodes, returns_bool=False),
-    b"end": Builtin("end", BuiltinExpandType.ParseNodes, returns_bool=False, arg_count=0),
-    b"haveprog": Builtin("haveprog", BuiltinExpandType.Strings, returns_bool=True, arg_count=1),
-    b"setenv": Builtin("setenv", BuiltinExpandType.Strings, returns_bool=False, arg_count=2),
-    b"unsetenv": Builtin("unsetenv", BuiltinExpandType.Strings, returns_bool=False, arg_count=1),
-    b"env": Builtin("env", BuiltinExpandType.Strings, returns_bool=False, arg_count=1),
+    b"allstringliterals": Builtin("allstringliterals", BuiltinExpandType.ParseNodes, BuiltinReturnType.ExitCode, arg_count=0),
+    b"note": Builtin("note", BuiltinExpandType.ParseNodes, BuiltinReturnType.ExitCode),
+    b"echo": Builtin("echo", BuiltinExpandType.Strings, BuiltinReturnType.ExitCode),
+    b"settmp": Builtin("settmp", BuiltinExpandType.ParseNodes, BuiltinReturnType.ExitCode),
+    b"multiline": Builtin("multiline", BuiltinExpandType.ParseNodes, BuiltinReturnType.ExitCode),
+    b"exitcode": Builtin("exitcode", BuiltinExpandType.ParseNodes, BuiltinReturnType.Bool),
+    b"call": Builtin("call", BuiltinExpandType.Strings, BuiltinReturnType.ExitCode),
+    b"assert": Builtin("assert_", BuiltinExpandType.ParseNodes, BuiltinReturnType.ExitCode),
+    b"if": Builtin("if_", BuiltinExpandType.ParseNodes, BuiltinReturnType.ExitCode),
+    b"end": Builtin("end", BuiltinExpandType.ParseNodes, BuiltinReturnType.ExitCode, arg_count=0),
+    b"haveprog": Builtin("haveprog", BuiltinExpandType.Strings, BuiltinReturnType.Bool, arg_count=1),
+    b"setenv": Builtin("setenv", BuiltinExpandType.Strings, BuiltinReturnType.ExitCode, arg_count=2),
+    b"unsetenv": Builtin("unsetenv", BuiltinExpandType.Strings, BuiltinReturnType.ExitCode, arg_count=1),
+    b"env": Builtin("env", BuiltinExpandType.Strings, BuiltinReturnType.ExitCode, arg_count=1),
     # NOTE: envdefault must take ParseNodes to support lazy expansion of the default value
-    b"envdefault": Builtin("envdefault", BuiltinExpandType.ParseNodes, returns_bool=False, arg_count=2),
+    b"envdefault": Builtin("envdefault", BuiltinExpandType.ParseNodes, BuiltinReturnType.ExitCode, arg_count=2),
     b"false": BOOL_FALSE,
     b"true": BOOL_TRUE,
-    b"not": Builtin("not_", BuiltinExpandType.ParseNodes, returns_bool=True),
-    b"isfile": Builtin("isfile", BuiltinExpandType.Strings, returns_bool=True, arg_count=1),
-    b"isdir": Builtin("isdir", BuiltinExpandType.Strings, returns_bool=True, arg_count=1),
+    b"not": Builtin("not_", BuiltinExpandType.ParseNodes, BuiltinReturnType.Bool),
+    b"isfile": Builtin("isfile", BuiltinExpandType.Strings, BuiltinReturnType.Bool, arg_count=1),
+    b"isdir": Builtin("isdir", BuiltinExpandType.Strings, BuiltinReturnType.Bool, arg_count=1),
     b"or": OrOperator(),
     b"and": AndOperator(),
     b"eq": EqOperator(),
     b"gt": CompareOperator(b"gt", CompareOp.gt),
     b"lt": CompareOperator(b"lt", CompareOp.lt),
-    # NOTE: this is just temporary for testing
-    b"emptyarray": Array([]),
+    b"array": Builtin("array", BuiltinExpandType.Strings, BuiltinReturnType.Array),
+    b"lines2array": Builtin("lines2array", BuiltinExpandType.Strings, BuiltinReturnType.Array, arg_count=1),
 }
 
 def which(name):
@@ -769,7 +793,7 @@ def enforceBuiltinArgCount(builtin: Builtin, actual: int) -> Optional[Error]:
     return None
 
 def runBuiltin(cmd_ctx: CommandContext, builtin: Builtin, nodes: List[parse.Node]):
-    if builtin.returns_bool:
+    if builtin.return_type != BuiltinReturnType.ExitCode:
         error = disableCaptureModifiers(cmd_ctx, builtin.atname_str)
         if error:
             return error
@@ -819,10 +843,10 @@ def runAssign(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> Union[Error,E
     if isinstance(value, Error):
         return value
     is_unknown_value = False
-    if isinstance(value, UnknownString) or isinstance(value, UnknownBool):
+    if isinstance(value, UnknownString) or isinstance(value, UnknownBool) or isinstance(value, UnknownArray):
         is_unknown_value = True
-    elif (not isinstance(value, String)) and (not isinstance(value, Bool)):
-        return SemanticError("expected a String or Bool after '=' but got {}".format(value.userTypeDescriptor()))
+    elif (not isinstance(value, String)) and (not isinstance(value, Bool)) and (not isinstance(value, Array)):
+        return SemanticError("expected a String, Bool or Array after '=' but got {}".format(value.userTypeDescriptor()))
 
     cmd_ctx.var_map[varname.value] = value
     return UNKNOWN_EXIT_CODE if is_unknown_value else ExitCode(0)
@@ -958,11 +982,10 @@ def stdoutOnlyHandler(stdout: bytes, multiline: bool):
         return String(stdout)
     lines = stdout.splitlines()
     if len(lines) == 0:
-        return String("")
+        return String(b"")
     elif len(lines) == 1:
         return String(stripNewline(lines[0]))
     return UnexpectedMultilineError(stdout)
-    #sys.exit("Error: program '{}' returned {} lines, but command-subtitution requires only 1 line of output.  Prefix the command with '@multiline' to support multiple.".format(str(node.nodes[0]), len(lines)))
 
 def isCaptured(s):
     return s != None
@@ -977,9 +1000,11 @@ def combineRunResultWithOutputs(cmd_ctx, result):
         if cmd_ctx.capture.stdout != cmd_ctx.parent.capture.stdout:
             assert(isinstance(cmd_ctx.capture.stdout, StringBuilder))
             stdout = cmd_ctx.capture.stdout.output
+            assert(type(stdout) == bytes)
         if cmd_ctx.capture.stderr != cmd_ctx.parent.capture.stderr:
             assert(isinstance(cmd_ctx.capture.stderr, StringBuilder))
             stderr = cmd_ctx.capture.stderr.output
+            assert(type(stderr) == bytes)
 
     exitcode = None
     if isinstance(result, ExitCode):
@@ -1011,12 +1036,14 @@ def combineRunResultWithOutputs(cmd_ctx, result):
             return UNKNOWN_COMMAND_RESULT
         return CommandResult(result.value, stdout, stderr)
 
-    if isinstance(result, Bool) or isinstance(result, UnknownBool):
+    if (isinstance(result, Bool) or isinstance(result, Array)
+        or isinstance(result, UnknownBool) or isinstance(result, UnknownArray)):
+
         if cmd_ctx.capture.exitcode or isCaptured(stdout) or isCaptured(stderr):
-            raise Exception("ec={} stdout={} stderr={}".format(cmd_ctx.capture.exitcode, isCaptured(stdout), isCaptured(stderr)))
+            raise Exception("codebug? ec={} stdout={} stderr={}".format(cmd_ctx.capture.exitcode, isCaptured(stdout), isCaptured(stderr)))
         return result
 
-    raise Exception("expected an ExitCode or Bool but got {}".format(result.userTypeDescriptor()))
+    raise Exception("expected an ExitCode, Bool or Array but got {}".format(result.userTypeDescriptor()))
 
 
 # returns an array of strings and builtin objects

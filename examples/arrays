@@ -1,0 +1,21 @@
+
+empty = (@array)
+@echo $empty
+@assert "" @eq (@echo $empty)
+
+abc = (@array a b c)
+@assert "a b c" @eq (@echo $abc)
+
+cmd = (@array true)
+$cmd
+@assert (@exitcode $cmd)
+
+cmd = (@array false)
+@assert @not (@exitcode $cmd)
+
+@if @haveprog ls
+    files_string = (@multiline ls -1 @scriptdir)
+    @echo $files_string
+    files_array = (@lines2array $files_string)
+    @echo $files_array
+@end
