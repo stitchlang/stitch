@@ -5,6 +5,7 @@ import subprocess
 import inspect
 from typing import List, Dict, Union, Tuple
 
+import lex
 import prototype
 
 SCRIPT_DIR = os.path.dirname(__file__)
@@ -36,10 +37,11 @@ class ErrorTest(CommandTest):
     def verify(self, result, test_line):
         if type(result) != self.error_type:
             sys.exit("{}({}): Error: expected a {} but got {}: '{}'".format(__file__, test_line, self.error_type.__name__, result, result))
-        if result.message != self.message:
+        result_msg = str(result)
+        if result_msg != self.message:
             print("{}({}): Error: semantic error message does not match expected:".format(__file__, test_line))
             print("expected: {}".format(self.message))
-            print("actual  : {}".format(result.message))
+            print("actual  : {}".format(result_msg))
             sys.exit(1)
 
 class CommandResultTest(CommandTest):
@@ -67,7 +69,7 @@ def runTests(commands: List[CommandTest], test_line: int, verification_mode: boo
         stderr_builder = prototype.StringBuilder()
         try:
             result = prototype.runLine(context, cmd.line, stdout_builder, stderr_builder)
-        except prototype.SyntaxError as e:
+        except lex.SyntaxError as e:
             result = e
 
         if type(result) == prototype.ExitCode:
@@ -79,7 +81,7 @@ def getCallerLine():
     return inspect.getframeinfo(inspect.stack()[2][0]).lineno
 
 def testSyntaxError(line, message):
-    test = ErrorTest(line, prototype.SyntaxError, message)
+    test = ErrorTest(line, lex.SyntaxError, message)
     print("test {}".format(test))
     runTests([test], getCallerLine(), verification_mode=True)
 
@@ -132,6 +134,19 @@ def main():
         path = os.path.join(SCRIPT_DIR, "assetsfortest", "missing_windows_programs")
         os.environ["PATH"] = path + ";" + os.environ["PATH"]
 
+    testSyntaxError("(", "missing close paren for: (")
+    testSyntaxError("(foo", "missing close paren for: (foo")
+    testSyntaxError("(a long command that demonstrates we shouldn't pring this whole thing when we show an error",
+                    "missing close paren for: (a long command that demonstra[..snip..]")
+    testSyntaxError("$$", "unrecognized character sequence '$$'")
+    testSyntaxError("@`", "unrecognized character sequence '@`'")
+    testCommand("@echo @@", 0, "@\n")
+    testCommand("@echo @#", 0, "#\n")
+    testCommand("@echo @$", 0, "$\n")
+    testCommand('@echo @"', 0, '"\n')
+    testCommand("@echo @)", 0, ")\n")
+    testCommand("@echo @(", 0, "(\n")
+
     testSemanticError("@multiline", "@multiline requires at least 1 argument")
     testSemanticError("@multiline @true", "the @multiline builtin is only supported within an (..inline command..)")
     testSemanticError("(@multiline @true @and @true)", "@multiline does not accept Bool")
@@ -144,11 +159,13 @@ def main():
     testCommand('@echo', 0, "")
     testCommand('@echo foo', 0, "foo\n")
     testCommand('@echo "foo"', 0, "foo\n")
-    testSyntaxError('@echo "foo', "string literal '\"foo' is missing the terminating '\"' character")
+
+    testSyntaxError('"', 'missing close quote for: "')
+    testSyntaxError('@echo "foo', 'missing close quote for: "foo')
     testSyntaxError('@echo "01234567890123456789012345678',
-                    "string literal '\"01234567890123456789012345678' is missing the terminating '\"' character")
+                    'missing close quote for: "01234567890123456789012345678')
     testSyntaxError('@echo "012345678901234567890123456789',
-                    "string literal '\"01234567890123456789012345678[..snip..]' is missing the terminating '\"' character")
+                    'missing close quote for: "01234567890123456789012345678[..snip..]')
     testCommand('@echo @"', 0, '"\n')
     testCommand('@echo "#@$()"', 0, '#@$()\n')
 

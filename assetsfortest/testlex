@@ -1,0 +1,62 @@
+#!/usr/bin/env python3
+import sys
+import os
+from typing import List, Dict, Set, Union, Tuple, Optional, Pattern
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_DIR = os.path.dirname(SCRIPT_DIR)
+sys.path.insert(0, os.path.join(REPO_DIR))
+
+import lex
+
+def tokenize(s):
+    pos = 0
+    while True:
+        optional_token = lex.scan(s, pos, verify_one_rule=True)
+        if optional_token is None:
+            break
+        rule, token_len = optional_token
+        token_str = s[pos:pos+token_len]
+        pos += token_len
+        display_str = token_str
+        if display_str == "\n":
+            display_str = ""
+        print("{}({})".format(rule.kind.name, display_str))
+
+STITCH_HEADER = "#!/usr/bin/env stitch"
+        
+def testFile(name: str):
+    with open(name, "r") as f:
+        source = f.read()
+        print("--------------------------------------------------------------------------------")
+        print("lexing script: '{}'".format(name))
+        print("--------------------------------------------------------------------------------")
+        if not source.startswith("#!/usr/bin/env stitch"):
+            print("Error: this script doesn't start with '{}'".format(STITCH_HEADER))
+        tokenize(source)
+            
+def testDir(path: str, ignore_set: Set[str]):
+    for entry_base in os.listdir(path):
+        if entry_base.endswith("~"):
+            continue
+        entry = os.path.join(path, entry_base)
+        if entry_base in ignore_set:
+            print("ignoring '{}'".format(entry))
+            continue
+        testFile(entry)
+        
+def main():
+    print("--------------------------------------------------------------------------------")
+    print("Token Rules")
+    print("--------------------------------------------------------------------------------")
+    for rule in lex.RULES:
+        print("{} {}".format(rule.kind.name, rule.pattern.pattern))
+    print("--------------------------------------------------------------------------------")
+
+    tokenize('@@ @# @$ @" @( @)')
+    testFile(os.path.join(REPO_DIR, "stitch-tests"))
+    testDir(os.path.join(REPO_DIR, "examples"), {"ldd.original_bash"})
+    print("testlex: Success")
+
+if __name__ == "__main__":
+    main()

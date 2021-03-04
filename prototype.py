@@ -7,216 +7,8 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from typing import List, Dict, Set, Union, Tuple, Optional
 
-class Node:
-    def __init__(self, src):
-        self.src = src
-class NodeToken(Node):
-    def __init__(self, src, s):
-        Node.__init__(self, src)
-        self.s = s
-    def __repr__(self):
-        return "RawString({})".format(self.s)
-class NodeVariable(Node):
-    def __init__(self, src, id, is_at):
-        Node.__init__(self, src)
-        self.id = id
-        self.is_at = is_at
-    def __repr__(self):
-        return "Variable({}{})".format("@" if self.is_at else "$", self.id)
-class NodeInlineCommand(Node):
-    def __init__(self, src, nodes):
-        Node.__init__(self, src)
-        self.nodes = nodes
-    def __repr__(self):
-        return "NodeInlineCommand({})".format(", ".join([str(n) for n in self.nodes]))
-class NodeMultiple(Node):
-    def __init__(self, src, nodes):
-        Node.__init__(self, src)
-        self.nodes = nodes
-    def __repr__(self):
-        return "Multiple({})".format(", ".join([str(n) for n in self.nodes]))
-
-def combineNodes(existing_node, new_node):
-    if not existing_node:
-        return new_node
-    if isinstance(existing_node, NodeMultiple):
-        existing_node.nodes.append(new_node)
-        return existing_node
-    return NodeMultiple(existing_node.src + new_node.src, [existing_node, new_node])
-
-def isspaceOrd(c_ord):
-    return c_ord == ord(" ")
-
-def isIdOrd(c_ord):
-    if c_ord >= ord("a"):
-        return c_ord <= ord("z")
-    elif c_ord >= ord("A"):
-        return c_ord <= ord("Z") or c_ord == ord("_")
-    elif c_ord >= ord("0"):
-        return c_ord <= ord("9")
-    else:
-        return c_ord == ord(".")
-
-def skipWhitespace(src, i):
-    while i < len(src) and isspaceOrd(ord(src[i])):
-        i += 1
-    return i
-
-# TODO: this can be implemented better
-#       the string returned should never exceed max_len, so the [..snip..]
-#       should cut off the actual characters of s as well
-def preview(s, max_len):
-    cutoff = s.find("\n")
-    if cutoff == -1:
-        cutoff = len(s)
-    cutoff = min(len(s), max_len)
-    return s[:cutoff] + ("[..snip..]" if (len(s) > cutoff) else "")
-
-class SyntaxError(Exception):
-    def __init__(self, message):
-        self.message = message
-
-def parseDelimitedString(src: str, i: int, prefix: str) -> Tuple[NodeToken, int]:
-    assert(i < len(src))
-    sentinel_char = src[i]
-    sentinel_ord = ord(sentinel_char)
-    i += 1
-    start = i
-    while True:
-        if i == len(src):
-            literal = preview(src[start-1:], 30)
-            raise SyntaxError("string literal '{}{}' is missing the terminating '{}' character".format(
-                prefix, literal, sentinel_char))
-        if ord(src[i]) == sentinel_ord:
-            s = src[start:i]
-            return NodeToken(s, s), i+1
-        i += 1
-
-def parseAtOrDollarVar(src, i, is_at):
-    special_char = "@" if is_at else "$"
-    c_ord = ord(src[i])
-    if not isIdOrd(c_ord):
-        sys.exit("Error: unexpected sequence '{}{}''".format(special_char, chr(c_ord)))
-    special_ord = ord(special_char)
-    id_start = i
-    while True:
-        i += 1
-        if i == len(src):
-            id_end = i
-            break
-        c_ord = ord(src[i])
-        if not isIdOrd(c_ord):
-            id_end = i
-            if c_ord == special_ord:
-                i += 1
-            break
-    return NodeVariable(src[id_start-1:id_end], src[id_start:id_end], is_at=is_at), i
-
-def parseAtExpr(src, i):
-    if i == len(src):
-        # TODO: add test for this error
-        sys.exit("Error: got a '@' with nothing after it")
-    c_ord = ord(src[i])
-    if c_ord == ord("#"):
-        return NodeToken("@#", "#"), i+1
-    if c_ord == ord("@"):
-        return NodeToken("@@", "@"), i+1
-    if c_ord == ord("%"):
-        if i+1 == len(src):
-            sys.exit("Error: got '@%' with nothing after it")
-        return parseDelimitedString(src, i+1, "@%")
-    if c_ord == ord("$"):
-        return NodeToken("@$", "$"), i+1
-    if c_ord == ord('"'):
-        return NodeToken('@"', '"'), i+1
-    if c_ord == ord("("):
-        return NodeToken("@(", "("), i+1
-    if c_ord == ord(")"):
-        return NodeToken("@)", ")"), i+1
-    return parseAtOrDollarVar(src, i, is_at=True)
-
-def parseDollarExpr(src, i):
-    if i == len(src):
-        # TODO: add test for this error
-        sys.exit("Error: got a '$' with nothing after it")
-    c_ord = ord(src[i])
-    if c_ord == ord("@"):
-        return NodeToken("$@", "@"), i+1
-    return parseAtOrDollarVar(src, i, is_at=False)
-
-def parseNode(src, i):
-    assert(i < len(src))
-    assert(ord(src[i]) != "#")
-    assert(not isspaceOrd(ord(src[i])))
-    node = None
-    mark = i
-    while i < len(src):
-        c_ord = ord(src[i])
-        if c_ord == ord("@"):
-            if i > mark:
-                s = src[mark:i]
-                node = combineNodes(node, NodeToken(s, s))
-            at_node, at_str_limit = parseAtExpr(src, i+1)
-            mark = at_str_limit
-            i = at_str_limit
-            node = combineNodes(node, at_node)
-            continue
-        if c_ord == ord("$"):
-            if i > mark:
-                s = src[mark:i]
-                node = combineNodes(node, NodeToken(s, s))
-            dollar_node, dollar_str_limit = parseDollarExpr(src, i+1)
-            mark = dollar_str_limit
-            i = dollar_str_limit
-            node = combineNodes(node, dollar_node)
-            continue
-        if c_ord == ord('"'):
-            if i > mark:
-                s = src[mark:i]
-                node = combineNodes(node, NodeToken(s, s))
-            token_node, token_limit = parseDelimitedString(src, i, '')
-            mark = token_limit
-            i = token_limit
-            node = combineNodes(node, token_node)
-            continue
-        if c_ord == ord("("):
-            if i > mark:
-                s = src[mark:i]
-                node = combineNodes(node, NodeToken(s, s))
-            inline_cmd_nodes, inline_cmd_limit = parseCommand(src, i+1)
-            if inline_cmd_limit == len(src) or ord(src[inline_cmd_limit]) != ord(")"):
-                # TODO: add test for this error
-                sys.exit("Error: '(' is missing the closing paren ')'")
-            node = combineNodes(node, NodeInlineCommand(src[i:inline_cmd_limit+1], inline_cmd_nodes))
-            mark = inline_cmd_limit + 1
-            i = inline_cmd_limit + 1
-            continue
-        if isspaceOrd(c_ord) or c_ord == ord("#") or c_ord == ord(")"):
-            break
-        i += 1
-    if i > mark:
-        s = src[mark:i]
-        node = combineNodes(node, NodeToken(s, s))
-    return node, i
-
-def parseCommand(src, i):
-    nodes = []
-    while True:
-        i = skipWhitespace(src, i)
-        if i == len(src):
-            break
-        next_ord = ord(src[i])
-        if next_ord == ord("#") or next_ord == ord(")"):
-            break
-        node, i = parseNode(src, i)
-        if not node:
-            break
-        nodes.append(node)
-    return nodes, i
-
-def parseTopLevelCommand(src):
-    nodes, _ = parseCommand(src, 0)
-    return nodes
+import lex
+import parse
 
 def stripNewline(s):
     if len(s) > 0 and ord(s[-1]) == "\n":
@@ -388,22 +180,35 @@ class UnknownCommandResult(Unknown):
         return "CommandResult"
 UNKNOWN_COMMAND_RESULT = UnknownCommandResult()
 
+def countLinesAndColumns(s: str):
+    line = 1
+    column = 1
+    for c in s:
+        if c == "\n":
+            line += 1
+            column = 1
+        else:
+            column += 1
+    return line, column
+
 # TODO: not sure if the Error types will be exposed to stitch yet, or if they
 #       are just an internal detail
 class Error:
     def __init__(self, message):
         self.message = message
+    def __repr__(self):
+        return self.message
+class SyntaxError(Error):
+    def __init__(self, filename: str, lex_error: lex.SyntaxError):
+        line, column = countLinesAndColumns(lex_error.src_prefix)
+        super().__init__("{}(line {} column {}) {}".format(filename, line, column, str(lex_error)))
 class SemanticError(Error):
     def __init__(self, message):
         Error.__init__(self, message)
-    def __repr__(self):
-        return "SemanticError: {}".format(self.message)
 class AssertError(Error):
     def __init__(self, src):
         Error.__init__(self, "@assert failed")
         self.src = src
-    def __repr__(self):
-        return "AssertError"
 class NonZeroExitCodeError(Error):
     def __init__(self, exitcode: int, stdout: Optional[str], stderr: Optional[str]):
         assert(exitcode != 0)
@@ -538,10 +343,10 @@ class CommandContext:
 
 class BuiltinMethods:
     @staticmethod
-    def note(cmd_ctx: CommandContext, nodes: List[Node]):
+    def note(cmd_ctx: CommandContext, nodes: List[parse.Node]):
         return ExitCode(0)
     @staticmethod
-    def echo(cmd_ctx: CommandContext, nodes: List[Node]):
+    def echo(cmd_ctx: CommandContext, nodes: List[parse.Node]):
         args: List[str] = []
         error = nodesToArgs(cmd_ctx, nodes, args)
         if error:
@@ -549,7 +354,7 @@ class BuiltinMethods:
         cmd_ctx.capture.stdout.handle(" ".join(args))
         return ExitCode(0)
     @staticmethod
-    def set(cmd_ctx: CommandContext, nodes: List[Node]):
+    def set(cmd_ctx: CommandContext, nodes: List[parse.Node]):
         if len(nodes) != 2:
             return SemanticError("@set expects 2 arguments but got {}".format(len(nodes)))
         is_unknown = expandSetArgs(cmd_ctx, nodes[0], nodes[1], "@set", cmd_ctx.script.var_map)
@@ -557,7 +362,7 @@ class BuiltinMethods:
             return is_unknown
         return UNKNOWN_EXIT_CODE if is_unknown else ExitCode(0)
     @staticmethod
-    def settmp(cmd_ctx: CommandContext, nodes: List[Node]):
+    def settmp(cmd_ctx: CommandContext, nodes: List[parse.Node]):
         if len(nodes) < 3:
             sys.exit("Error: the @settmp builtin requires at least 3 arguments")
         is_unknown = expandSetArgs(cmd_ctx, nodes[0], nodes[1], "@settmp", cmd_ctx.var_map)
@@ -566,7 +371,7 @@ class BuiltinMethods:
         #print("DEBUG: settmp '{}' to '{}'".format(varname, value))
         return runCommandNodes(cmd_ctx.nextBuiltin(ambiguous_op=None), nodes[2:])
     @staticmethod
-    def setenv(cmd_ctx: CommandContext, nodes: List[Node]):
+    def setenv(cmd_ctx: CommandContext, nodes: List[parse.Node]):
         if len(nodes) != 2:
             return SemanticError("@setenv expects 2 arguments but got {}".format(len(nodes)))
         pair = expandSetArgsCommon(cmd_ctx, nodes[0], nodes[1], "@setenv")
@@ -582,7 +387,7 @@ class BuiltinMethods:
             return UNKNOWN_EXIT_CODE
         return SemanticError("@setenv requires a String for its 2nd argument but got {}".format(value.userTypeDescriptor()))
     @staticmethod
-    def unsetenv(cmd_ctx: CommandContext, nodes: List[Node]):
+    def unsetenv(cmd_ctx: CommandContext, nodes: List[parse.Node]):
         if len(nodes) != 1:
             return SemanticError("@unsetenv expects 1 argument but got {}".format(len(nodes)))
         name = expandNode(cmd_ctx, nodes[0])
@@ -598,7 +403,7 @@ class BuiltinMethods:
             del os.environ[name.value]
         return ExitCode(0)
     @staticmethod
-    def env(cmd_ctx: CommandContext, nodes: List[Node]):
+    def env(cmd_ctx: CommandContext, nodes: List[parse.Node]):
         if len(nodes) != 1:
             return SemanticError("@env expects 1 argument but got {}".format(len(nodes)))
         name = expandNode(cmd_ctx, nodes[0])
@@ -616,7 +421,7 @@ class BuiltinMethods:
         cmd_ctx.capture.stdout.handle(value)
         return ExitCode(0)
     @staticmethod
-    def envdefault(cmd_ctx: CommandContext, nodes: List[Node]):
+    def envdefault(cmd_ctx: CommandContext, nodes: List[parse.Node]):
         if len(nodes) != 2:
             return SemanticError("@envdefault expects 2 arguments but got {}".format(len(nodes)))
         name = expandNode(cmd_ctx, nodes[0])
@@ -644,7 +449,7 @@ class BuiltinMethods:
         cmd_ctx.capture.stdout.handle(default.value)
         return ExitCode(0)
     @staticmethod
-    def multiline(cmd_ctx: CommandContext, nodes: List[Node]):
+    def multiline(cmd_ctx: CommandContext, nodes: List[parse.Node]):
         if len(nodes) == 0:
             return SemanticError("@multiline requires at least 1 argument")
         if cmd_ctx.parent is None:
@@ -660,7 +465,7 @@ class BuiltinMethods:
         result.multiline = True
         return result
     @staticmethod
-    def exitcode(cmd_ctx: CommandContext, nodes: List[Node]):
+    def exitcode(cmd_ctx: CommandContext, nodes: List[parse.Node]):
         if len(nodes) == 0:
             return SemanticError("@exitcode requires at least 1 argument")
         if cmd_ctx.parent is None:
@@ -676,14 +481,14 @@ class BuiltinMethods:
         cmd_ctx.capture.stdout = cmd_ctx.parent.capture.stdout
         return runCommandNodes(cmd_ctx.nextBuiltin(ambiguous_op=None), nodes)
     @staticmethod
-    def not_(cmd_ctx: CommandContext, nodes: List[Node]):
+    def not_(cmd_ctx: CommandContext, nodes: List[parse.Node]):
         result = expandNodesToBool(cmd_ctx.nextBuiltin(ambiguous_op="@not"), nodes, "@not", True)
         if isinstance(result, Error) or isinstance(result, UnknownBool):
             return result
         assert(isinstance(result, Bool))
         return BOOL_FALSE if result.value else BOOL_TRUE
     @staticmethod
-    def isfile(cmd_ctx: CommandContext, nodes: List[Node]):
+    def isfile(cmd_ctx: CommandContext, nodes: List[parse.Node]):
         error = disableIncompatibleCapture(cmd_ctx, "@isfile")
         if error:
             return error
@@ -696,7 +501,7 @@ class BuiltinMethods:
         assert(cmd_ctx.script.verification_mode)
         return UNKNOWN_BOOL
     @staticmethod
-    def assert_(cmd_ctx: CommandContext, nodes: List[Node]):
+    def assert_(cmd_ctx: CommandContext, nodes: List[parse.Node]):
         result = expandNodesToBool(cmd_ctx.nextBuiltin(ambiguous_op=None), nodes, "@assert", False)
         if isinstance(result, Error):
             return result
@@ -707,7 +512,7 @@ class BuiltinMethods:
             return AssertError(" ".join([n.src for n in nodes]))
         return ExitCode(0)
     @staticmethod
-    def if_(cmd_ctx: CommandContext, nodes: List[Node]):
+    def if_(cmd_ctx: CommandContext, nodes: List[parse.Node]):
         result = expandNodesToBool(cmd_ctx.nextBuiltin(ambiguous_op=None), nodes, "@if", True)
         if isinstance(result, Error):
             return result
@@ -720,7 +525,7 @@ class BuiltinMethods:
         cmd_ctx.script.pushBlock(enabled=True)
         return UNKNOWN_EXIT_CODE
     @staticmethod
-    def end(cmd_ctx: CommandContext, nodes: List[Node]):
+    def end(cmd_ctx: CommandContext, nodes: List[parse.Node]):
         if len(nodes) != 0:
             return SemanticError("'@end' does not accept any arguments")
         error = cmd_ctx.script.popBlock()
@@ -728,7 +533,7 @@ class BuiltinMethods:
             return error
         return ExitCode(0)
     @staticmethod
-    def call(cmd_ctx: CommandContext, nodes: List[Node]):
+    def call(cmd_ctx: CommandContext, nodes: List[parse.Node]):
         args: List[str] = []
         error = nodesToArgs(cmd_ctx, nodes, args)
         if error:
@@ -761,7 +566,7 @@ class BuiltinMethods:
         return result
 
     @staticmethod
-    def haveprog(cmd_ctx: CommandContext, nodes: List[Node]):
+    def haveprog(cmd_ctx: CommandContext, nodes: List[parse.Node]):
         error = disableIncompatibleCapture(cmd_ctx, "@haveprog")
         if error:
             return error
@@ -786,7 +591,7 @@ def operandToBool(op: BinaryOperator, operand: StitchObject) -> Union[Error,Bool
         return UNKNOWN_BOOL
     return opInvalidTypeError(op, operand)
 
-def expandSetArgsCommon(cmd_ctx: CommandContext, arg1: Node, arg2: Node, builtin_name: str) -> Union[Error,Tuple[str,StitchObject]]:
+def expandSetArgsCommon(cmd_ctx: CommandContext, arg1: parse.Node, arg2: parse.Node, builtin_name: str) -> Union[Error,Tuple[str,StitchObject]]:
     name = expandNode(cmd_ctx, arg1)
     if isinstance(name, Error):
         return name
@@ -797,7 +602,7 @@ def expandSetArgsCommon(cmd_ctx: CommandContext, arg1: Node, arg2: Node, builtin
         return value
     return (name.value, value)
 
-def expandSetArgs(cmd_ctx: CommandContext, arg1: Node, arg2: Node, builtin_name: str, var_map: Dict[str,StitchObject]) -> Union[Error,bool]:
+def expandSetArgs(cmd_ctx: CommandContext, arg1: parse.Node, arg2: parse.Node, builtin_name: str, var_map: Dict[str,StitchObject]) -> Union[Error,bool]:
     pair = expandSetArgsCommon(cmd_ctx, arg1, arg2, builtin_name)
     if isinstance(pair, Error):
         return pair
@@ -877,7 +682,7 @@ class ExpandNodes:
         def __init__(self, args: List[str]):
             self.args = args
 
-def expandNodes(cmd_ctx: CommandContext, nodes: List[Node]) -> Union[Error,ExpandNodesResult]:
+def expandNodes(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> Union[Error,ExpandNodesResult]:
     assert(len(nodes) > 0)
 
     obj = expandNode(cmd_ctx, nodes[0])
@@ -918,7 +723,7 @@ def expandNodes(cmd_ctx: CommandContext, nodes: List[Node]) -> Union[Error,Expan
 
     return ExpandNodes.ExternalProgram(args)
 
-def expandNodesToBool(cmd_ctx: CommandContext, nodes: List[Node], builtin_name: str, allow_cmd_result: bool) -> Union[Error,Bool,UnknownBool]:
+def expandNodesToBool(cmd_ctx: CommandContext, nodes: List[parse.Node], builtin_name: str, allow_cmd_result: bool) -> Union[Error,Bool,UnknownBool]:
     if len(nodes) == 0:
         return SemanticError("{} requires at least 1 argument".format(builtin_name))
 
@@ -951,7 +756,7 @@ def expandNodesToBool(cmd_ctx: CommandContext, nodes: List[Node], builtin_name: 
 #
 # is no longer used, but I think it might be later so keeping for now
 #
-#def expandOneNodeToBool(cmd_ctx: CommandContext, nodes: List[Node], builtin_name: str) -> Union[Error,Bool,UnknownBool]:
+#def expandOneNodeToBool(cmd_ctx: CommandContext, nodes: List[parse.Node], builtin_name: str) -> Union[Error,Bool,UnknownBool]:
 #    if len(nodes) != 1:
 #        return SemanticError("{} accepts 1 argument but got {}".format(builtin_name, len(nodes)))
 #
@@ -973,7 +778,7 @@ def expandNodesToBool(cmd_ctx: CommandContext, nodes: List[Node], builtin_name: 
 #
 #    return SemanticError("'{}' expects Bool but got {}".format(builtin_name, obj.userTypeDescriptor()))
 
-def expandOneNodeToString(cmd_ctx: CommandContext, nodes: List[Node], builtin_name: str) -> Union[Error,String,UnknownString]:
+def expandOneNodeToString(cmd_ctx: CommandContext, nodes: List[parse.Node], builtin_name: str) -> Union[Error,String,UnknownString]:
     if len(nodes) != 1:
         return SemanticError("{} accepts 1 argument but got {}".format(builtin_name, len(nodes)))
 
@@ -987,12 +792,12 @@ def expandOneNodeToString(cmd_ctx: CommandContext, nodes: List[Node], builtin_na
         return UNKNOWN_STRING
     return SemanticError("'{}' expects String but got {}".format(builtin_name, obj.userTypeDescriptor()))
 
-def runCommandNodes(cmd_ctx: CommandContext, nodes: List[Node]) -> Union[Error,Bool,ExitCode,UnknownBool,UnknownExitCode]:
+def runCommandNodes(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> Union[Error,Bool,ExitCode,UnknownBool,UnknownExitCode]:
     assert(len(nodes) > 0)
     # handle @end if we are disabled
     if not cmd_ctx.script.blockStack[-1].enabled:
         first = nodes[0]
-        if isinstance(first, NodeVariable) and (first.id == "end"):
+        if isinstance(first, parse.NodeVariable) and (first.id == "end"):
             if len(nodes) > 1:
                 return SemanticError("'@end' does not accept any arguments")
             error = cmd_ctx.script.popBlock()
@@ -1020,7 +825,7 @@ def runCommandNodes(cmd_ctx: CommandContext, nodes: List[Node]) -> Union[Error,B
     assert(isinstance(result, ExpandNodes.ExternalProgram))
     return runExternalProgram(cmd_ctx.script.verification_mode, cmd_ctx.capture.stdout, cmd_ctx.capture.stderr, result.args)
 
-def nodesToArgs(cmd_ctx: CommandContext, nodes: List[Node], args: List[str], start: int = 0) -> Optional[Error]:
+def nodesToArgs(cmd_ctx: CommandContext, nodes: List[parse.Node], args: List[str], start: int = 0) -> Optional[Error]:
     for i, node in enumerate(nodes[start:], start=start):
         obj = expandNode(cmd_ctx, node)
         if isinstance(obj, Error):
@@ -1173,11 +978,11 @@ def combineRunResultWithOutputs(cmd_ctx, result):
 
 
 # returns an array of strings and builtin objects
-def expandNode(cmd_ctx: CommandContext, node: Node) -> Union[Error,StitchObject]:
-    if isinstance(node, NodeToken):
+def expandNode(cmd_ctx: CommandContext, node: parse.Node) -> Union[Error,StitchObject]:
+    if isinstance(node, parse.NodeToken):
         return String(node.s)
 
-    if isinstance(node, NodeVariable):
+    if isinstance(node, parse.NodeVariable):
         if node.is_at:
             obj = tryLookupBuiltinVar(cmd_ctx.script, node.id)
         else:
@@ -1186,12 +991,12 @@ def expandNode(cmd_ctx: CommandContext, node: Node) -> Union[Error,StitchObject]
             return SemanticError("'{}' is undefined".format(node.src))
         return obj
 
-    if isinstance(node, NodeInlineCommand):
+    if isinstance(node, parse.NodeInlineCommand):
         inline_cmd_ctx = cmd_ctx.createChild()
         result = runCommandNodes(inline_cmd_ctx, node.nodes)
         return combineRunResultWithOutputs(inline_cmd_ctx, result)
 
-    if isinstance(node, NodeMultiple):
+    if isinstance(node, parse.NodeMultiple):
         args: List[str] = []
         error = nodesToArgs(cmd_ctx, node.nodes, args)
         if error:
@@ -1209,7 +1014,7 @@ def disableIncompatibleCapture(cmd_ctx: CommandContext, error_context: str):
         cmd_ctx.capture.stdout = cmd_ctx.parent.capture.stdout
     return None
 
-def runBinaryExpression(cmd_ctx: CommandContext, nodes: List[Node], first_obj: StitchObject, op: BinaryOperator):
+def runBinaryExpression(cmd_ctx: CommandContext, nodes: List[parse.Node], first_obj: StitchObject, op: BinaryOperator):
     if cmd_ctx.ambiguous_op:
         return SemanticError("got binary expression inside ambiguous operator '{}', wrap inside (..parenthesis..)".format(cmd_ctx.ambiguous_op))
 
@@ -1243,8 +1048,8 @@ def runBinaryExpression(cmd_ctx: CommandContext, nodes: List[Node], first_obj: S
             return expression_result
 
         next_op = nodes[index]
-        if not isinstance(next_op, NodeVariable):
-            if isinstance(next_op, NodeToken):
+        if not isinstance(next_op, parse.NodeVariable):
+            if isinstance(next_op, parse.NodeToken):
                 return SemanticError("expected '{}' operator but got token '{}'; commands must be wrapped with (...)".format(op, next_op.s))
             return SemanticError("TODO: good error message for node that was expected to be an operand: {}".format(next_op))
         if next_op.id != op.name:
@@ -1252,7 +1057,7 @@ def runBinaryExpression(cmd_ctx: CommandContext, nodes: List[Node], first_obj: S
 
 
 def runLine(script_ctx: ScriptContext, line: str, stdout_handler: DataHandler, stderr_handler: DataHandler) -> Union[Error,Bool,ExitCode,UnknownBool,UnknownExitCode]:
-    nodes = parseTopLevelCommand(line)
+    nodes = parse.parseTopLevelCommand(line)
     if len(nodes) == 0:
         return ExitCode(0)
 
@@ -1333,39 +1138,43 @@ def normalizeFilename(filename):
 
 def runFile(global_ctx: GlobalContext, full_filename: str, line_reader: LineReader,
             stdout_handler: DataHandler, stderr_handler: DataHandler) -> Union[Error,ExitCode]:
-    output = ""
 
-    if global_ctx.doverify:
-        normalized_filename = normalizeFilename(full_filename)
-        if not normalized_filename in global_ctx.verify_started:
-            global_ctx.verify_started.add(normalized_filename)
-            print("stitch: DEBUG: verifying '{}'".format(full_filename), file=sys.stderr)
-            stdout_builder = StringBuilder()
-            stderr_builder = StringBuilder()
-            script_ctx = ScriptContext(global_ctx, full_filename, verification_mode=True)
-            result = runFileHelper(script_ctx, line_reader, stdout_builder, stderr_builder)
-            if isinstance(result, Error):
-                # This can happen if the arguments of an assert are known at "verification time"
-                # i.e. @assert @true
-                if isinstance(result, AssertError):
-                    print("{}: AssertError: {}".format(full_filename, result.src))
-                else:
-                    assert(isinstance(result, SemanticError))
-                    print("{}: SemanticError: {}".format(full_filename, result.message))
-                return result
-            # I'm allowing things to print to stdout during verification mode
-            # because this can allow other mechnisms to get "further" in verification
-            if len(stdout_builder.output) > 0:
-                pass
-                #sys.exit("something printed to stdout during verification mode???")
-            if len(stderr_builder.output) > 0:
-                pass
-                #sys.exit("something printed to stderr during verification mode???")
-            print("stitch: DEBUG: verification done on '{}'".format(full_filename), file=sys.stderr)
+    try:
+        output = ""
 
-    line_reader.reset()
-    script_ctx = ScriptContext(global_ctx, full_filename, verification_mode=False)
-    return runFileHelper(script_ctx, line_reader, stdout_handler, stderr_handler)
+        if global_ctx.doverify:
+            normalized_filename = normalizeFilename(full_filename)
+            if not normalized_filename in global_ctx.verify_started:
+                global_ctx.verify_started.add(normalized_filename)
+                print("stitch: DEBUG: verifying '{}'".format(full_filename), file=sys.stderr)
+                stdout_builder = StringBuilder()
+                stderr_builder = StringBuilder()
+                script_ctx = ScriptContext(global_ctx, full_filename, verification_mode=True)
+                result = runFileHelper(script_ctx, line_reader, stdout_builder, stderr_builder)
+                if isinstance(result, Error):
+                    # This can happen if the arguments of an assert are known at "verification time"
+                    # i.e. @assert @true
+                    if isinstance(result, AssertError):
+                        print("{}: AssertError: {}".format(full_filename, result.src))
+                    else:
+                        assert(isinstance(result, SemanticError))
+                        print("{}: SemanticError: {}".format(full_filename, result.message))
+                    return result
+                # I'm allowing things to print to stdout during verification mode
+                # because this can allow other mechnisms to get "further" in verification
+                if len(stdout_builder.output) > 0:
+                    pass
+                    #sys.exit("something printed to stdout during verification mode???")
+                if len(stderr_builder.output) > 0:
+                    pass
+                    #sys.exit("something printed to stderr during verification mode???")
+                print("stitch: DEBUG: verification done on '{}'".format(full_filename), file=sys.stderr)
+
+        line_reader.reset()
+        script_ctx = ScriptContext(global_ctx, full_filename, verification_mode=False)
+        return runFileHelper(script_ctx, line_reader, stdout_handler, stderr_handler)
+    except lex.SyntaxError as lex_syntax_err:
+        return SyntaxError(full_filename, lex_syntax_err)
 
 def resolveCallerWorkdir(sandbox_path: str) -> str:
     # TODO: is this the same var on all posix operating systems?
