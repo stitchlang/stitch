@@ -6,6 +6,7 @@ import inspect
 from typing import List, Dict, Union, Tuple
 
 import lex
+import parse
 import prototype
 
 SCRIPT_DIR = os.path.dirname(__file__)
@@ -13,19 +14,6 @@ SCRIPT_DIR = os.path.dirname(__file__)
 class CommandTest:
     def __init__(self, line):
         self.line = line
-
-class BoolTest(CommandTest):
-    def __init__(self, line, expect):
-        CommandTest.__init__(self, line)
-        self.expect = expect
-    def __repr__(self):
-        return "BoolTest line='{}' expect={}'".format(self.line, self.expect)
-    def verify(self, result, test_line):
-        if type(result) != prototype.Bool:
-            sys.exit("{}({}): Error: expected a Bool but got {}".format(__file__, test_line, result))
-        if result.value != self.expect:
-            sys.exit("{}({}): Error: expected line to return {} but returned {}: '{}'".format(
-                __file__, test_line, self.expect, result.value, line))
 
 class ErrorTest(CommandTest):
     def __init__(self, line, error_type, message):
@@ -67,13 +55,20 @@ def runTests(commands: List[CommandTest], test_line: int, verification_mode: boo
     for cmd in commands:
         stdout_builder = prototype.StringBuilder()
         stderr_builder = prototype.StringBuilder()
+        result = None
         try:
-            result = prototype.runLine(context, cmd.line, stdout_builder, stderr_builder)
+            nodes, end = parse.parseCommand(cmd.line, 0)
+            assert(end == len(cmd.line))
         except lex.SyntaxError as e:
             result = e
-
-        if type(result) == prototype.ExitCode:
-            result = prototype.CommandResult(result.value, stdout_builder.output, stderr_builder.output)
+        if not result:
+            assert(len(nodes) > 0)
+            result = prototype.runCommandNodes(prototype.CommandContext(
+                context, parent=None, depth=0,
+                capture=prototype.Capture(False, stdout_builder, stderr_builder),
+                builtin_prefix_count=0, ambiguous_op=None), nodes)
+            if type(result) == prototype.ExitCode:
+                result = prototype.CommandResult(result.value, stdout_builder.output, stderr_builder.output)
 
         cmd.verify(result, test_line)
 
@@ -101,8 +96,12 @@ def testError(line, error_type, message):
     runTests([test], getCallerLine(), verification_mode=False)
 
 def testExpression(line, expected):
-    test = BoolTest(line, expected)
-    print("{}".format(test))
+    print("testExpression('{}', {})".format(line, expected))
+    if expected:
+        command = "@assert " + line
+    else:
+        command = "@assert @not ({})".format(line)
+    test = CommandResultTest(command, 0, "")
     runTests([test], getCallerLine(), verification_mode=False)
 
 def testCommands(commands, verification_mode: bool):
@@ -235,7 +234,7 @@ def main():
 
     testSemanticError("$missing @and @true", "'$missing' is undefined")
     testSemanticError("(@echo hello) @and @true", "'@and' does not accept objects of type String")
-    testExpression("(@exitcode @echo hello) @and @true", True)
+    testCommand("@assert (@exitcode @echo hello) @and @true", 0, "hello\n")
 
     testSemanticError("((@echo true)) @and @true", "'@and' does not accept objects of type String")
     testExpression("(@exitcode (@echo true)) @and @true", True)
@@ -273,9 +272,15 @@ def main():
     testSemanticError("@if", "@if requires at least 1 argument")
     testCommand("@if @false", 0, "")
     testCommand("@if @true", 0, "")
-    testCommand("@if false", 0, "")
-    testCommand("@if true", 0, "")
     # TODO: I need to call something like testFile to test "need more '@end'"
+    testCommands([
+        CommandResultTest("@if @false", 0, ""),
+        CommandResultTest("    @echo hey", 0, ""),
+        CommandResultTest("@end", 0, ""),
+        CommandResultTest("@if @true", 0, ""),
+        CommandResultTest("    @echo hey", 0, "hey\n"),
+        CommandResultTest("@end", 0, ""),
+    ], verification_mode=False)
 
     testSemanticError("@end", "too many '@end'")
     # need multiple lines to test this otherwise I just get "too many '@end'"

@@ -545,21 +545,18 @@ class BuiltinMethods:
             sys.exit("Error: @call with more than just a program not implemented")
         if cmd_ctx.script.verification_mode:
             return UNKNOWN_EXIT_CODE
-        script_file = None
+        # TODO: should I be caching files?
         try:
-            try:
-                script_file = open(program_file, "r")
-            except FileNotFoundError:
-                return MissingStitchScript(program_file)
-            result = runFile(cmd_ctx.script.global_ctx,
-                           program_file,
-                           FileLineReader(script_file),
-                           cmd_ctx.capture.stdout,
-                           cmd_ctx.capture.stderr)
-        finally:
-            if script_file:
-                script_file.close()
-
+            with open(program_file, "r") as file:
+                # TODO: try mmap if it is supported
+                src = file.read()
+        except FileNotFoundError:
+            return MissingStitchScript(program_file)
+        result = runFile(cmd_ctx.script.global_ctx,
+                         program_file,
+                         src,
+                         cmd_ctx.capture.stdout,
+                         cmd_ctx.capture.stderr)
         if isinstance(result, Error):
             return result
         assert(isinstance(result, ExitCode))
@@ -1055,70 +1052,39 @@ def runBinaryExpression(cmd_ctx: CommandContext, nodes: List[parse.Node], first_
         if next_op.id != op.name:
             return SemanticError("'{}' and '@{}' cannot be chained".format(op, next_op.id))
 
+def runSrc(script_ctx: ScriptContext, src: str, stdout_handler: DataHandler, stderr_handler: DataHandler) -> Union[Error,ExitCode]:
+    pos = 0
+    while pos < len(src):
+        nodes, end = parse.parseCommand(src, pos)
+        assert(end > pos)
+        pos = end
 
-def runLine(script_ctx: ScriptContext, line: str, stdout_handler: DataHandler, stderr_handler: DataHandler) -> Union[Error,Bool,ExitCode,UnknownBool,UnknownExitCode]:
-    nodes = parse.parseTopLevelCommand(line)
-    if len(nodes) == 0:
-        return ExitCode(0)
+        if len(nodes) == 0:
+            continue
 
-    # Note: it seems like it might be better to just print the
-    #       line in its source form rather than the expanded form
-    #       definitely should have an option for this
-    #if script_ctx.print_trace:
-    #    message = "+ {}".format(line)
-    #    if capture_stdout:
-    #        output += message + "\n"
-    #    else:
-    #        print(message)
-    cmd_ctx = CommandContext(
-        script_ctx,
-        parent=None,
-        depth=0,
-        capture=Capture(False, stdout_handler, stderr_handler),
-        builtin_prefix_count=0,
-        ambiguous_op=None
-    )
-    return runCommandNodes(cmd_ctx, nodes)
-
-
-class LineReader:
-    @abstractmethod
-    def reset(self):
-        pass
-    @abstractmethod
-    def readline(self):
-        pass
-class StringLinesReader(LineReader):
-    def __init__(self, lines):
-        self.lines = lines
-        self.next_line = 0
-    def reset(self):
-        self.next_line = 0
-    def readline(self):
-        if self.next_line == len(self.lines):
-            return None
-        line = self.lines[self.next_line]
-        self.next_line += 1
-        return line if line else "\n"
-class FileLineReader(LineReader):
-    def __init__(self, open_file):
-        self.open_file = open_file
-    def reset(self):
-        self.open_file.seek(0)
-    def readline(self):
-        return self.open_file.readline()
-
-def runFileHelper(script_ctx: ScriptContext, line_reader: LineReader, stdout_handler: DataHandler, stderr_handler: DataHandler) -> Union[Error,ExitCode]:
-    while True:
-        line = line_reader.readline()
-        if not line:
-            break
-        line = line.rstrip()
-        result = runLine(script_ctx, line, stdout_handler, stderr_handler)
+        # Note: it seems like it might be better to just print the
+        #       line in its source form rather than the expanded form
+        #       definitely should have an option for this
+        #if script_ctx.print_trace:
+        #    message = "+ {}".format(line)
+        #    if capture_stdout:
+        #        output += message + "\n"
+        #    else:
+        #        print(message)
+        result = runCommandNodes(CommandContext(
+            script_ctx,
+            parent=None,
+            depth=0,
+            capture=Capture(False, stdout_handler, stderr_handler),
+            builtin_prefix_count=0,
+            ambiguous_op=None
+        ), nodes)
         if isinstance(result, Error):
             return result
         if isinstance(result, Bool):
             return SemanticError("unhandled Bool whose value is {}".format(result.value))
+        if isinstance(result, UnknownBool):
+            return SemanticError("unhandled Bool".format())
         if isinstance(result, ExitCode):
             if result.value != 0:
                 return result
@@ -1136,7 +1102,7 @@ def normalizeFilename(filename):
     # TODO: implement this
     return filename
 
-def runFile(global_ctx: GlobalContext, full_filename: str, line_reader: LineReader,
+def runFile(global_ctx: GlobalContext, full_filename: str, src: str,
             stdout_handler: DataHandler, stderr_handler: DataHandler) -> Union[Error,ExitCode]:
 
     try:
@@ -1150,7 +1116,7 @@ def runFile(global_ctx: GlobalContext, full_filename: str, line_reader: LineRead
                 stdout_builder = StringBuilder()
                 stderr_builder = StringBuilder()
                 script_ctx = ScriptContext(global_ctx, full_filename, verification_mode=True)
-                result = runFileHelper(script_ctx, line_reader, stdout_builder, stderr_builder)
+                result = runSrc(script_ctx, src, stdout_builder, stderr_builder)
                 if isinstance(result, Error):
                     # This can happen if the arguments of an assert are known at "verification time"
                     # i.e. @assert @true
@@ -1170,9 +1136,8 @@ def runFile(global_ctx: GlobalContext, full_filename: str, line_reader: LineRead
                     #sys.exit("something printed to stderr during verification mode???")
                 print("stitch: DEBUG: verification done on '{}'".format(full_filename), file=sys.stderr)
 
-        line_reader.reset()
         script_ctx = ScriptContext(global_ctx, full_filename, verification_mode=False)
-        return runFileHelper(script_ctx, line_reader, stdout_handler, stderr_handler)
+        return runSrc(script_ctx, src, stdout_handler, stderr_handler)
     except lex.SyntaxError as lex_syntax_err:
         return SyntaxError(full_filename, lex_syntax_err)
 
@@ -1237,16 +1202,19 @@ def main():
             sys.exit("Error: -c requires 1 argument but got {}".format(len(cmd_args)))
         filename = "<command-line-script>"
         full_filename = filename
-        line_reader = StringLinesReader(cmd_args[0].splitlines())
+        src = cmd_args[0]
     else:
         if len(cmd_args) > 0:
             sys.exit("Error: too many command-line arguments")
         filename = first_arg
         full_filename = os.path.abspath(first_arg)
-        line_reader = FileLineReader(open(first_arg, "r"))
+        with open(first_arg, "r") as file:
+            # TODO: try mmap if it is supported
+            # NOTE: this will require using bytes instead of strings in Python
+            src = file.read()
 
     global_ctx = GlobalContext(doverify, sandboxCallerWorkdir())
-    result = runFile(global_ctx, full_filename, line_reader, CONSOLE_PRINTER, CONSOLE_PRINTER)
+    result = runFile(global_ctx, full_filename, src, CONSOLE_PRINTER, CONSOLE_PRINTER)
     if isinstance(result, Error):
         prefix = "Semantic" if isinstance(result, SemanticError) else ""
         print("{}: {}Error: {}".format(filename, prefix, result.message))

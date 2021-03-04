@@ -70,6 +70,7 @@ def parseNode(src: str, token: ParseToken) -> Tuple[Node, Optional[ParseToken]]:
     assert(token.pos < len(src))
     assert(token.rule.kind != lex.TokenKind.INLINE_WHITESPACE)
     assert(token.rule.kind != lex.TokenKind.COMMENT)
+    assert(token.rule.kind != lex.TokenKind.NEWLINE)
     assert(token.rule.kind != lex.TokenKind.RIGHT_PAREN)
 
     node: Optional[Node] = None
@@ -111,6 +112,7 @@ def parseNode(src: str, token: ParseToken) -> Tuple[Node, Optional[ParseToken]]:
         token = ParseToken(next_token_start, rule, token_len)
         if (rule.kind == lex.TokenKind.INLINE_WHITESPACE or
             rule.kind == lex.TokenKind.COMMENT or
+            rule.kind == lex.TokenKind.NEWLINE or
             rule.kind == lex.TokenKind.RIGHT_PAREN):
             return node, token
 
@@ -125,7 +127,7 @@ def parseCommand(src, cmd_start) -> Tuple[List[Node],int]:
     if token.skipInlineWhitespace(src):
         return nodes, token.pos
     while True:
-        if token.rule.kind == lex.TokenKind.COMMENT:
+        if token.rule.kind == lex.TokenKind.COMMENT or token.rule.kind == lex.TokenKind.NEWLINE:
             return nodes, token.pos + token.length
         if token.rule.kind == lex.TokenKind.RIGHT_PAREN:
             return nodes, token.pos
@@ -139,8 +141,5 @@ def parseCommand(src, cmd_start) -> Tuple[List[Node],int]:
                 return nodes, token.pos
         else:
             assert(token.rule.kind == lex.TokenKind.COMMENT or
+                   token.rule.kind == lex.TokenKind.NEWLINE or
                    token.rule.kind == lex.TokenKind.RIGHT_PAREN)
-
-def parseTopLevelCommand(src):
-    nodes, _ = parseCommand(src, 0)
-    return nodes

@@ -67,11 +67,11 @@ class SyntaxError(Exception):
 #       the string returned should never exceed max_len, so the [..snip..]
 #       should cut off the actual characters of s as well
 def preview(s, max_len):
-    cutoff = s.find("\n")
-    if cutoff == -1:
-        cutoff = len(s)
-    cutoff = min(len(s), max_len)
-    return s[:cutoff] + ("[..snip..]" if (len(s) > cutoff) else "")
+    newline = s.find("\n")
+    cutoff = len(s) if (newline == -1) else newline - 1
+    if cutoff > max_len:
+        return s[:max_len] + "[..snip..]"
+    return s[:cutoff]
 
 # NOTE: verify_one_rule verifies that only 1 lexer rule is matching the next string.
 #       I think that maintaining this property on my lexer means that all the rules
