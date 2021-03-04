@@ -129,7 +129,7 @@ def parseAtExpr(src, i):
     if c_ord == ord('"'):
         return NodeToken('@"', '"'), i+1
     if c_ord == ord("("):
-        return NodeToken("@(", "@"), i+1
+        return NodeToken("@(", "("), i+1
     if c_ord == ord(")"):
         return NodeToken("@)", ")"), i+1
     return parseAtOrDollarVar(src, i, is_at=True)
