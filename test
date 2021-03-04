@@ -61,7 +61,7 @@ class CommandResultTest(CommandTest):
 
 
 def runTests(commands: List[CommandTest], test_line: int, verification_mode: bool):
-    context = prototype.ScriptContext(False, __file__, SCRIPT_DIR, verification_mode)
+    context = prototype.ScriptContext(prototype.GlobalContext(True, SCRIPT_DIR), __file__, verification_mode)
     for cmd in commands:
         stdout_builder = prototype.StringBuilder()
         stderr_builder = prototype.StringBuilder()
@@ -116,7 +116,14 @@ def testCommand(line, exitcode, stdout):
 
 def runStitchTests():
     print("test: running stitch-tests...")
-    result = subprocess.run([sys.executable, os.path.join(SCRIPT_DIR, "prototype.py"), "stitch-tests"])
+    stitch_args = [sys.executable, os.path.join(SCRIPT_DIR, "prototype.py")]
+
+    result = subprocess.run(stitch_args + ["-c", "@echo hello"], capture_output=True)
+    if result.returncode != 0:
+        sys.exit(result.returncode)
+    assert(result.stdout.decode("ascii").rstrip() == "hello")
+
+    result = subprocess.run(stitch_args + ["stitch-tests"])
     if result.returncode != 0:
         sys.exit(result.returncode)
 
@@ -326,6 +333,8 @@ def main():
         ErrorTest        ("@assert @not ((@env FOO) @eq BAR)", prototype.AssertError, "@assert failed"),
         CommandResultTest("@unsetenv FOO", 0, ""),
     ], verification_mode=False)
+
+    testError("@call this-file-does-not-exist", prototype.MissingStitchScript, "stitch script 'this-file-does-not-exist' does not exist")
 
     runStitchTests()
 

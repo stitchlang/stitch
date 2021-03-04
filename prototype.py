@@ -392,8 +392,11 @@ class NonZeroExitCodeError(Error):
         self.stdout = stdout
         self.stderr = stderr
 class MissingProgramError(Error):
+    def __init__(self, filename):
+        Error.__init__(self, "unable to find program '{}' in PATH".format(filename))
+class MissingStitchScript(Error):
     def __init__(self, prog):
-        Error.__init__(self, "unable to find program '{}' in PATH".format(prog))
+        Error.__init__(self, "stitch script '{}' does not exist".format(prog))
 class UnexpectedMultilineError(Error):
     def __init__(self, stdout):
         Error.__init__(self, "missing '@multiline', got this multiline output\n----\n{}----\n".format(stdout))
@@ -411,23 +414,28 @@ class UnknownExitCode:
     pass
 UNKNOWN_EXIT_CODE = UnknownExitCode()
 
+class GlobalContext:
+    def __init__(self, doverify: bool, callerworkdir: str):
+        self.doverify = doverify
+        self.callerworkdir = callerworkdir
+        self.verify_started = {}
+
 class ScriptContext:
     class Block:
         def __init__(self, enabled: Union[None,Bool]):
             self.enabled = enabled
 
     # TODO: add fields for logging/tracing options?
-    def __init__(self, doverify, scriptfile, callerworkdir, verification_mode):
-        self.doverify = doverify
+    def __init__(self, global_ctx: GlobalContext, scriptfile: str, verification_mode: bool):
+        self.global_ctx = global_ctx
         self.script_specific_builtin_objects = {
             "scriptfile": String(scriptfile),
             "scriptdir": String(os.path.dirname(scriptfile)),
             # NOTE: callerworkdir will need to be forwarded to any sub-scripts
             #       maybe I can just use an environment variable
-            "callerworkdir": String(callerworkdir),
+            "callerworkdir": String(global_ctx.callerworkdir),
         }
         self.var_map = {}
-        self.verify_started = {}
         self.verification_mode = verification_mode
         self.blockStack = [ScriptContext.Block(enabled=True)]
     def pushBlock(self, enabled: bool) -> None:
@@ -668,11 +676,25 @@ class BuiltinMethods:
             sys.exit("Error: @call with more than just a program not implemented")
         if cmd_ctx.script.verification_mode:
             return UNKNOWN_EXIT_CODE
-        return runFile(cmd_ctx.script.doverify,
-                       program_file,
-                       cmd_ctx.script.script_specific_builtin_objects["callerworkdir"].value,
-                       cmd_ctx.capture.stdout,
-                       cmd_ctx.capture.stderr)
+        script_file = None
+        try:
+            try:
+                script_file = open(program_file, "r")
+            except FileNotFoundError:
+                return MissingStitchScript(program_file)
+            result = runFile(cmd_ctx.script.global_ctx,
+                           program_file,
+                           FileLineReader(script_file),
+                           cmd_ctx.capture.stdout,
+                           cmd_ctx.capture.stderr)
+        finally:
+            if script_file:
+                script_file.close()
+
+        if isinstance(result, Error):
+            return result
+        assert(type(result) == ExitCode)
+        return result
 
     def haveprog(cmd_ctx: CommandContext, nodes: List[Node]):
         error = disableIncompatibleCapture(cmd_ctx, "@haveprog")
@@ -908,7 +930,7 @@ def runCommandNodes(cmd_ctx: CommandContext, nodes: List[Node]) -> Union[Error,B
         # todo: is ("+" * (depth+1)) too inneficient?
         msg = "{} {}".format("+" * (cmd_ctx.depth+1), " ".join([n.src for n in nodes]))
         # NOTE: ignore capture_stdout, just always print to console for now
-        print(msg)
+        print(msg, file=sys.stderr)
 
     # handle @end if we are disabled
     if not cmd_ctx.script.blockStack[-1].enabled:
@@ -1199,26 +1221,48 @@ def runLine(script_ctx: ScriptContext, line: str, stdout_handler: DataHandler, s
     )
     return runCommandNodes(cmd_ctx, nodes)
 
-def runFileHelper(script_ctx: ScriptContext, filename: str, stdout_handler: DataHandler, stderr_handler: DataHandler) -> ExitCode:
-    with open(filename, "r") as file:
-        while True:
-            line = file.readline()
-            if not line:
-                break
-            line = line.rstrip()
-            result = runLine(script_ctx, line, stdout_handler, stderr_handler)
-            if isinstance(result, Error):
+
+class LineReader:
+    pass
+class StringLinesReader(LineReader):
+    def __init__(self, lines):
+        self.lines = lines
+        self.next_line = 0
+    def reset(self):
+        self.next_line = 0
+    def readline(self):
+        if self.next_line == len(self.lines):
+            return None
+        line = self.lines[self.next_line]
+        self.next_line += 1
+        return line if line else "\n"
+class FileLineReader(LineReader):
+    def __init__(self, open_file):
+        self.open_file = open_file
+    def reset(self):
+        self.open_file.seek(0)
+    def readline(self):
+        return self.open_file.readline()
+
+def runFileHelper(script_ctx: ScriptContext, line_reader: LineReader, stdout_handler: DataHandler, stderr_handler: DataHandler) -> ExitCode:
+    while True:
+        line = line_reader.readline()
+        if not line:
+            break
+        line = line.rstrip()
+        result = runLine(script_ctx, line, stdout_handler, stderr_handler)
+        if isinstance(result, Error):
+            return result
+        if type(result) == Bool:
+            return SemanticError("unhandled Bool whose value is {}".format(result.value))
+        if type(result) == ExitCode:
+            if result.value != 0:
                 return result
-            if type(result) == Bool:
-                return SemanticError("unhandled Bool")
-            if type(result) == ExitCode:
-                if result.value != 0:
-                    return result
-            else:
-                assert(script_ctx.verification_mode and (
-                    type(result) == UnknownBool or
-                    type(result) == UnknownExitCode
-                ))
+        else:
+            assert(script_ctx.verification_mode and (
+                type(result) == UnknownBool or
+                type(result) == UnknownExitCode
+            ))
 
     if len(script_ctx.blockStack) != 1:
         return SemanticError("need more '@end'")
@@ -1228,22 +1272,19 @@ def normalizeFilename(filename):
     # TODO: implement this
     return filename
 
-def runFile(doverify: bool, full_filename: str, callerworkdir: str, stdout_handler: DataHandler, stderr_handler: DataHandler) -> ExitCode:
-
+def runFile(global_ctx: GlobalContext, full_filename: str, line_reader: LineReader,
+            stdout_handler: DataHandler, stderr_handler: DataHandler) -> ExitCode:
     output = ""
 
-    #full_filename = if os.path.isabsolute(filename) else os.path.os.path.abspath(filename)
-    script_ctx = ScriptContext(doverify, full_filename, callerworkdir, verification_mode=False)
-    if script_ctx.doverify:
+    if global_ctx.doverify:
         normalized_filename = normalizeFilename(full_filename)
-        if not normalized_filename in script_ctx.verify_started:
-            script_ctx.verify_started[normalized_filename] = True
-            script_ctx.verification_mode = True
-            print("stitch: DEBUG: verifying '{}'".format(full_filename))
+        if not normalized_filename in global_ctx.verify_started:
+            global_ctx.verify_started[normalized_filename] = True
+            print("stitch: DEBUG: verifying '{}'".format(full_filename), file=sys.stderr)
             stdout_builder = StringBuilder()
             stderr_builder = StringBuilder()
-            result = runFileHelper(script_ctx, full_filename, stdout_builder, stderr_builder)
-            script_ctx.verification_mode = False
+            script_ctx = ScriptContext(global_ctx, full_filename, verification_mode=True)
+            result = runFileHelper(script_ctx, line_reader, stdout_builder, stderr_builder)
             if isinstance(result, Error):
                 # This can happen if the arguments of an assert are known at "verification time"
                 # i.e. @assert @true
@@ -1261,9 +1302,11 @@ def runFile(doverify: bool, full_filename: str, callerworkdir: str, stdout_handl
             if len(stderr_builder.output) > 0:
                 pass
                 #sys.exit("something printed to stderr during verification mode???")
-            print("stitch: DEBUG: verification done on '{}'".format(full_filename))
+            print("stitch: DEBUG: verification done on '{}'".format(full_filename), file=sys.stderr)
 
-    return runFileHelper(script_ctx, full_filename, stdout_handler, stderr_handler)
+    line_reader.reset()
+    script_ctx = ScriptContext(global_ctx, full_filename, verification_mode=False)
+    return runFileHelper(script_ctx, line_reader, stdout_handler, stderr_handler)
 
 def resolveCallerWorkdir(sandbox_path: str) -> str:
     # TODO: is this the same var on all posix operating systems?
@@ -1313,15 +1356,27 @@ def main():
     cmd_args = sys.argv[1:]
     if len(cmd_args) == 0:
         sys.exit("Usage: stitch FILE")
-    if len(cmd_args) != 1:
-        sys.exit("Error: too many command-line arguments")
-    filename = cmd_args[0]
-    full_filename = os.path.abspath(filename)
-
-    callerworkdir = sandboxCallerWorkdir()
+        sys.exit("       stitch -c COMMAND (this is only 1 argument)")
 
     doverify = True
-    result = runFile(doverify, full_filename, callerworkdir, CONSOLE_PRINTER, CONSOLE_PRINTER)
+
+    first_arg = cmd_args[0]
+    cmd_args = cmd_args[1:]
+    if first_arg == "-c":
+        if len(cmd_args) != 1:
+            sys.exit("Error: -c requires 1 argument but got {}".format(len(cmd_args)))
+        filename = "<command-line-script>"
+        full_filename = filename
+        line_reader = StringLinesReader(cmd_args[0].splitlines())
+    else:
+        if len(cmd_args) > 0:
+            sys.exit("Error: too many command-line arguments")
+        filename = first_arg
+        full_filename = os.path.abspath(first_arg)
+        line_reader = FileLineReader(open(first_arg, "r"))
+
+    global_ctx = GlobalContext(doverify, sandboxCallerWorkdir())
+    result = runFile(global_ctx, full_filename, line_reader, CONSOLE_PRINTER, CONSOLE_PRINTER)
     if isinstance(result, Error):
         prefix = "Semantic" if (type(result) == SemanticError) else ""
         print("{}: {}Error: {}".format(filename, prefix, result.msg))

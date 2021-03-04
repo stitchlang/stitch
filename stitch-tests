@@ -2,6 +2,9 @@
 #
 # TODO: use an array to enumerate all the examples
 #
+@if @not @haveprog true
+    @setenv PATH @scriptdir/assetsfortest/missing_windows_programs;(@env PATH)
+@end
 
 @if @haveprog dirname:
     @echo testing scriptdir @scriptdir
