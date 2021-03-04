@@ -27,19 +27,19 @@ class BoolTest(CommandTest):
                 __file__, test_line, self.expect, result.value, line))
 
 class ErrorTest(CommandTest):
-    def __init__(self, line, error_type, msg):
+    def __init__(self, line, error_type, message):
         CommandTest.__init__(self, line)
         self.error_type = error_type
-        self.msg = msg
+        self.message = message
     def __repr__(self):
-        return "{}Test line='{}' msg='{}'".format(self.error_type.__name__, self.line, self.msg)
+        return "{}Test line='{}' message='{}'".format(self.error_type.__name__, self.line, self.message)
     def verify(self, result, test_line):
         if type(result) != self.error_type:
             sys.exit("{}({}): Error: expected a {} but got {}: '{}'".format(__file__, test_line, self.error_type.__name__, result, result))
-        if result.msg != self.msg:
+        if result.message != self.message:
             print("{}({}): Error: semantic error message does not match expected:".format(__file__, test_line))
-            print("expected: {}".format(self.msg))
-            print("actual  : {}".format(result.msg))
+            print("expected: {}".format(self.message))
+            print("actual  : {}".format(result.message))
             sys.exit(1)
 
 class CommandResultTest(CommandTest):
@@ -78,23 +78,23 @@ def runTests(commands: List[CommandTest], test_line: int, verification_mode: boo
 def getCallerLine():
     return inspect.getframeinfo(inspect.stack()[2][0]).lineno
 
-def testSyntaxError(line, msg):
-    test = ErrorTest(line, prototype.SyntaxError, msg)
+def testSyntaxError(line, message):
+    test = ErrorTest(line, prototype.SyntaxError, message)
     print("test {}".format(test))
     runTests([test], getCallerLine(), verification_mode=True)
 
-def testSemanticError(line, msg):
-    test = ErrorTest(line, prototype.SemanticError, msg)
+def testSemanticError(line, message):
+    test = ErrorTest(line, prototype.SemanticError, message)
     print("{}".format(test))
     runTests([test], getCallerLine(), verification_mode=True)
 
-def testAssertError(line, msg):
-    test = ErrorTest(line, prototype.AssertError, msg)
+def testAssertError(line, message):
+    test = ErrorTest(line, prototype.AssertError, message)
     print("{}".format(test))
     runTests([test], getCallerLine(), verification_mode=False)
 
-def testError(line, error_type, msg):
-    test = ErrorTest(line, error_type, msg)
+def testError(line, error_type, message):
+    test = ErrorTest(line, error_type, message)
     print("{}".format(error_type.__name__))
     runTests([test], getCallerLine(), verification_mode=False)
 

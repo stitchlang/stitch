@@ -73,8 +73,8 @@ def preview(s, max_len):
     return s[:cutoff] + ("[..snip..]" if (len(s) > cutoff) else "")
 
 class SyntaxError(Exception):
-    def __init__(self, msg):
-        self.msg = msg
+    def __init__(self, message):
+        self.message = message
 
 def parseDelimitedString(src: str, i: int, prefix: str) -> Tuple[NodeToken, int]:
     assert(i < len(src))
@@ -391,13 +391,13 @@ UNKNOWN_COMMAND_RESULT = UnknownCommandResult()
 # TODO: not sure if the Error types will be exposed to stitch yet, or if they
 #       are just an internal detail
 class Error:
-    def __init__(self, msg):
-        self.msg = msg
+    def __init__(self, message):
+        self.message = message
 class SemanticError(Error):
-    def __init__(self, msg):
-        Error.__init__(self, msg)
+    def __init__(self, message):
+        Error.__init__(self, message)
     def __repr__(self):
-        return "SemanticError: {}".format(self.msg)
+        return "SemanticError: {}".format(self.message)
 class AssertError(Error):
     def __init__(self, src):
         Error.__init__(self, "@assert failed")
@@ -1004,9 +1004,9 @@ def runCommandNodes(cmd_ctx: CommandContext, nodes: List[Node]) -> Union[Error,B
     #       in triaging SemanticErrors
     if not cmd_ctx.script.verification_mode and cmd_ctx.builtin_prefix_count == 0:
         # todo: is ("+" * (depth+1)) too inneficient?
-        msg = "{} {}".format("+" * (cmd_ctx.depth+1), " ".join([n.src for n in nodes]))
+        message = "{} {}".format("+" * (cmd_ctx.depth+1), " ".join([n.src for n in nodes]))
         # NOTE: ignore capture_stdout, just always print to console for now
-        print(msg, file=sys.stderr)
+        print(message, file=sys.stderr)
 
     result = expandNodes(cmd_ctx, nodes)
     if isinstance(result, Error):
@@ -1260,11 +1260,11 @@ def runLine(script_ctx: ScriptContext, line: str, stdout_handler: DataHandler, s
     #       line in its source form rather than the expanded form
     #       definitely should have an option for this
     #if script_ctx.print_trace:
-    #    msg = "+ {}".format(line)
+    #    message = "+ {}".format(line)
     #    if capture_stdout:
-    #        output += msg + "\n"
+    #        output += message + "\n"
     #    else:
-    #        print(msg)
+    #        print(message)
     cmd_ctx = CommandContext(
         script_ctx,
         parent=None,
@@ -1351,7 +1351,7 @@ def runFile(global_ctx: GlobalContext, full_filename: str, line_reader: LineRead
                     print("{}: AssertError: {}".format(full_filename, result.src))
                 else:
                     assert(isinstance(result, SemanticError))
-                    print("{}: SemanticError: {}".format(full_filename, result.msg))
+                    print("{}: SemanticError: {}".format(full_filename, result.message))
                 return result
             # I'm allowing things to print to stdout during verification mode
             # because this can allow other mechnisms to get "further" in verification
@@ -1440,7 +1440,7 @@ def main():
     result = runFile(global_ctx, full_filename, line_reader, CONSOLE_PRINTER, CONSOLE_PRINTER)
     if isinstance(result, Error):
         prefix = "Semantic" if isinstance(result, SemanticError) else ""
-        print("{}: {}Error: {}".format(filename, prefix, result.msg))
+        print("{}: {}Error: {}".format(filename, prefix, result.message))
         sys.exit(1)
 
     assert(isinstance(result, ExitCode))
