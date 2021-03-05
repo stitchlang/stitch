@@ -420,6 +420,8 @@ def main():
         CommandResultTest("@assert (@envdefault FOO bar) @eq bar", 0, ""),
     ], verification_mode=False)
 
+    testSemanticError("@call", "@call requires at least one argument")
+    testSemanticError("@call @false", "@call requires Strings but got Bool")
     testError("@call this-file-does-not-exist", prototype.MissingStitchScript, "stitch script 'this-file-does-not-exist' does not exist")
 
     runStitchTests()

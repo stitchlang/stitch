@@ -533,13 +533,9 @@ class BuiltinMethods:
             return error
         return ExitCode(0)
     @staticmethod
-    def call(cmd_ctx: CommandContext, nodes: List[parse.Node]):
-        args: List[str] = []
-        error = nodesToArgs(cmd_ctx, nodes, args)
-        if error:
-            return error
+    def call(cmd_ctx: CommandContext, args: List[str]):
         if len(args) == 0:
-            sys.exit("Error: the @call builtin requires at least one argument")
+            return SemanticError("@call requires at least one argument")
         program_file = args[0]
         if len(args) > 1:
             sys.exit("Error: @call with more than just a program not implemented")
@@ -618,7 +614,7 @@ builtin_objects = {
     "settmp": Builtin("settmp", BuiltinExpandType.ParseNodes, returns_bool=False),
     "multiline": Builtin("multiline", BuiltinExpandType.ParseNodes, returns_bool=False),
     "exitcode": Builtin("exitcode", BuiltinExpandType.ParseNodes, returns_bool=True),
-    "call": Builtin("call", BuiltinExpandType.ParseNodes, returns_bool=False),
+    "call": Builtin("call", BuiltinExpandType.Strings, returns_bool=False),
     "assert": Builtin("assert_", BuiltinExpandType.ParseNodes, returns_bool=False),
     "if": Builtin("if_", BuiltinExpandType.ParseNodes, returns_bool=False),
     "end": Builtin("end", BuiltinExpandType.ParseNodes, returns_bool=False, arg_count=0),
