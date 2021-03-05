@@ -3,17 +3,17 @@ import re
 from typing import List, Dict, Set, Union, Tuple, Optional, Pattern
 
 class TokenKind(Enum):
-    COMMENT = 0
-    LEFT_PAREN = 1
-    RIGHT_PAREN = 2
-    INLINE_WHITESPACE = 3
+    INLINE_WHITESPACE = 0
+    BUILTIN_ID = 1
+    USER_ID = 2
+    ARG = 3
     NEWLINE = 4
-    ESCAPE_SEQUENCE = 5
-    BUILTIN_ID = 6
-    USER_ID = 7
-    QUOTED_STRING = 8
-    ARG = 9
-    DELIMITED_STRING = 10
+    QUOTED_STRING = 5
+    COMMENT = 6
+    LEFT_PAREN = 7
+    RIGHT_PAREN = 8
+    DELIMITED_STRING = 9
+    ESCAPE_SEQUENCE = 10
 
 class TokenRule:
     def __init__(self, kind: TokenKind, pattern: str):
