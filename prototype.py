@@ -34,11 +34,21 @@ class Bool(StitchObject):
 BOOL_FALSE = Bool(False)
 BOOL_TRUE = Bool(True)
 
+class BuiltinExpandType(Enum):
+    ParseNodes = 0
+    ExpandNodesResult = 1
+    Objects = 2
+    Strings = 3
 class Builtin(StitchObject):
-    def __init__(self, name):
-        self.name = name
+    def __init__(self, python_name: str, expand_type: BuiltinExpandType, returns_bool: bool, arg_count: Optional[int] = None):
+        self.name = python_name.rstrip("_")
+        self.python_name = python_name
+        self.atname = "@" + self.name
+        self.expand_type = expand_type
+        self.returns_bool = returns_bool
+        self.arg_count = arg_count
     def __repr__(self):
-        return "@{}".format(self.name)
+        return self.atname
     @staticmethod
     def userTypeDescriptor():
         return "Builtin"
@@ -127,14 +137,14 @@ class EqOperator(BinaryOperator):
         if isinstance(operand, String):
             return operand
         if isinstance(operand, UnknownString):
-            return UNKNOWN_STRING
+            return UNKNOWN_BOOL
         return opInvalidTypeError(self, operand)
     def apply(self, verification_mode: bool, left, right: StitchObject):
         if isinstance(left, String):
             if isinstance(right, String):
                 return BOOL_TRUE if (left.value == right.value) else BOOL_FALSE
             if isinstance(right, UnknownString):
-                return UNKNOWN_STRING
+                return UNKNOWN_BOOL
             return opInvalidTypeError(self, right)
         assert(isinstance(left, UnknownString))
         return UNKNOWN_BOOL
@@ -207,7 +217,11 @@ class SyntaxError(Error):
         super().__init__("{}(line {} column {}) {}".format(filename, line, column, str(lex_error)))
 class SemanticError(Error):
     def __init__(self, message):
-        Error.__init__(self, message)
+        super().__init__(message)
+class CannotCoerceToStringError(SemanticError):
+    def __init__(self, uncoercable_type):
+        super().__init__("cannot coerce {} to String".format(uncoercable_type))
+        self.uncoercable_type = uncoercable_type
 class AssertError(Error):
     def __init__(self, src):
         Error.__init__(self, "@assert failed")
@@ -349,17 +363,12 @@ class BuiltinMethods:
     def note(cmd_ctx: CommandContext, nodes: List[parse.Node]):
         return ExitCode(0)
     @staticmethod
-    def echo(cmd_ctx: CommandContext, nodes: List[parse.Node]):
-        args: List[str] = []
-        error = nodesToArgs(cmd_ctx, nodes, args)
-        if error:
-            return error
+    def echo(cmd_ctx: CommandContext, args: List[str]):
         cmd_ctx.capture.stdout.handle(" ".join(args))
         return ExitCode(0)
     @staticmethod
     def set(cmd_ctx: CommandContext, nodes: List[parse.Node]):
-        if len(nodes) != 2:
-            return SemanticError("@set expects 2 arguments but got {}".format(len(nodes)))
+        assert(len(nodes) == 2)
         is_unknown = expandSetArgs(cmd_ctx, nodes[0], nodes[1], "@set", cmd_ctx.script.var_map)
         if isinstance(is_unknown, Error):
             return is_unknown
@@ -367,7 +376,7 @@ class BuiltinMethods:
     @staticmethod
     def settmp(cmd_ctx: CommandContext, nodes: List[parse.Node]):
         if len(nodes) < 3:
-            sys.exit("Error: the @settmp builtin requires at least 3 arguments")
+            return SemanticError("@settmp requires at least 3 arguments but got {}".format(len(nodes)))
         is_unknown = expandSetArgs(cmd_ctx, nodes[0], nodes[1], "@settmp", cmd_ctx.var_map)
         if isinstance(is_unknown, Error):
             return is_unknown
@@ -375,8 +384,7 @@ class BuiltinMethods:
         return runCommandNodes(cmd_ctx.nextBuiltin(ambiguous_op=None), nodes[2:])
     @staticmethod
     def setenv(cmd_ctx: CommandContext, nodes: List[parse.Node]):
-        if len(nodes) != 2:
-            return SemanticError("@setenv expects 2 arguments but got {}".format(len(nodes)))
+        assert(len(nodes) == 2)
         pair = expandSetArgsCommon(cmd_ctx, nodes[0], nodes[1], "@setenv")
         if isinstance(pair, Error):
             return pair
@@ -390,43 +398,30 @@ class BuiltinMethods:
             return UNKNOWN_EXIT_CODE
         return SemanticError("@setenv requires a String for its 2nd argument but got {}".format(value.userTypeDescriptor()))
     @staticmethod
-    def unsetenv(cmd_ctx: CommandContext, nodes: List[parse.Node]):
-        if len(nodes) != 1:
-            return SemanticError("@unsetenv expects 1 argument but got {}".format(len(nodes)))
-        name = expandNode(cmd_ctx, nodes[0])
-        if isinstance(name, Error):
-            return name
-        if isinstance(name, UnknownString):
-            return UNKNOWN_EXIT_CODE
-        if not isinstance(name, String):
-            return SemanticError("@unsetenv requires a String but got {}".format(name.userTypeDescriptor()))
-        if not cmd_ctx.script.verification_mode:
-            if not name.value in os.environ:
-                return UndefinedEnvironmentVariableError(name.value)
-            del os.environ[name.value]
-        return ExitCode(0)
-    @staticmethod
-    def env(cmd_ctx: CommandContext, nodes: List[parse.Node]):
-        if len(nodes) != 1:
-            return SemanticError("@env expects 1 argument but got {}".format(len(nodes)))
-        name = expandNode(cmd_ctx, nodes[0])
-        if isinstance(name, Error):
-            return name
-        if isinstance(name, UnknownString):
-            return UNKNOWN_EXIT_CODE
-        if not isinstance(name, String):
-            return SemanticError("@env requires a String but got {}".format(name.userTypeDescriptor()))
+    def unsetenv(cmd_ctx: CommandContext, args: List[str]):
+        assert(len(args) == 1)
+        name = args[0]
         if cmd_ctx.script.verification_mode:
             return UNKNOWN_EXIT_CODE
-        value = os.environ.get(name.value)
-        if value is None:
-            return UndefinedEnvironmentVariableError(name.value)
-        cmd_ctx.capture.stdout.handle(value)
+        if not name in os.environ:
+            return UndefinedEnvironmentVariableError(name)
+        del os.environ[name]
         return ExitCode(0)
     @staticmethod
+    def env(cmd_ctx: CommandContext, args: List[str]):
+        assert(len(args) == 1)
+        if cmd_ctx.script.verification_mode:
+            return UNKNOWN_EXIT_CODE
+        name = args[0]
+        value = os.environ.get(name)
+        if value is None:
+            return UndefinedEnvironmentVariableError(name)
+        cmd_ctx.capture.stdout.handle(value)
+        return ExitCode(0)
+    # NOTE: envdefault uses raw ParseNodes to support lazy expansion of the default value
+    @staticmethod
     def envdefault(cmd_ctx: CommandContext, nodes: List[parse.Node]):
-        if len(nodes) != 2:
-            return SemanticError("@envdefault expects 2 arguments but got {}".format(len(nodes)))
+        assert(len(nodes) == 2)
         name = expandNode(cmd_ctx, nodes[0])
         if isinstance(name, Error):
             return name
@@ -473,15 +468,12 @@ class BuiltinMethods:
             return SemanticError("@exitcode requires at least 1 argument")
         if cmd_ctx.parent is None:
             return SemanticError("the @exitcode builtin is only supported within an (..inline command..)")
-        if cmd_ctx.capture.exitcode:
-            return SemanticError("@exitcode was given more than once in the same inline command")
+        # this should be impossible because disableCaptureModifiers will catch it
+        assert(not cmd_ctx.capture.exitcode)
         cmd_ctx.capture.exitcode = True
-        if cmd_ctx.capture.stdout == cmd_ctx.parent.capture.stdout:
-            # I might be able to just ignore this
-            sys.exit("stdout has already been 'uncaptured', maybe by another directive?")
-        assert(isinstance(cmd_ctx.capture.stdout, StringBuilder))
-        assert(len(cmd_ctx.capture.stdout.output) == 0)
-        cmd_ctx.capture.stdout = cmd_ctx.parent.capture.stdout
+        # this should have been set by disableCaptureModifiers
+        # because this builtin sets return_bool to True
+        assert(cmd_ctx.capture.stdout == cmd_ctx.parent.capture.stdout)
         return runCommandNodes(cmd_ctx.nextBuiltin(ambiguous_op=None), nodes)
     @staticmethod
     def not_(cmd_ctx: CommandContext, nodes: List[parse.Node]):
@@ -491,31 +483,24 @@ class BuiltinMethods:
         assert(isinstance(result, Bool))
         return BOOL_FALSE if result.value else BOOL_TRUE
     @staticmethod
-    def isfile(cmd_ctx: CommandContext, nodes: List[parse.Node]):
-        error = disableCaptureModifiers(cmd_ctx, "@isfile")
-        if error:
-            return error
-        s = expandOneNodeToString(cmd_ctx, nodes, "@isfile")
-        if isinstance(s, Error):
-            return s
-        if isinstance(s, String):
-            return BOOL_TRUE if os.path.isfile(s.value) else BOOL_FALSE
-        assert(isinstance(s, UnknownString))
-        assert(cmd_ctx.script.verification_mode)
-        return UNKNOWN_BOOL
+    def isfile(cmd_ctx: CommandContext, args: List[str]):
+        assert(len(args) == 1)
+        if cmd_ctx.script.verification_mode:
+            return UNKNOWN_BOOL
+        return BOOL_TRUE if os.path.isfile(args[0]) else BOOL_FALSE
     @staticmethod
-    def isdir(cmd_ctx: CommandContext, nodes: List[parse.Node]):
-        error = disableCaptureModifiers(cmd_ctx, "@isdir")
-        if error:
-            return error
-        s = expandOneNodeToString(cmd_ctx, nodes, "@isdir")
-        if isinstance(s, Error):
-            return s
-        if isinstance(s, String):
-            return BOOL_TRUE if os.path.isdir(s.value) else BOOL_FALSE
-        assert(isinstance(s, UnknownString))
-        assert(cmd_ctx.script.verification_mode)
-        return UNKNOWN_BOOL
+    def isdir(cmd_ctx: CommandContext, args: List[str]):
+        assert(len(args) == 1)
+        if cmd_ctx.script.verification_mode:
+            return UNKNOWN_BOOL
+        return BOOL_TRUE if os.path.isdir(args[0]) else BOOL_FALSE
+    @staticmethod
+    def haveprog(cmd_ctx: CommandContext, args: List[str]):
+        assert(len(args) == 1)
+        if cmd_ctx.script.verification_mode:
+            return UNKNOWN_BOOL
+        return BOOL_TRUE if which(args[0]) else BOOL_FALSE
+
     @staticmethod
     def assert_(cmd_ctx: CommandContext, nodes: List[parse.Node]):
         result = expandNodesToBool(cmd_ctx.nextBuiltin(ambiguous_op=None), nodes, "@assert", False)
@@ -542,8 +527,7 @@ class BuiltinMethods:
         return UNKNOWN_EXIT_CODE
     @staticmethod
     def end(cmd_ctx: CommandContext, nodes: List[parse.Node]):
-        if len(nodes) != 0:
-            return SemanticError("'@end' does not accept any arguments")
+        assert(len(nodes) == 0)
         error = cmd_ctx.script.popBlock()
         if error:
             return error
@@ -577,19 +561,6 @@ class BuiltinMethods:
             return result
         assert(isinstance(result, ExitCode))
         return result
-
-    @staticmethod
-    def haveprog(cmd_ctx: CommandContext, nodes: List[parse.Node]):
-        error = disableCaptureModifiers(cmd_ctx, "@haveprog")
-        if error:
-            return error
-        args: List[str] = []
-        error = nodesToArgs(cmd_ctx, nodes, args)
-        if error:
-            return error
-        if len(args) != 1:
-            return SemanticError("'@haveprog' expects 1 arg but got {}".format(len(args)))
-        return BOOL_TRUE if which(args[0]) else BOOL_FALSE
 
 def opInvalidTypeError(op: BinaryOperator, operand: StitchObject):
     #raise Exception("'{}' does not accept objects of type {}".format(op, operand.userTypeDescriptor()))
@@ -640,27 +611,28 @@ class CompareOp:
 
 # builtin objects that do not change and are the same for all scripts
 builtin_objects = {
-    "note": Builtin("note"),
-    "echo": Builtin("echo"),
-    "set": Builtin("set"),
-    "setarray": Builtin("setarray"),
-    "settmp": Builtin("settmp"),
-    "multiline": Builtin("multiline"),
-    "exitcode": Builtin("exitcode"),
-    "call": Builtin("call"),
-    "assert": Builtin("assert_"),
-    "if": Builtin("if_"),
-    "end": Builtin("end"),
-    "haveprog": Builtin("haveprog"),
-    "setenv": Builtin("setenv"),
-    "unsetenv": Builtin("unsetenv"),
-    "env": Builtin("env"),
-    "envdefault": Builtin("envdefault"),
+    "note": Builtin("note", BuiltinExpandType.ParseNodes, returns_bool=False),
+    "echo": Builtin("echo", BuiltinExpandType.Strings, returns_bool=False),
+    "set": Builtin("set", BuiltinExpandType.ParseNodes, returns_bool=False, arg_count=2),
+    "setarray": Builtin("setarray", BuiltinExpandType.ParseNodes, returns_bool=False),
+    "settmp": Builtin("settmp", BuiltinExpandType.ParseNodes, returns_bool=False),
+    "multiline": Builtin("multiline", BuiltinExpandType.ParseNodes, returns_bool=False),
+    "exitcode": Builtin("exitcode", BuiltinExpandType.ParseNodes, returns_bool=True),
+    "call": Builtin("call", BuiltinExpandType.ParseNodes, returns_bool=False),
+    "assert": Builtin("assert_", BuiltinExpandType.ParseNodes, returns_bool=False),
+    "if": Builtin("if_", BuiltinExpandType.ParseNodes, returns_bool=False),
+    "end": Builtin("end", BuiltinExpandType.ParseNodes, returns_bool=False, arg_count=0),
+    "haveprog": Builtin("haveprog", BuiltinExpandType.Strings, returns_bool=True, arg_count=1),
+    "setenv": Builtin("setenv", BuiltinExpandType.ParseNodes, returns_bool=False, arg_count=2),
+    "unsetenv": Builtin("unsetenv", BuiltinExpandType.Strings, returns_bool=False, arg_count=1),
+    "env": Builtin("env", BuiltinExpandType.Strings, returns_bool=False, arg_count=1),
+    # NOTE: envdefault must take ParseNodes to support lazy expansion of the default value
+    "envdefault": Builtin("envdefault", BuiltinExpandType.ParseNodes, returns_bool=False, arg_count=2),
     "false": BOOL_FALSE,
     "true": BOOL_TRUE,
-    "not": Builtin("not_"),
-    "isfile": Builtin("isfile"),
-    "isdir": Builtin("isdir"),
+    "not": Builtin("not_", BuiltinExpandType.ParseNodes, returns_bool=True),
+    "isfile": Builtin("isfile", BuiltinExpandType.Strings, returns_bool=True, arg_count=1),
+    "isdir": Builtin("isdir", BuiltinExpandType.Strings, returns_bool=True, arg_count=1),
     "or": OrOperator(),
     "and": AndOperator(),
     "eq": EqOperator(),
@@ -719,7 +691,7 @@ def expandNodes(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> Union[Error
         obj_list = [first_obj, obj]
 
     # TODO: are there other special types to handle here?
-    if isinstance(first_obj, Bool):
+    if isinstance(first_obj, Bool) or isinstance(first_obj, UnknownBool):
         if len(nodes) != 1:
             return SemanticError("unexpected Bool at the start of a command")
         return ExpandNodes.Bool(first_obj)
@@ -750,7 +722,7 @@ def expandNodesToBool(cmd_ctx: CommandContext, nodes: List[parse.Node], builtin_
         return runBinaryExpression(cmd_ctx, nodes, expand_result.first, expand_result.op)
 
     if isinstance(expand_result, ExpandNodes.Builtin):
-        next_result = getattr(BuiltinMethods, expand_result.builtin.name)(cmd_ctx, nodes[1:])
+        next_result = runBuiltin(cmd_ctx, expand_result.builtin, nodes[1:])
         if isinstance(next_result, Bool) or isinstance(next_result, UnknownBool):
             return next_result
         # TODO: there are probably more types to handle here
@@ -806,6 +778,43 @@ def expandOneNodeToString(cmd_ctx: CommandContext, nodes: List[parse.Node], buil
         return UNKNOWN_STRING
     return SemanticError("'{}' expects String but got {}".format(builtin_name, obj.userTypeDescriptor()))
 
+def enforceBuiltinArgCount(builtin: Builtin, actual: int) -> Optional[Error]:
+    if builtin.arg_count and (builtin.arg_count != actual):
+        suffix = "" if (builtin.arg_count == 1) else "s"
+        return SemanticError("@{} takes {} argument{} but got {}".format(
+            builtin.name, builtin.arg_count, suffix, actual))
+
+def runBuiltin(cmd_ctx: CommandContext, builtin: Builtin, nodes: List[parse.Node]):
+    if builtin.returns_bool:
+        error = disableCaptureModifiers(cmd_ctx, builtin.atname)
+        if error:
+            return error
+
+    func = getattr(BuiltinMethods, builtin.python_name)
+    if builtin.expand_type == BuiltinExpandType.ParseNodes:
+        error = enforceBuiltinArgCount(builtin, len(nodes))
+        if error:
+            return error
+        return func(cmd_ctx, nodes)
+    if builtin.expand_type == BuiltinExpandType.Strings:
+        args: List[str] = []
+        error = nodesToArgs(cmd_ctx, nodes, args)
+        if error:
+            if isinstance(error, CannotCoerceToStringError):
+                if builtin.arg_count is None:
+                    requires = "Strings"
+                elif builtin.arg_count == 1:
+                    requires = "a String"
+                else:
+                    requires = "{} Strings".format(builtin.arg_count)
+                return SemanticError("@{} requires {} but got {}".format(builtin.name, requires, error.uncoercable_type))
+            return error
+        error = enforceBuiltinArgCount(builtin, len(args))
+        if error:
+            return error
+        return func(cmd_ctx, args)
+    raise Exception("TODO: expand_type {}".format(builtin.expand_type))
+
 def runCommandNodes(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> Union[Error,Bool,ExitCode,UnknownBool,UnknownExitCode]:
     assert(len(nodes) > 0)
     # handle @end if we are disabled
@@ -831,7 +840,7 @@ def runCommandNodes(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> Union[E
     if isinstance(result, Error):
         return result
     if isinstance(result, ExpandNodes.Builtin):
-        return getattr(BuiltinMethods, result.builtin.name)(cmd_ctx, nodes[1:])
+        return runBuiltin(cmd_ctx, result.builtin, nodes[1:])
     if isinstance(result, ExpandNodes.BinaryExp):
         return runBinaryExpression(cmd_ctx, nodes, result.first, result.op)
     if isinstance(result, ExpandNodes.Bool):
@@ -849,25 +858,27 @@ def nodesToArgs(cmd_ctx: CommandContext, nodes: List[parse.Node], args: List[str
             return error
     return None
 
+UNKNOWN_ARG_STRING = "<UNKNOWN_ARG_STRING>"
+
 def objectToArgs(obj: StitchObject, args: List[str]) -> Optional[Error]:
     assert(not isinstance(obj, Error))
     if isinstance(obj, String):
         args.append(obj.value)
         return None
-    elif isinstance(obj, Array):
+    if isinstance(obj, Array):
         args.extend(obj.elements)
         return None
-    elif isinstance(obj, UnknownString):
-        args.append("<UNKNOWN_STRING>")
+    if isinstance(obj, UnknownString):
+        args.append(UNKNOWN_ARG_STRING)
         return None
-    elif isinstance(obj, Bool) or isinstance(obj, UnknownBool):
-        return SemanticError("cannot coerce Bool to String")
-    elif isinstance(obj, BinaryOperator):
+    if isinstance(obj, Bool) or isinstance(obj, UnknownBool):
+        return CannotCoerceToStringError("Bool")
+    if isinstance(obj, BinaryOperator):
         return SemanticError("unexpected '{}'".format(obj))
-    elif isinstance(obj, Builtin):
-        return SemanticError("builtin program '{}' cannot be coerced to a String".format(obj))
-    else:
-        return SemanticError("TODO: implement objectToArgs for type {} ({})".format(type(obj), obj))
+    if isinstance(obj, Builtin):
+        return CannotCoerceToStringError("Builtin '@{}'".format(obj.name))
+
+    return SemanticError("TODO: implement objectToArgs for type {} ({})".format(type(obj), obj))
 
 def runExternalProgram(verification_mode: bool, stdout_handler: DataHandler,
                        stderr_handler: DataHandler, args: List[str]) -> Union[Error,ExitCode,UnknownExitCode]:
@@ -983,7 +994,7 @@ def combineRunResultWithOutputs(cmd_ctx, result):
             return UNKNOWN_COMMAND_RESULT
         return CommandResult(result.value, stdout, stderr)
 
-    if isinstance(result, Bool):
+    if isinstance(result, Bool) or isinstance(result, UnknownBool):
         if cmd_ctx.capture.exitcode or isCaptured(stdout) or isCaptured(stderr):
             raise Exception("ec={} stdout={} stderr={}".format(cmd_ctx.capture.exitcode, isCaptured(stdout), isCaptured(stderr)))
         return result
@@ -1025,6 +1036,8 @@ def disableCaptureModifiers(cmd_ctx: CommandContext, error_context: str):
     if cmd_ctx.parent is not None and cmd_ctx.capture.stderr is not cmd_ctx.parent.capture.stderr:
         return SemanticError("@stderr is not compatible with {}".format(error_context))
     if cmd_ctx.parent is not None and cmd_ctx.capture.stdout is not cmd_ctx.parent.capture.stdout:
+        assert(isinstance(cmd_ctx.capture.stdout, StringBuilder))
+        assert(len(cmd_ctx.capture.stdout.output) == 0)
         cmd_ctx.capture.stdout = cmd_ctx.parent.capture.stdout
     return None
 

@@ -23,8 +23,9 @@ class ErrorTest(CommandTest):
     def __repr__(self):
         return "{}Test line='{}' message='{}'".format(self.error_type.__name__, self.line, self.message)
     def verify(self, result, test_line):
-        if type(result) != self.error_type:
-            sys.exit("{}({}): Error: expected a {} but got {}: '{}'".format(__file__, test_line, self.error_type.__name__, result, result))
+        if not isinstance(result, self.error_type):
+            sys.exit("{}({}): Error: expected a {} but got {}: '{}'".format(
+                __file__, test_line, self.error_type.__name__, type(result).__name__, result))
         result_msg = str(result)
         if result_msg != self.message:
             print("{}({}): Error: semantic error message does not match expected:".format(__file__, test_line))
@@ -210,6 +211,20 @@ def main():
     # TODO: test @%"..." strings
     # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+    #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    # TODO: test all the inline command prefixes
+    #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    testSemanticError("@exitcode true", "the @exitcode builtin is only supported within an (..inline command..)")
+    testSemanticError("@assert (@exitcode)", "@exitcode requires at least 1 argument")
+    testSemanticError("@assert (@exitcode @exitcode true)", "@exitcode is not compatible with @exitcode")
+    testSemanticError("@assert (@exitcode true @exitcode)", "cannot coerce Builtin '@exitcode' to String")
+    testSemanticError("@assert (@exitcode @true)", "unhandled Bool")
+    #testSemanticError("@assert (@exitcode @multiline true)", "")
+    testCommand("@assert (@exitcode true)", 0, "")
+    testCommand("@assert @not (@exitcode false)", 0, "")
 
     testSemanticError("@and", "unexpected '@and'")
     testSemanticError("@or", "unexpected '@or'")
@@ -326,41 +341,31 @@ def main():
 
     testSemanticError("@emptyarray", "got a command with no arguments, what should the language do here?")
 
-    testSemanticError("@haveprog", "'@haveprog' expects 1 arg but got 0")
-    testSemanticError("@haveprog a b", "'@haveprog' expects 1 arg but got 2")
+    testSemanticError("@haveprog", "@haveprog takes 1 argument but got 0")
+    testSemanticError("@haveprog a b", "@haveprog takes 1 argument but got 2")
 
-    testSemanticError("@set", "@set expects 2 arguments but got 0")
-    testSemanticError("@set foo", "@set expects 2 arguments but got 1")
+    testSemanticError("@set", "@set takes 2 arguments but got 0")
+    testSemanticError("@set foo", "@set takes 2 arguments but got 1")
     testCommand("@set foo bar", 0, "")
     testSemanticError("@set @false bar", "@set requires a String for its 1st argument but got Bool")
     testSemanticError("@set @echo bar", "@set requires a String for its 1st argument but got Builtin")
     testCommand("@set (@echo foo) bar", 0, "")
     testCommand("@set foo @false", 0, "")
 
-    testSemanticError("@isfile", "@isfile accepts 1 argument but got 0")
-    testSemanticError("@isfile foo bar", "@isfile accepts 1 argument but got 2")
-    testSemanticError("@isdir", "@isdir accepts 1 argument but got 0")
-    testSemanticError("@isdir foo bar", "@isdir accepts 1 argument but got 2")
+    testSemanticError("@settmp", "@settmp requires at least 3 arguments but got 0")
+    testSemanticError("@settmp a", "@settmp requires at least 3 arguments but got 1")
+    testSemanticError("@settmp a b", "@settmp requires at least 3 arguments but got 2")
+
+    testSemanticError("@isfile", "@isfile takes 1 argument but got 0")
+    testSemanticError("@isfile foo bar", "@isfile takes 1 argument but got 2")
+    testSemanticError("@isdir", "@isdir takes 1 argument but got 0")
+    testSemanticError("@isdir foo bar", "@isdir takes 1 argument but got 2")
 
     testCommands([
         CommandResultTest("@set foo bar", 0, ""),
         CommandResultTest("@assert $foo @eq bar", 0, ""),
         ErrorTest        ("@assert @not ($foo @eq bar)", prototype.AssertError, "@assert failed"),
     ], verification_mode=False)
-
-    #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    # TODO: test all the inline command prefixes
-    #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    testSemanticError("@exitcode true", "the @exitcode builtin is only supported within an (..inline command..)")
-    testSemanticError("@assert (@exitcode)", "@exitcode requires at least 1 argument")
-    testSemanticError("@assert (@exitcode @exitcode true)", "@exitcode was given more than once in the same inline command")
-    testSemanticError("@assert (@exitcode true @exitcode)", "builtin program '@exitcode' cannot be coerced to a String")
-    testSemanticError("@assert (@exitcode @true)", "unhandled Bool")
-    #testSemanticError("@assert (@exitcode @multiline true)", "")
-    testCommand("@assert (@exitcode true)", 0, "")
-    testCommand("@assert @not (@exitcode false)", 0, "")
 
     testCommand("@echo hello", 0, "hello\n")
     testCommand("@assert (@exitcode @echo hello)", 0, "hello\n")
@@ -370,23 +375,23 @@ def main():
     #testCommand("@assert ("" @eq (@stderr @echo hello)", "hello")
 
 
-    testSemanticError("@setenv", "@setenv expects 2 arguments but got 0")
-    testSemanticError("@setenv FOO", "@setenv expects 2 arguments but got 1")
-    testSemanticError("@setenv FOO BAR BAZ", "@setenv expects 2 arguments but got 3")
+    testSemanticError("@setenv", "@setenv takes 2 arguments but got 0")
+    testSemanticError("@setenv FOO", "@setenv takes 2 arguments but got 1")
+    testSemanticError("@setenv FOO BAR BAZ", "@setenv takes 2 arguments but got 3")
     testSemanticError("@setenv @false BAR", "@setenv requires a String for its 1st argument but got Bool")
     testSemanticError("@setenv FOO @false", "@setenv requires a String for its 2nd argument but got Bool")
     testCommand("@setenv FOO BAR", 0, "")
     # TODO: remove this if/when environment variables are no longer "sticky" across multiple ScriptContexts
     testCommand("@unsetenv FOO", 0, "")
 
-    testSemanticError("@env", "@env expects 1 argument but got 0")
-    testSemanticError("@env PWD PWD", "@env expects 1 argument but got 2")
+    testSemanticError("@env", "@env takes 1 argument but got 0")
+    testSemanticError("@env PWD PWD", "@env takes 1 argument but got 2")
     testSemanticError("@env @false", "@env requires a String but got Bool")
     testError("@env THIS_IS_NOT_DEFINED", prototype.UndefinedEnvironmentVariableError, "undefined environment variable 'THIS_IS_NOT_DEFINED'")
 
-    testSemanticError("@envdefault", "@envdefault expects 2 arguments but got 0")
-    testSemanticError("@envdefault foo", "@envdefault expects 2 arguments but got 1")
-    testSemanticError("@envdefault foo bar baz", "@envdefault expects 2 arguments but got 3")
+    testSemanticError("@envdefault", "@envdefault takes 2 arguments but got 0")
+    testSemanticError("@envdefault foo", "@envdefault takes 2 arguments but got 1")
+    testSemanticError("@envdefault foo bar baz", "@envdefault takes 2 arguments but got 3")
     testSemanticError("@envdefault @false foo", "@envdefault requires a String for its first argument but got Bool")
     testSemanticError("@envdefault foo @false", "@envdefault requires a String for its second argument but got Bool")
     testCommand("@envdefault THIS_IS_NOT_DEFINED foo", 0, "foo\n")
@@ -400,8 +405,8 @@ def main():
         CommandResultTest("@unsetenv FOO", 0, ""),
     ], verification_mode=False)
 
-    testSemanticError("@unsetenv", "@unsetenv expects 1 argument but got 0")
-    testSemanticError("@unsetenv PWD PWD", "@unsetenv expects 1 argument but got 2")
+    testSemanticError("@unsetenv", "@unsetenv takes 1 argument but got 0")
+    testSemanticError("@unsetenv PWD PWD", "@unsetenv takes 1 argument but got 2")
     testSemanticError("@unsetenv @false", "@unsetenv requires a String but got Bool")
     testError("@unsetenv THIS_IS_NOT_DEFINED", prototype.UndefinedEnvironmentVariableError, "undefined environment variable 'THIS_IS_NOT_DEFINED'")
 
