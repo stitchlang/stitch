@@ -1,0 +1,13 @@
+INLINE_WHITESPACE       [ \t]+
+BUILTIN_ID              @[a-zA-Z0-9_\.]+@?
+USER_ID                 \$[a-zA-Z0-9_\.]+\$?
+ARG                     [^ \t\n#()@$\"]+
+NEWLINE                 \n
+QUOTED_STRING           "[^"]*"
+COMMENT                 #.*
+OPEN_PAREN              \(
+CLOSE_PAREN             \)
+ESCAPE_SEQUENCE         @[@#$")(]
+DELIMITED_STRING_DOUBLEQUOTE      @%"[^"]*"
+DELIMITED_STRING_SINGLEQUOTE      @%'[^']*'
+DELIMITED_STRING_VERTBAR          @%\|[^\|]*\|

@@ -1,6 +1,8 @@
 from enum import Enum
-import re
 from typing import List, Dict, Set, Union, Tuple, Optional, Pattern
+import re
+
+import tokens
 
 class TokenKind(Enum):
     INLINE_WHITESPACE = 0
@@ -15,37 +17,21 @@ class TokenKind(Enum):
     DELIMITED_STRING = 9
     ESCAPE_SEQUENCE = 10
 
-class TokenRule:
-    def __init__(self, kind: TokenKind, pattern: str):
+class Pattern:
+    def __init__(self, kind: TokenKind, re_string: str):
         self.kind = kind
-        self.pattern = re.compile("^" + pattern)
+        self.re = re.compile("^" + re_string)
 
-RULES = [
-    TokenRule(TokenKind.INLINE_WHITESPACE, r"[ \t]+"),
-    # NOTE: there have to be different rules for @id and $id because they
-    #       end with different optional characters '@?' and '$?'
-    TokenRule(TokenKind.BUILTIN_ID, r"@[a-zA-Z0-9_\.]+@?"),
-    TokenRule(TokenKind.USER_ID, r"\$[a-zA-Z0-9_\.]+\$?"),
-    TokenRule(TokenKind.ARG, r'[^ \t\n#()@$"]+'),
-    TokenRule(TokenKind.NEWLINE, r"\n"),
-    TokenRule(TokenKind.QUOTED_STRING, r'"[^"]*"'),
-    TokenRule(TokenKind.COMMENT, r"#.*"),
-    TokenRule(TokenKind.OPEN_PAREN, r"\("),
-    TokenRule(TokenKind.CLOSE_PAREN, r"\)"),
-    TokenRule(TokenKind.ESCAPE_SEQUENCE, r'@[@#$")(]'),
-
-    # uncomment this to intentionally break the token rules by having multiple
-    # rules in the same group that match the same thing , verify this
-    # produces errors
-    #TokenRule(TokenKind.COMMENT, r"#.*"),
-
-# To be able to tokenize them, I need to make a separate rule for every possible
-# kind of delimited string. For now I'll just make  few:
-] + [TokenRule(TokenKind.DELIMITED_STRING, r"@%{0}[^{0}]*{0}".format(re_str)) for (re_str) in (
-    '"',
-    "'",
-    r"\|",
-)]
+PATTERNS = []
+with open(tokens.getTokensTxtFilename(), "r") as tokens_file:
+    for line in tokens_file:
+        name, pattern = tokens.parseLine(line)
+        #print("{:20} {}".format(name, pattern))
+        if name.startswith("DELIMITED_STRING_"):
+            kind = TokenKind.DELIMITED_STRING
+        else:
+            kind = getattr(TokenKind, name)
+        PATTERNS.append(Pattern(kind, pattern))
 
 def countLinesAndColumns(s: str):
     line = 1
@@ -73,33 +59,33 @@ def preview(s, max_len):
         return s[:max_len] + "[..snip..]"
     return s[:cutoff]
 
-# NOTE: verify_one_rule verifies that only 1 lexer rule is matching the next string.
-#       I think that maintaining this property on my lexer means that all the rules
+# NOTE: verify_one_match verifies that only 1 lexer pattern is matching the next string.
+#       I think that maintaining this property on my lexer means that all the patterns
 #       combined form a "regular language".  This means I could represent the entire
 #       lexer in 1 single regular expression.  I'd like to maintain this property
 #       of the lexer if I can.  At some point, I should write some logic that takes
-#       all my individual rules and combines them into 1 regular expression.
+#       all my individual patterns and combines them into 1 regular expression.
 #
-#       I think we take about a 10% hit to performance when verify_one_rule is enabled.
+#       I think we take about a 10% hit to performance when verify_one_match is enabled.
 #
-# TODO: remove this verify_one_rule argument when I know my combined lex rules are regular
-def scan(src: str, pos: int, verify_one_rule: bool = True) -> Optional[Tuple[TokenRule,int]]:
+# TODO: remove this verify_one_match argument when I know my combined lex patterns are regular
+def scan(src: str, pos: int, verify_one_match: bool = True) -> Optional[Tuple[Pattern,int]]:
     if pos == len(src):
         return None
     next = src[pos:]
-    result: Optional[Tuple[TokenRule,int]] = None
-    for rule in RULES:
-        match = rule.pattern.match(next)
+    result: Optional[Tuple[Pattern,int]] = None
+    for pattern in PATTERNS:
+        match = pattern.re.match(next)
         if match:
             match_str = match.group()
             assert(len(match_str) > 0)
             if result:
-                other_rule, other_match_len = result
+                other_pattern, other_match_len = result
                 min_match_len = min(len(match_str), other_match_len)
-                raise Exception("TokenRuleProblem: both patterns '{}' and '{}' matched a string starting with '{}'".format(
-                    rule.kind, other_rule.kind, src[pos:pos+min_match_len]))
-            result = (rule, len(match_str))
-            if not verify_one_rule:
+                raise Exception("TokenPatternProblem: both patterns '{}' and '{}' matched a string starting with '{}'".format(
+                    pattern.kind, other_pattern.kind, src[pos:pos+min_match_len]))
+            result = (pattern, len(match_str))
+            if not verify_one_match:
                 return result
     if result:
         return result
