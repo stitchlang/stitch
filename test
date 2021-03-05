@@ -133,6 +133,13 @@ def expectMatches(output: str, matches: List[str]):
             print("--------------------------------------------------------------------------------")
             sys.exit(1)
 
+def expectMatch(actual: str, expected: str):
+    if actual != expected:
+        print("Error: unexpectd output:")
+        print("Expected: '{}'".format(expected))
+        print("Actual: '{}'".format(actual))
+        sys.exit(1)
+
 def runStitchTests():
     print("test: running stitch-tests...")
     stitch_args = [sys.executable, os.path.join(SCRIPT_DIR, "prototype.py")]
@@ -140,7 +147,7 @@ def runStitchTests():
     result = subprocess.run(stitch_args + ["-c", "@echo hello"], capture_output=True)
     if result.returncode != 0:
         sys.exit(result.returncode)
-    assert(result.stdout.decode("ascii").rstrip() == "hello")
+    expectMatch(result.stdout.decode("ascii").rstrip(), "hello")
 
     if os.name == "nt":
         make_foo_cmd = "fsutil file createnew foo 0"
