@@ -631,6 +631,11 @@ foo @out @in2file myfile
 
 NOTE: I think I should implement multi-command semantics for piping first.  This will help me setup the proper abstractions for piping before I tacke the interface for the shorthand version.
 
+Here's what piping might look like if I treated it as a binary operator:
+
+```sh
+(ps axo pid,args) @pipe (awk '{print $1, $2}') @pipe (grep '[ /]'$program'$') @pipe (awk '{print $1}')
+```
 
 # The Current Working Directory
 
