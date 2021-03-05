@@ -541,10 +541,10 @@
 #       to put the main code in a function in stittch, there's
 #       no global scope leakage
 #
-#if [[ ! -d "$config_dir" ]]; then
-#    # Create configuration directory, if needed
-#    mkdir -p "$config_dir"
-#fi
+@if @not @isdir $config_dir
+    # Create configuration directory, if needed
+    mkdir -p @callerworkdir/$config_dir
+@end
 #
 #readarray -t ALL_VARIANTS <<< "$(find "$config_dir" -maxdepth 2 -mindepth 2 ! -path "$config_dir/.*" ! -path "$config_dir/*/.config" | sed "s/${config_dir//\//\\\/}\///")"
 #readarray -t ALL_TARGETS <<< "$(find "$config_dir" -maxdepth 1 -type d ! -path "$config_dir" ! -path "$config_dir/.*" | pathname)"

@@ -115,6 +115,24 @@ def testCommand(line, exitcode, stdout):
     print("{}".format(test))
     runTests([test], getCallerLine(), verification_mode=False)
 
+def printForceNewline(s: str):
+    print(s, end= "" if s.endswith("\n") else "\n")
+
+def expectMatches(output: str, matches: List[str]):
+    for match in matches:
+        if match not in output:
+            print("Error: did not find expected output")
+            print()
+            print("Expected:")
+            print("--------------------------------------------------------------------------------")
+            printForceNewline(match)
+            print("--------------------------------------------------------------------------------")
+            print("Actual:")
+            print("--------------------------------------------------------------------------------")
+            printForceNewline(output)
+            print("--------------------------------------------------------------------------------")
+            sys.exit(1)
+
 def runStitchTests():
     print("test: running stitch-tests...")
     stitch_args = [sys.executable, os.path.join(SCRIPT_DIR, "prototype.py")]
@@ -123,6 +141,18 @@ def runStitchTests():
     if result.returncode != 0:
         sys.exit(result.returncode)
     assert(result.stdout.decode("ascii").rstrip() == "hello")
+
+    if os.name == "nt":
+        make_foo_cmd = "fsutil file createnew foo 0"
+    else:
+        make_foo_cmd = "touch foo"
+    result = subprocess.run(stitch_args + ["-c", make_foo_cmd], capture_output=True)
+    if result.returncode == 0:
+        sys.exit("expected an error but didn't get one")
+    expectMatches(result.stderr.decode("ascii"), [
+        "this script must be using relative filenames because the sandbox has this file ",
+        "1 file(s) were cleaned from the sandbox",
+    ])
 
     result = subprocess.run(stitch_args + ["stitch-tests"])
     if result.returncode != 0:
@@ -302,6 +332,8 @@ def main():
 
     testSemanticError("@isfile", "@isfile accepts 1 argument but got 0")
     testSemanticError("@isfile foo bar", "@isfile accepts 1 argument but got 2")
+    testSemanticError("@isdir", "@isdir accepts 1 argument but got 0")
+    testSemanticError("@isdir foo bar", "@isdir accepts 1 argument but got 2")
 
     testCommands([
         CommandResultTest("@set foo bar", 0, ""),

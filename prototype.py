@@ -10,6 +10,9 @@ from typing import List, Dict, Set, Union, Tuple, Optional
 import lex
 import parse
 
+def eprint(msg: str):
+    print(msg, file=sys.stderr)
+
 def stripNewline(s):
     if len(s) > 0 and ord(s[-1]) == "\n":
         if len(s) > 2 and s[-2] == "\r":
@@ -489,7 +492,7 @@ class BuiltinMethods:
         return BOOL_FALSE if result.value else BOOL_TRUE
     @staticmethod
     def isfile(cmd_ctx: CommandContext, nodes: List[parse.Node]):
-        error = disableIncompatibleCapture(cmd_ctx, "@isfile")
+        error = disableCaptureModifiers(cmd_ctx, "@isfile")
         if error:
             return error
         s = expandOneNodeToString(cmd_ctx, nodes, "@isfile")
@@ -497,6 +500,19 @@ class BuiltinMethods:
             return s
         if isinstance(s, String):
             return BOOL_TRUE if os.path.isfile(s.value) else BOOL_FALSE
+        assert(isinstance(s, UnknownString))
+        assert(cmd_ctx.script.verification_mode)
+        return UNKNOWN_BOOL
+    @staticmethod
+    def isdir(cmd_ctx: CommandContext, nodes: List[parse.Node]):
+        error = disableCaptureModifiers(cmd_ctx, "@isdir")
+        if error:
+            return error
+        s = expandOneNodeToString(cmd_ctx, nodes, "@isdir")
+        if isinstance(s, Error):
+            return s
+        if isinstance(s, String):
+            return BOOL_TRUE if os.path.isdir(s.value) else BOOL_FALSE
         assert(isinstance(s, UnknownString))
         assert(cmd_ctx.script.verification_mode)
         return UNKNOWN_BOOL
@@ -564,7 +580,7 @@ class BuiltinMethods:
 
     @staticmethod
     def haveprog(cmd_ctx: CommandContext, nodes: List[parse.Node]):
-        error = disableIncompatibleCapture(cmd_ctx, "@haveprog")
+        error = disableCaptureModifiers(cmd_ctx, "@haveprog")
         if error:
             return error
         args: List[str] = []
@@ -644,6 +660,7 @@ builtin_objects = {
     "true": BOOL_TRUE,
     "not": Builtin("not_"),
     "isfile": Builtin("isfile"),
+    "isdir": Builtin("isdir"),
     "or": OrOperator(),
     "and": AndOperator(),
     "eq": EqOperator(),
@@ -808,7 +825,7 @@ def runCommandNodes(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> Union[E
         # todo: is ("+" * (depth+1)) too inneficient?
         message = "{} {}".format("+" * (cmd_ctx.depth+1), " ".join([n.src for n in nodes]))
         # NOTE: ignore capture_stdout, just always print to console for now
-        print(message, file=sys.stderr)
+        eprint(message)
 
     result = expandNodes(cmd_ctx, nodes)
     if isinstance(result, Error):
@@ -1002,7 +1019,7 @@ def expandNode(cmd_ctx: CommandContext, node: parse.Node) -> Union[Error,StitchO
 
     raise Exception("codebug, unhandled node type {}".format(type(node)))
 
-def disableIncompatibleCapture(cmd_ctx: CommandContext, error_context: str):
+def disableCaptureModifiers(cmd_ctx: CommandContext, error_context: str):
     if cmd_ctx.capture.exitcode:
         return SemanticError("@exitcode is not compatible with {}".format(error_context))
     if cmd_ctx.parent is not None and cmd_ctx.capture.stderr is not cmd_ctx.parent.capture.stderr:
@@ -1015,7 +1032,7 @@ def runBinaryExpression(cmd_ctx: CommandContext, nodes: List[parse.Node], first_
     if cmd_ctx.ambiguous_op:
         return SemanticError("got binary expression inside ambiguous operator '{}', wrap inside (..parenthesis..)".format(cmd_ctx.ambiguous_op))
 
-    error = disableIncompatibleCapture(cmd_ctx, "binary expressions")
+    error = disableCaptureModifiers(cmd_ctx, "binary expressions")
     if error:
         return error
 
@@ -1112,7 +1129,7 @@ def runFile(global_ctx: GlobalContext, full_filename: str, src: str,
             normalized_filename = normalizeFilename(full_filename)
             if not normalized_filename in global_ctx.verify_started:
                 global_ctx.verify_started.add(normalized_filename)
-                print("stitch: DEBUG: verifying '{}'".format(full_filename), file=sys.stderr)
+                eprint("stitch: DEBUG: verifying '{}'".format(full_filename))
                 stdout_builder = StringBuilder()
                 stderr_builder = StringBuilder()
                 script_ctx = ScriptContext(global_ctx, full_filename, verification_mode=True)
@@ -1121,10 +1138,10 @@ def runFile(global_ctx: GlobalContext, full_filename: str, src: str,
                     # This can happen if the arguments of an assert are known at "verification time"
                     # i.e. @assert @true
                     if isinstance(result, AssertError):
-                        print("{}: AssertError: {}".format(full_filename, result.src))
+                        eprint("stitch: {}: AssertError: {}".format(full_filename, result.src))
                     else:
                         assert(isinstance(result, SemanticError))
-                        print("{}: SemanticError: {}".format(full_filename, result.message))
+                        eprint("stitch: {}: SemanticError: {}".format(full_filename, result.message))
                     return result
                 # I'm allowing things to print to stdout during verification mode
                 # because this can allow other mechnisms to get "further" in verification
@@ -1134,7 +1151,7 @@ def runFile(global_ctx: GlobalContext, full_filename: str, src: str,
                 if len(stderr_builder.output) > 0:
                     pass
                     #sys.exit("something printed to stderr during verification mode???")
-                print("stitch: DEBUG: verification done on '{}'".format(full_filename), file=sys.stderr)
+                eprint("stitch: DEBUG: verification done on '{}'".format(full_filename))
 
         script_ctx = ScriptContext(global_ctx, full_filename, verification_mode=False)
         return runSrc(script_ctx, src, stdout_handler, stderr_handler)
@@ -1170,12 +1187,32 @@ def resolveCallerWorkdir(sandbox_path: str) -> str:
 
     return cwd
 
+def cleanSandboxDir(sandbox_path: str, before_execution: bool):
+    assert(sandbox_path == os.getcwd())
+    clean_count = 0
+    for entry_base in os.listdir(sandbox_path):
+        entry = os.path.join(sandbox_path, entry_base)
+        if os.path.isfile(entry):
+            if before_execution:
+                eprint("stitch: DEBUG: cleaning sandbox file '{}'".format(entry))
+            else:
+                eprint("stitch: Error: this script must be using relative filenames because the sandbox has this file '{}'".format(entry))
+            clean_count += 1
+            os.remove(entry)
+        else:
+            if not before_execution:
+                eprint("stitch: Error: this script must be using relative filenames because the sandbox has this directory '{}'".format(entry))
+            clean_count += cleanSandboxDir(entry, before_execution)
+            os.rmdir(entry)
+            clean_count += 1
+    return clean_count
+
 # try to get rid of CWD state by going to a temporary readonly directory
-def sandboxCallerWorkdir() -> str:
+def sandboxCallerWorkdir() -> Tuple[str,str]:
     if os.name == "nt":
         temp_dir = os.getenv("TEMP")
         if not temp_dir:
-            sys.exit("ERROR: environment variable %TEMP% is not set")
+            sys.exit("stitch: Error: environment variable %TEMP% is not set")
     else:
         temp_dir = "/tmp"
     sandbox_path = os.path.join(temp_dir, "stitch-sandbox")
@@ -1184,8 +1221,9 @@ def sandboxCallerWorkdir() -> str:
     if not os.path.exists(sandbox_path):
         os.mkdir(sandbox_path)
     os.chdir(sandbox_path)
-    return callerworkdir
+    cleanSandboxDir(sandbox_path, before_execution=True)
 
+    return sandbox_path, callerworkdir
 
 def main():
     cmd_args = sys.argv[1:]
@@ -1213,16 +1251,21 @@ def main():
             # NOTE: this will require using bytes instead of strings in Python
             src = file.read()
 
-    global_ctx = GlobalContext(doverify, sandboxCallerWorkdir())
+    sandbox_path, callerworkdir = sandboxCallerWorkdir()
+    global_ctx = GlobalContext(doverify, callerworkdir)
     result = runFile(global_ctx, full_filename, src, CONSOLE_PRINTER, CONSOLE_PRINTER)
+    sandbox_clean_count = cleanSandboxDir(sandbox_path, before_execution=False)
     if isinstance(result, Error):
         prefix = "Semantic" if isinstance(result, SemanticError) else ""
-        print("{}: {}Error: {}".format(filename, prefix, result.message))
+        eprint("stitch: {}: {}Error: {}".format(filename, prefix, result.message))
         sys.exit(1)
 
     assert(isinstance(result, ExitCode))
     if result.value != 0:
-        sys.exit("Error: the last progam exited with code {}".format(result.value))
+        sys.exit("stitch: Error: the last progam exited with code {}".format(result.value))
+
+    if sandbox_clean_count > 0:
+        sys.exit("stitch: Error: {} file(s) were cleaned from the sandbox".format(sandbox_clean_count))
 
 if __name__ == "__main__":
     main()
