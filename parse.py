@@ -71,7 +71,7 @@ def parseNode(src: str, token: ParseToken) -> Tuple[Node, Optional[ParseToken]]:
     assert(token.rule.kind != lex.TokenKind.INLINE_WHITESPACE)
     assert(token.rule.kind != lex.TokenKind.COMMENT)
     assert(token.rule.kind != lex.TokenKind.NEWLINE)
-    assert(token.rule.kind != lex.TokenKind.RIGHT_PAREN)
+    assert(token.rule.kind != lex.TokenKind.CLOSE_PAREN)
 
     node: Optional[Node] = None
     while True:
@@ -89,7 +89,7 @@ def parseNode(src: str, token: ParseToken) -> Tuple[Node, Optional[ParseToken]]:
         elif token.rule.kind == lex.TokenKind.QUOTED_STRING:
             node = combineNodes(node, NodeToken(token_src, token_src[1:-1]))
             next_token_start = token_end
-        elif token.rule.kind == lex.TokenKind.LEFT_PAREN:
+        elif token.rule.kind == lex.TokenKind.OPEN_PAREN:
             inline_cmd_nodes, right_paren_pos = parseCommand(src, token_end)
             if right_paren_pos == len(src) or ord(src[right_paren_pos]) != ord(")"):
                 raise lex.SyntaxError(src[:token.pos], "missing close paren for: {}".format(lex.preview(src[token.pos:], 30)))
@@ -113,7 +113,7 @@ def parseNode(src: str, token: ParseToken) -> Tuple[Node, Optional[ParseToken]]:
         if (rule.kind == lex.TokenKind.INLINE_WHITESPACE or
             rule.kind == lex.TokenKind.COMMENT or
             rule.kind == lex.TokenKind.NEWLINE or
-            rule.kind == lex.TokenKind.RIGHT_PAREN):
+            rule.kind == lex.TokenKind.CLOSE_PAREN):
             return node, token
 
 def parseCommand(src, cmd_start) -> Tuple[List[Node],int]:
@@ -129,7 +129,7 @@ def parseCommand(src, cmd_start) -> Tuple[List[Node],int]:
     while True:
         if token.rule.kind == lex.TokenKind.COMMENT or token.rule.kind == lex.TokenKind.NEWLINE:
             return nodes, token.pos + token.length
-        if token.rule.kind == lex.TokenKind.RIGHT_PAREN:
+        if token.rule.kind == lex.TokenKind.CLOSE_PAREN:
             return nodes, token.pos
         node, next_token = parseNode(src, token)
         nodes.append(node)
@@ -142,4 +142,4 @@ def parseCommand(src, cmd_start) -> Tuple[List[Node],int]:
         else:
             assert(token.rule.kind == lex.TokenKind.COMMENT or
                    token.rule.kind == lex.TokenKind.NEWLINE or
-                   token.rule.kind == lex.TokenKind.RIGHT_PAREN)
+                   token.rule.kind == lex.TokenKind.CLOSE_PAREN)

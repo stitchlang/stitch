@@ -10,8 +10,8 @@ class TokenKind(Enum):
     NEWLINE = 4
     QUOTED_STRING = 5
     COMMENT = 6
-    LEFT_PAREN = 7
-    RIGHT_PAREN = 8
+    OPEN_PAREN = 7
+    CLOSE_PAREN = 8
     DELIMITED_STRING = 9
     ESCAPE_SEQUENCE = 10
 
@@ -30,8 +30,8 @@ RULES = [
     TokenRule(TokenKind.NEWLINE, r"\n"),
     TokenRule(TokenKind.QUOTED_STRING, r'"[^"]*"'),
     TokenRule(TokenKind.COMMENT, r"#.*"),
-    TokenRule(TokenKind.LEFT_PAREN, r"\("),
-    TokenRule(TokenKind.RIGHT_PAREN, r"\)"),
+    TokenRule(TokenKind.OPEN_PAREN, r"\("),
+    TokenRule(TokenKind.CLOSE_PAREN, r"\)"),
     TokenRule(TokenKind.ESCAPE_SEQUENCE, r'@[@#$")(]'),
 
     # uncomment this to intentionally break the token rules by having multiple
