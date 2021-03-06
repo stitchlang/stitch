@@ -3,6 +3,7 @@ from typing import List, Dict, Set, Union, Tuple, Optional, Pattern
 import re
 
 import tokens
+import cish
 
 class TokenKind(Enum):
     INLINE_WHITESPACE = 0
@@ -59,6 +60,24 @@ def preview(s, max_len):
         return s[:max_len] + "[..snip..]"
     return s[:cutoff]
 
+# this functions mirrors the one in lex.c
+def lex(text: str, pattern_index_ref: cish.Ref[int]) -> int:
+    for i, pattern in enumerate(PATTERNS[pattern_index_ref.value:], start=pattern_index_ref.value):
+        match = pattern.re.match(text)
+        if match:
+            match_length = len(match.group())
+            assert(match_length > 0)
+            pattern_index_ref.value = i
+            return match_length
+    return 0
+
+def afterLexVerifyOnlyOneMatch(text: str, pattern_index: int) -> None:
+    other_pattern_index_obj = cish.Ref(pattern_index + 1)
+    match_length = lex(text, other_pattern_index_obj)
+    if match_length > 0:
+        raise Exception("TokenPatternProblem: both patterns '{}' and '{}' matched a string starting with '{}'".format(
+            PATTERNS[pattern_index].kind, PATTERNS[other_pattern_index_obj.value].kind, text[:match_length]))
+
 # NOTE: verify_one_match verifies that only 1 lexer pattern is matching the next string.
 #       I think that maintaining this property on my lexer means that all the patterns
 #       combined form a "regular language".  This means I could represent the entire
@@ -73,22 +92,13 @@ def scan(src: str, pos: int, verify_one_match: bool = True) -> Optional[Tuple[Pa
     if pos == len(src):
         return None
     next = src[pos:]
-    result: Optional[Tuple[Pattern,int]] = None
-    for pattern in PATTERNS:
-        match = pattern.re.match(next)
-        if match:
-            match_str = match.group()
-            assert(len(match_str) > 0)
-            if result:
-                other_pattern, other_match_len = result
-                min_match_len = min(len(match_str), other_match_len)
-                raise Exception("TokenPatternProblem: both patterns '{}' and '{}' matched a string starting with '{}'".format(
-                    pattern.kind, other_pattern.kind, src[pos:pos+min_match_len]))
-            result = (pattern, len(match_str))
-            if not verify_one_match:
-                return result
-    if result:
-        return result
+
+    match_pattern_index_obj = cish.Ref(0)
+    match_length = lex(next, match_pattern_index_obj)
+    if match_length > 0:
+        if verify_one_match:
+            afterLexVerifyOnlyOneMatch(next, match_pattern_index_obj.value)
+        return (PATTERNS[match_pattern_index_obj.value], match_length)
 
     # time to try to figure out what went wrong
     src_prefix = src[:pos]
