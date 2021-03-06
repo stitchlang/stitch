@@ -4,6 +4,20 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+
+static void escape(char quote_char, char c, char *out_buf)
+{
+  if (c == '\\' || c == quote_char) {
+    sprintf(out_buf, "\\%c", c);
+  } else if (c == '\n') {
+    sprintf(out_buf, "\\n");
+  } else if (c == '\t') {
+    sprintf(out_buf, "\\t");
+  } else {
+    sprintf(out_buf, "%c", c);
+  }
+}
+
 void generate_regex(FILE *file, unsigned kind, regex_t *pattern)
 {
   const char* types[] = { "UNUSED", "DOT", "BEGIN", "END", "QUESTIONMARK", "STAR", "PLUS", "CHAR", "CHAR_CLASS", "INV_CHAR_CLASS", "DIGIT", "NOT_DIGIT", "ALPHA", "NOT_ALPHA", "WHITESPACE", "NOT_WHITESPACE", "BRANCH" };
@@ -35,24 +49,18 @@ void generate_regex(FILE *file, unsigned kind, regex_t *pattern)
         {
           break;
         }
-        if (c == '"') {
-          fprintf(file, "\\\"");
-        } else if (c == '\\') {
-          fprintf(file, "\\\\");
-        } else {
-          fprintf(file, "%c", c);
-        }
+        char escaped[3];
+        escape('"', c, escaped);
+        fprintf(file, "%s", escaped);
       }
       fprintf(file, "\" }");
     }
     else if (pattern[i].type == CHAR)
     {
       fprintf(file, ", { .ch = '");
-      char ch[3] = {pattern[i].u.ch, 0};
-      if (pattern[i].u.ch == '\'') {
-        sprintf(ch, "\\'");
-      }
-      fprintf(file, "%s' }", ch);
+      char escaped[3];
+      escape('\'', pattern[i].u.ch, escaped);
+      fprintf(file, "%s' }", escaped);
     }
     fprintf(file, " }, // %s\n", types[pattern[i].type]);
   }

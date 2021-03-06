@@ -38,11 +38,18 @@ executable(
   include_directories: [
     'tiny-regex-c',
   ],
-  c_args: [
-    '-DMAX_REGEXP_OBJECTS=30',
-    # TODO: I'm not sure what this is for exactly, but apparently I need it because
-    #       my regex's won't compile if it gets too small
-    '-DMAX_CHAR_CLASS_LEN=20',
+)
+
+
+executable(
+  'lexfile',
+  'lexfile.c',
+  'lex.c',
+  'tiny-regex-c/re.c',
+  tokens_c,
+  compiledtokens_c,
+  include_directories: [
+    'tiny-regex-c',
   ],
 )
 

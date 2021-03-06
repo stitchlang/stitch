@@ -48,7 +48,21 @@ def main(cmd_args):
         out.write("};\n")
         out.write("const char *token_pattern_table[] = {\n")
         for name, pattern in patterns:
-            out.write("    \"^{}\",\n".format(pattern.replace("\\", "\\\\").replace('"', '\\"')))
+            parts = pattern.split("\\")
+            new_parts = [parts[0]]
+
+            KNOWN_C_ESCAPES = "nt"
+            KNOWN_REGEX_ESCAPES = ".$)(|"
+
+            for part in parts[1:]:
+                if len(part) == 0 or part[0] in KNOWN_C_ESCAPES:
+                    new_parts.append(part)
+                elif part[0] in KNOWN_REGEX_ESCAPES:
+                    new_parts.append("\\" + part)
+                else:
+                    sys.exit("is \\{} (ascii=0x{:02X}) a REGEX escape or a C escape? (from pattern {})".format(part[0], ord(part[0]), pattern))
+
+            out.write("    \"^{}\",\n".format("\\".join(new_parts).replace('"', '\\"')))
         out.write("};\n")
 
 main(sys.argv[1:])
