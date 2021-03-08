@@ -10,4 +10,4 @@ CLOSE_PAREN             \)
 ESCAPE_SEQUENCE         @[@#$")(]
 DELIMITED_STRING_DOUBLEQUOTE      @%"[^"]*"
 DELIMITED_STRING_SINGLEQUOTE      @%'[^']*'
-DELIMITED_STRING_VERTBAR          @%\|[^\|]*\|
+DELIMITED_STRING_VERTBAR          @%\|[^|]*\|

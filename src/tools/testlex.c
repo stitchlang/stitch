@@ -59,4 +59,5 @@ int main(int argc, char *argv[])
   test("#hello", TOKEN_KIND_COMMENT);
   test("\n", TOKEN_KIND_NEWLINE);
   test("#!/usr/bin/env", TOKEN_KIND_COMMENT);
+  test("@%|hello|", TOKEN_KIND_DELIMITED_STRING_VERTBAR);
 }
