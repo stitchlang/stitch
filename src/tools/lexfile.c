@@ -1,3 +1,4 @@
+#include <stddef.h>
 #include <errno.h>
 #include <re.h>
 
@@ -7,31 +8,29 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-static int lexfile(const char *text, long text_length)
+static int lexfile(const char *text, const char *limit)
 {
-  long offset = 0;
-  while (offset < text_length) {
+  while (text < limit) {
     enum token_kind kind = 0;
-    const char *next = text + offset;
-    unsigned length = lex(next, &kind);
+    unsigned length = lex(text, limit, &kind);
     if (length == 0) {
-      fprintf(stderr, "Error: unnown sequence: %s\n", next);
+      fprintf(stderr, "Error: unnown sequence: %s\n", text);
       return 1;
     }
     if (kind == TOKEN_KIND_NEWLINE) {
       printf("NEWLINE\n");
     } else {
-      printf("%s(%u): %.*s\n", token_name_table[kind], length, length, next);
+      printf("%s(%u): %.*s\n", token_name_table[kind], length, length, text);
     }
     {
       enum token_kind next_kind = kind + 1;
-      if (lex(next, &next_kind)) {
-        fprintf(stderr, "Error: text '%.*s' matched %s and %s\n", length, next,
+      if (lex(text, limit, &next_kind)) {
+        fprintf(stderr, "Error: text '%.*s' matched %s and %s\n", length, text,
                token_name_table[kind], token_name_table[next_kind]);
         return 1;
       }
     }
-    offset += length;
+    text += length;
   }
   return 0;
 }
@@ -42,6 +41,11 @@ int main(int argc, char *argv[])
     printf("Usage: lexfile FILE\n");
     return 1;
   }
+  //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  // TODO: use mmap!!
+  //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   const char *filename = argv[1];
   FILE *file = fopen(filename, "r");
   if (file == NULL) {
@@ -57,9 +61,9 @@ int main(int argc, char *argv[])
     fprintf(stderr, "Error: ftell failed, errno=%d\n", errno);
     return 1;
   }
-  char *buffer = malloc(filesize+1);
+  char *buffer = malloc(filesize);
   if (!buffer) {
-    fprintf(stderr, "Error: malloc %ld failed, errno=%d\n", filesize+1, errno);
+    fprintf(stderr, "Error: malloc %ld failed, errno=%d\n", filesize, errno);
     return 1;
   }
   if (0 != fseek(file, 0, SEEK_SET)) {
@@ -71,6 +75,5 @@ int main(int argc, char *argv[])
     fprintf(stderr, "Error: fread %ld returned %llu, errno=%d\n", filesize, (unsigned long long)read, errno);
     return 1;
   }
-  buffer[filesize] = 0;
-  return lexfile(buffer, filesize);
+  return lexfile(buffer, buffer + filesize);
 }

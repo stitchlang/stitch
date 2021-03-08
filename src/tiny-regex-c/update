@@ -1,11 +1,12 @@
 #!/usr/bin/env stitch
 rm -rf @scriptdir/repo
 
-# NOTE: using my fork to allow non-static regex storage for now
+# NOTE: using my fork with a rework of the implementation
+#    see https://github.com/kokke/tiny-regex-c/issues/67
 #@set repo_url https://github.com/kokke/tiny-regex-c
 @set repo_url https://github.com/marler8997/tiny-regex-c
 
-@set sha d32d9cdb6fd75904a1cc4190edf3d2af831496c7
+@set sha 8311dc883418407e83fcdf2468867e3f3448ca93
 
 git clone $repo_url @scriptdir/repo
 git -C @scriptdir/repo checkout $sha -b for_stitch

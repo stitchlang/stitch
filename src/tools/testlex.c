@@ -1,3 +1,4 @@
+#include <stddef.h>
 #include <re.h>
 
 #include <tokens.h>
@@ -11,8 +12,10 @@ static void test(const char *text, enum token_kind expected_kind)
 {
   printf("test '%s'....", text);
   fflush(stdout);
+  const char *limit = text + strlen(text);
+
   enum token_kind kind = 0;
-  unsigned length = lex(text, &kind);
+  unsigned length = lex(text, limit, &kind);
   if (length == 0) {
     printf("Error: NO MATCH!\n");
   } else {
@@ -26,7 +29,7 @@ static void test(const char *text, enum token_kind expected_kind)
     }
 
     enum token_kind next_kind = kind + 1;
-    if (lex(text, &next_kind)) {
+    if (lex(text, limit, &next_kind)) {
       printf("Error: text '%s' matched %s and %s\n", text, token_name_table[kind], token_name_table[next_kind]);
       exit(1);
     }

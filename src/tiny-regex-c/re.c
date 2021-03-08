@@ -1,529 +1,357 @@
-/*
- *
- * Mini regex-module inspired by Rob Pike's regex code described in:
- *
- * http://www.cs.princeton.edu/courses/archive/spr09/cos333/beautiful.html
- *
- *
- *
- * Supports:
- * ---------
- *   '.'        Dot, matches any character
- *   '^'        Start anchor, matches beginning of string
- *   '$'        End anchor, matches end of string
- *   '*'        Asterisk, match zero or more (greedy)
- *   '+'        Plus, match one or more (greedy)
- *   '?'        Question, match zero or one (non-greedy)
- *   '[abc]'    Character class, match if one of {'a', 'b', 'c'}
- *   '[^abc]'   Inverted class, match if NOT one of {'a', 'b', 'c'} -- NOTE: feature is currently broken!
- *   '[a-zA-Z]' Character ranges, the character set of the ranges { a-z | A-Z }
- *   '\s'       Whitespace, \t \f \r \n \v and spaces
- *   '\S'       Non-whitespace
- *   '\w'       Alphanumeric, [a-zA-Z0-9_]
- *   '\W'       Non-alphanumeric
- *   '\d'       Digits, [0-9]
- *   '\D'       Non-digits
- *
- *
- */
+#include <ctype.h> // for isalpha, isdigit, isspace
+#include <string.h> // for strchr
 
-
-
+#include <assert.h>
 #include "re.h"
-#include <stdio.h>
-#include <ctype.h>
 
-/* Definitions: */
-
-#ifndef MAX_REGEXP_OBJECTS
-#define MAX_REGEXP_OBJECTS      30    /* Max number of regex symbols in expression. */
+#ifndef RE_TRACE
+//#include <stdio.h>
+//#define RE_TRACE(fmt,...) do { fprintf(stderr, "RE_TRACE: " fmt "\n", ##__VA_ARGS__); } while (0)
+#define RE_TRACE(fmt,...)
 #endif
 
-#ifndef MAX_CHAR_CLASS_LEN
-#define MAX_CHAR_CLASS_LEN      40    /* Max length of character-class buffer in.   */
-#endif
+// By default, re.c uses 2 pointers to delineate the start and the end of the text being matched.
+// This means the user is not required to null-terminate their text.  It also means the \0 character
+// can be included in the text to be matched.
+//
+// The disadvantage of this mechanism is that it requires the user to know the end of the string, and
+// 2 pointers are passed around for the text instead of 1 which may have some affect on performance.
+// So the RE_CSTRINGS option can be defined to use null-terminated strings.
+//
+#define text_is_empty(ptr, end) text_is_empty_func(text_call(ptr, end))
+#define text_first_char(ptr, end) text_first_char_func(text_call(ptr, end))
+#define text_inc(ptr_ref, end) text_inc_func(text_call(ptr_ref, end))
 
+#ifdef RE_CSTRINGS
 
-enum { UNUSED, DOT, BEGIN, END, QUESTIONMARK, STAR, PLUS, CHAR, CHAR_CLASS, INV_CHAR_CLASS, DIGIT, NOT_DIGIT, ALPHA, NOT_ALPHA, WHITESPACE, NOT_WHITESPACE, /* BRANCH */ };
+#define RE_MATCH re_match_cstr
+#define RE_MATCH_START_ONLY re_match_start_only_cstr
 
+#define text_decl(ptr, end) const char *ptr
+#define text_call(ptr, end) ptr
 
+#define PRITEXT "%s"
+#define PRITEXTARGS(ptr, end) ptr
 
-
-/* Private function declarations: */
-static int matchpattern(regex_t* pattern, const char* text, int* matchlength);
-static int matchcharclass(char c, const char* str);
-static int matchstar(regex_t p, regex_t* pattern, const char* text, int* matchlength);
-static int matchplus(regex_t p, regex_t* pattern, const char* text, int* matchlength);
-static int matchone(regex_t p, char c);
-static int matchdigit(char c);
-static int matchalpha(char c);
-static int matchwhitespace(char c);
-static int matchmetachar(char c, const char* str);
-static int matchrange(char c, const char* str);
-static int matchdot(char c);
-static int ismetachar(char c);
-
-
-
-/* Public functions: */
-int re_match(const char* pattern, const char* text, int* matchlength)
+static inline int text_is_empty_func(const char *ptr) { return ptr[0] == '\0'; }
+static inline char text_first_char_func(const char *ptr)
 {
-  return re_matchp(re_compile(pattern), text, matchlength);
+  assert(ptr[0] != '\0');
+  return ptr[0];
+}
+static inline void text_inc_func(const char **ptr_ref)
+{
+  assert((*ptr_ref)[0] != '\0');
+  *ptr_ref += 1;
 }
 
-int re_matchp(re_t pattern, const char* text, int* matchlength)
+#else
+
+#define RE_MATCH re_match
+#define RE_MATCH_START_ONLY re_match_start_only
+
+#define text_decl(ptr, end) const char *ptr, const char *end
+#define text_call(ptr, end) ptr, end
+
+#define PRITEXT "%.*s"
+#define PRITEXTARGS(ptr, end) (unsigned)(end-ptr), ptr
+static inline int text_is_empty_func(const char *ptr, const char *end)
 {
-  *matchlength = 0;
-  if (pattern != 0)
-  {
-    if (pattern[0].type == BEGIN)
-    {
-      return ((matchpattern(&pattern[1], text, matchlength)) ? 0 : -1);
+  assert(ptr <= end);
+  return ptr == end;
+}
+static inline char text_first_char_func(const char *ptr, const char *end)
+{
+  assert(ptr < end);
+  return ptr[0];
+}
+static inline void text_inc_func(const char **ptr_ref, const char *end)
+{
+  assert(*ptr_ref < end);
+  *ptr_ref += 1;
+}
+#endif
+
+#define AS_STRING_ENTRY(s) #s,
+const char *re_error_name_table[] = { "NO_ERROR", RE_ERRORS(AS_STRING_ENTRY) };
+
+// the length of 1 node in the regex
+re_length_t nodelen(const char *regex, enum re_error *error_code)
+{
+    const char c = regex[0];
+    if (c == '\0')
+      return 0;
+    if (c == '\\') {
+      if (regex[1] == 0) {
+        *error_code = RE_ERROR_ENDS_WITH_BACKSLASH;
+        return 0;
+      }
+      return 2;
     }
-    else
-    {
-      int idx = -1;
-
-      do
-      {
-        idx += 1;
-
-        if (matchpattern(pattern, text, matchlength))
-        {
-          if (text[0] == '\0')
-            return -1;
-
-          return idx;
+    if (c == '*' || c == '+' || c == '.' || c == '$' || c == '^' || c == '?')
+      return 1;
+    if (c == '[') {
+      int in_escape = 0;
+      for (re_length_t i = 1;;i++) {
+        switch (regex[i]) {
+        case ']':
+          if (!in_escape)
+            return i + 1;
+          in_escape = 0;
+          break;
+        case '\\':
+          in_escape = !in_escape;
+          break;
+        case '\0':
+          *error_code = RE_ERROR_MISSING_RIGHT_SQUARE_BRACKET;
+          return 0;
+        default:
+          in_escape = 0;
         }
       }
-      while (*text++ != '\0');
+    }
+    return 1;
+}
+
+static int isalphanum(char c)
+{
+  return (c == '_') || isalpha(c) || isdigit(c);
+}
+
+// TODO: return -1 on BAD_ESCAPE
+static int try_match_escape(char regex_c, char text_c)
+{
+  switch (regex_c)
+  {
+  case 'd': return isdigit(text_c)    ? 1 : 0;
+  case 'D': return isdigit(text_c)    ? 0 : 1;
+  case 'w': return isalphanum(text_c) ? 1 : 0;
+  case 'W': return isalphanum(text_c) ? 0 : 1;
+  case 's': return isspace(text_c)    ? 1 : 0;
+  case 'S': return isspace(text_c)    ? 0 : 1;
+
+  // common escapes
+  case 't': return text_c == '\t';
+  case 'n': return text_c == '\n';
+
+  case '\\': case '*': case '+':
+  case '?': case '.':
+  case '$': case '^':
+  case '(': case ')':
+  case '[': case ']':
+  case '{': case '}':
+  case '-': case '|':
+  return regex_c == text_c;
+  }
+  return -1; // BAD_ESCAPE
+}
+
+#ifdef RE_DOT_NO_NEWLINE
+static inline int matchdot(char c){ return c != '\n'; }
+#else
+#define matchdot(c) 1
+#endif
+
+// TODO: return -1 on BAD_ESCAPE
+// caller guarantees regex is terminated by ']'
+// regex starts after the [ and the first ^ if it exists.
+static int try_matchcharset(const char *regex, char c)
+{
+  while (1) {
+    char regex_c = regex[0];
+    if (regex_c == ']')
+      return 0;
+
+    if (regex[1] == '-' && regex[2] != ']') {
+      if (c >= regex_c && c <= regex[2]) {
+        return 1;
+      }
+      regex += 3;
+    } else {
+      if (regex_c == '\\') {
+        int result = try_match_escape(regex[1], c);
+        if (result != 0) {
+          return result;
+        }
+        regex += 2;
+      } else if (regex_c == '.') {
+        // NOTE: why would you have '.' in a char set?
+        return matchdot(c);
+      } else {
+        if (regex_c == c)
+          return 1;
+        regex++;
+      }
     }
   }
-  return -1;
 }
 
-re_t re_compile(const char* pattern)
+// inverts the result of a match if it's not an error
+static inline int flip_try_match_result(int result)
 {
-  /* The sizes of the two static arrays below substantiates the static RAM usage of this module.
-     MAX_REGEXP_OBJECTS is the max number of symbols in the expression.
-     MAX_CHAR_CLASS_LEN determines the size of buffer for chars in all char-classes in the expression. */
-  static regex_t static_objects[MAX_REGEXP_OBJECTS];
-  static unsigned char static_ccl_buf[MAX_CHAR_CLASS_LEN];
-  return re_compile_to(pattern, static_objects, static_ccl_buf);
+  static const int try_not_table[] = {-1, 1, 0};
+  assert(result >= -1);
+  assert(result <= 1);
+  return try_not_table[result + 1];
 }
 
-re_t re_compile_to(const char* pattern, regex_t *re_compiled, unsigned char *ccl_buf)
+// returns -1 on invalid escape sequence
+static int try_matchone(const char *regex, char text_c)
 {
-  int ccl_bufidx = 1;
+  RE_TRACE("matchone regex='%s' c='%c'", regex, text_c);
+  char regex_c = regex[0];
+  if (regex_c == '\\')
+    return try_match_escape(regex[1], text_c);
 
-  char c;     /* current char in pattern   */
-  int i = 0;  /* index into pattern        */
-  int j = 0;  /* index into re_compiled    */
+  if (regex_c == '.')
+    return matchdot(text_c);
 
-  while (pattern[i] != '\0' && (j+1 < MAX_REGEXP_OBJECTS))
-  {
-    c = pattern[i];
-
-    switch (c)
-    {
-      /* Meta-characters: */
-      case '^': {    re_compiled[j].type = BEGIN;           } break;
-      case '$': {    re_compiled[j].type = END;             } break;
-      case '.': {    re_compiled[j].type = DOT;             } break;
-      case '*': {    re_compiled[j].type = STAR;            } break;
-      case '+': {    re_compiled[j].type = PLUS;            } break;
-      case '?': {    re_compiled[j].type = QUESTIONMARK;    } break;
-/*    case '|': {    re_compiled[j].type = BRANCH;          } break; <-- not working properly */
-
-      /* Escaped character-classes (\s \w ...): */
-      case '\\':
-      {
-        if (pattern[i+1] != '\0')
-        {
-          /* Skip the escape-char '\\' */
-          i += 1;
-          /* ... and check the next */
-          switch (pattern[i])
-          {
-            /* Meta-character: */
-            case 'd': {    re_compiled[j].type = DIGIT;            } break;
-            case 'D': {    re_compiled[j].type = NOT_DIGIT;        } break;
-            case 'w': {    re_compiled[j].type = ALPHA;            } break;
-            case 'W': {    re_compiled[j].type = NOT_ALPHA;        } break;
-            case 's': {    re_compiled[j].type = WHITESPACE;       } break;
-            case 'S': {    re_compiled[j].type = NOT_WHITESPACE;   } break;
-
-            /* Escaped character, e.g. '.' or '$' */
-            default:
-            {
-              re_compiled[j].type = CHAR;
-              re_compiled[j].u.ch = pattern[i];
-            } break;
-          }
-        }
-        /* '\\' as last char in pattern -> invalid regular expression. */
-/*
-        else
-        {
-          re_compiled[j].type = CHAR;
-          re_compiled[j].ch = pattern[i];
-        }
-*/
-      } break;
-
-      /* Character class: */
-      case '[':
-      {
-        /* Remember where the char-buffer starts. */
-        int buf_begin = ccl_bufidx;
-
-        /* Look-ahead to determine if negated */
-        if (pattern[i+1] == '^')
-        {
-          re_compiled[j].type = INV_CHAR_CLASS;
-          i += 1; /* Increment i to avoid including '^' in the char-buffer */
-          if (pattern[i+1] == 0) /* incomplete pattern, missing non-zero char after '^' */
-          {
-            return 0;
-          }
-        }
-        else
-        {
-          re_compiled[j].type = CHAR_CLASS;
-        }
-
-        /* Copy characters inside [..] to buffer */
-        while (    (pattern[++i] != ']')
-                && (pattern[i]   != '\0')) /* Missing ] */
-        {
-          if (pattern[i] == '\\')
-          {
-            if (ccl_bufidx >= MAX_CHAR_CLASS_LEN - 1)
-            {
-              //fputs("exceeded internal buffer!\n", stderr);
-              return 0;
-            }
-            if (pattern[i+1] == 0) /* incomplete pattern, missing non-zero char after '\\' */
-            {
-              return 0;
-            }
-            ccl_buf[ccl_bufidx++] = pattern[i++];
-          }
-          else if (ccl_bufidx >= MAX_CHAR_CLASS_LEN)
-          {
-              //fputs("exceeded internal buffer!\n", stderr);
-              return 0;
-          }
-          ccl_buf[ccl_bufidx++] = pattern[i];
-        }
-        if (ccl_bufidx >= MAX_CHAR_CLASS_LEN)
-        {
-            /* Catches cases such as [00000000000000000000000000000000000000][ */
-            //fputs("exceeded internal buffer!\n", stderr);
-            return 0;
-        }
-        /* Null-terminate string end */
-        ccl_buf[ccl_bufidx++] = 0;
-        re_compiled[j].u.ccl = &ccl_buf[buf_begin];
-      } break;
-
-      /* Other characters: */
-      default:
-      {
-        re_compiled[j].type = CHAR;
-        re_compiled[j].u.ch = c;
-      } break;
+  if (regex_c == '[') {
+    if (regex[1] ==  '^') {
+      return flip_try_match_result(try_matchcharset(regex + 2, text_c));
     }
-    /* no buffer-out-of-bounds access on invalid patterns - see https://github.com/kokke/tiny-regex-c/commit/1a279e04014b70b0695fba559a7c05d55e6ee90b */
-    if (pattern[i] == 0)
-    {
+    return try_matchcharset(regex + 1, text_c);
+  }
+  return regex_c == text_c;
+}
+
+static int matchquestion(struct re_context *context, const char *regex_left, const char *regex_right, text_decl(text_ptr, text_end))
+{
+  RE_TRACE("matchquestion regex_right='%s' text='"PRITEXT"'", regex_right, PRITEXTARGS(text_ptr, text_end));
+  if (RE_MATCH_START_ONLY(context, regex_right, text_call(text_ptr, text_end)))
+    return 1;
+  if (!text_is_empty(text_ptr, text_end)) {
+    int result = try_matchone(regex_left, text_first_char(text_ptr, text_end));
+    if (result == -1) {
+      context->error = RE_ERROR_BAD_ESCAPE;
+      context->error_location = regex_left;
+      return 0;
+    }
+    if (result) {
+      text_inc(&text_ptr, text_end);
+      if (RE_MATCH_START_ONLY(context, regex_right, text_call(text_ptr, text_end))) {
+        context->match_length++;
+        return 1;
+      }
+    }
+  }
+  return 0;
+}
+
+static int matchplus(struct re_context *context, const char *regex_left, const char *regex_right, text_decl(text_ptr, text_end))
+{
+  RE_TRACE("matchplus regex_right='%s' text='"PRITEXT"'", regex_right, PRITEXTARGS(text_ptr, text_end));
+  const char *text_start = text_ptr;
+
+  while (!text_is_empty(text_ptr, text_end)) {
+    int result = try_matchone(regex_left, text_ptr[0]);
+    if (result == -1) {
+      context->error = RE_ERROR_BAD_ESCAPE;
+      context->error_location = regex_left;
+      return 0;
+    }
+    if (!result)
+      break;
+    text_inc(&text_ptr, text_end);
+  }
+  for (;text_ptr > text_start; text_ptr--) {
+    if (RE_MATCH_START_ONLY(context, regex_right, text_call(text_ptr, text_end))) {
+      context->match_length += text_ptr - text_start;
+      return 1;
+    }
+  }
+  return 0;
+}
+
+int RE_MATCH_START_ONLY(struct re_context *context, const char *regex, text_decl(text_ptr, text_end))
+{
+  RE_TRACE("RE_MATCH_START_ONLY regex='%s' text='"PRITEXT"' (match=%u)", regex, PRITEXTARGS(text_ptr, text_end), (unsigned)context->match_length);
+  int save_length = context->match_length;
+  while (1) {
+    const char current_c = regex[0];
+    if (current_c == '\0')
+      return 1;
+    enum re_error node_length_error = RE_ERROR_NONE;
+    const char *next_regex = regex + nodelen(regex, &node_length_error);
+    if (node_length_error != RE_ERROR_NONE) {
+      context->error = node_length_error;
+      context->error_location = regex;
+      return 0; // just continue, the user can handle the error if they so chose
+    }
+    const char next_c = next_regex[0];
+    if (next_c == '?') {
+      enum re_error ignoreme = 0;
+      assert(nodelen(next_regex, &ignoreme) == 1);
+      assert(ignoreme == 0);
+      return matchquestion(context, regex, next_regex + 1, text_call(text_ptr, text_end));
+    }
+
+    if (next_c == '+') {
+      enum re_error ignoreme = 0;
+      assert(nodelen(next_regex, &ignoreme) == 1);
+      assert(ignoreme == 0);
+      return matchplus(context, regex, next_regex + 1, text_call(text_ptr, text_end));
+    }
+
+    if (current_c == '$' && next_c == '\0') {
+      return text_is_empty(text_ptr, text_end);
+    }
+
+    if (current_c == '|') {
+      context->error = RE_ERROR_BRANCH_NOT_IMPLEMENTED;
+      context->error_location = regex;
       return 0;
     }
 
-    i += 1;
-    j += 1;
-  }
-  /* 'UNUSED' is a sentinel used to indicate end-of-pattern */
-  re_compiled[j].type = UNUSED;
-
-  return (re_t) re_compiled;
-}
-
-void re_print(regex_t* pattern)
-{
-  const char* types[] = { "UNUSED", "DOT", "BEGIN", "END", "QUESTIONMARK", "STAR", "PLUS", "CHAR", "CHAR_CLASS", "INV_CHAR_CLASS", "DIGIT", "NOT_DIGIT", "ALPHA", "NOT_ALPHA", "WHITESPACE", "NOT_WHITESPACE", "BRANCH" };
-
-  int i;
-  int j;
-  char c;
-  for (i = 0; i < MAX_REGEXP_OBJECTS; ++i)
-  {
-    if (pattern[i].type == UNUSED)
-    {
-      break;
-    }
-
-    printf("type: %s", types[pattern[i].type]);
-    if (pattern[i].type == CHAR_CLASS || pattern[i].type == INV_CHAR_CLASS)
-    {
-      printf(" [");
-      for (j = 0; j < MAX_CHAR_CLASS_LEN; ++j)
-      {
-        c = pattern[i].u.ccl[j];
-        if ((c == '\0') || (c == ']'))
-        {
-          break;
-        }
-        printf("%c", c);
-      }
-      printf("]");
-    }
-    else if (pattern[i].type == CHAR)
-    {
-      printf(" '%c'", pattern[i].u.ch);
-    }
-    printf("\n");
-  }
-}
-
-
-
-/* Private functions: */
-static int matchdigit(char c)
-{
-  return isdigit(c);
-}
-static int matchalpha(char c)
-{
-  return isalpha(c);
-}
-static int matchwhitespace(char c)
-{
-  return isspace(c);
-}
-static int matchalphanum(char c)
-{
-  return ((c == '_') || matchalpha(c) || matchdigit(c));
-}
-static int matchrange(char c, const char* str)
-{
-  return (    (c != '-')
-           && (str[0] != '\0')
-           && (str[0] != '-')
-           && (str[1] == '-')
-           && (str[2] != '\0')
-           && (    (c >= str[0])
-                && (c <= str[2])));
-}
-static int matchdot(char c)
-{
-#if defined(RE_DOT_MATCHES_NEWLINE) && (RE_DOT_MATCHES_NEWLINE == 1)
-  (void)c;
-  return 1;
-#else
-  return c != '\n' && c != '\r';
-#endif
-}
-static int ismetachar(char c)
-{
-  return ((c == 's') || (c == 'S') || (c == 'w') || (c == 'W') || (c == 'd') || (c == 'D'));
-}
-
-static int matchmetachar(char c, const char* str)
-{
-  switch (str[0])
-  {
-    case 'd': return  matchdigit(c);
-    case 'D': return !matchdigit(c);
-    case 'w': return  matchalphanum(c);
-    case 'W': return !matchalphanum(c);
-    case 's': return  matchwhitespace(c);
-    case 'S': return !matchwhitespace(c);
-    default:  return (c == str[0]);
-  }
-}
-
-static int matchcharclass(char c, const char* str)
-{
-  do
-  {
-    if (matchrange(c, str))
-    {
-      return 1;
-    }
-    else if (str[0] == '\\')
-    {
-      /* Escape-char: increment str-ptr and match on next char */
-      str += 1;
-      if (matchmetachar(c, str))
-      {
+    if (next_c == '*') {
+      enum re_error ignoreme = 0;
+      assert(nodelen(next_regex, &ignoreme) == 1);
+      assert(ignoreme == 0);
+      if (matchplus(context, regex, next_regex + 1, text_call(text_ptr, text_end))) {
         return 1;
       }
-      else if ((c == str[0]) && !ismetachar(c))
-      {
-        return 1;
+      regex = next_regex + 1;
+    } else {
+      if (text_is_empty(text_ptr, text_end)) {
+        break;
       }
-    }
-    else if (c == str[0])
-    {
-      if (c == '-')
-      {
-        return ((str[-1] == '\0') || (str[1] == '\0'));
+      int result = try_matchone(regex, text_first_char(text_ptr, text_end));
+      if (result == -1) {
+        context->error = RE_ERROR_BAD_ESCAPE;
+        context->error_location = regex;
+        break;
       }
-      else
-      {
-        return 1;
-      }
+      if (result == 0)
+        break;
+      context->match_length++;
+      text_inc(&text_ptr, text_end);
+      regex = next_regex;
     }
   }
-  while (*str++ != '\0');
 
+  context->match_length = save_length;
   return 0;
 }
 
-static int matchone(regex_t p, char c)
+int RE_MATCH(struct re_context *context, const char *regex, text_decl(text_ptr, text_end), re_length_t *out_match_start)
 {
-  switch (p.type)
-  {
-    case DOT:            return matchdot(c);
-    case CHAR_CLASS:     return  matchcharclass(c, (const char*)p.u.ccl);
-    case INV_CHAR_CLASS: return !matchcharclass(c, (const char*)p.u.ccl);
-    case DIGIT:          return  matchdigit(c);
-    case NOT_DIGIT:      return !matchdigit(c);
-    case ALPHA:          return  matchalphanum(c);
-    case NOT_ALPHA:      return !matchalphanum(c);
-    case WHITESPACE:     return  matchwhitespace(c);
-    case NOT_WHITESPACE: return !matchwhitespace(c);
-    default:             return  (p.u.ch == c);
-  }
-}
-
-static int matchstar(regex_t p, regex_t* pattern, const char* text, int* matchlength)
-{
-  int prelen = *matchlength;
-  const char* prepoint = text;
-  while ((text[0] != '\0') && matchone(p, *text))
-  {
-    text++;
-    (*matchlength)++;
-  }
-  while (text >= prepoint)
-  {
-    if (matchpattern(pattern, text--, matchlength))
-      return 1;
-    (*matchlength)--;
-  }
-
-  *matchlength = prelen;
-  return 0;
-}
-
-static int matchplus(regex_t p, regex_t* pattern, const char* text, int* matchlength)
-{
-  const char* prepoint = text;
-  while ((text[0] != '\0') && matchone(p, *text))
-  {
-    text++;
-    (*matchlength)++;
-  }
-  while (text > prepoint)
-  {
-    if (matchpattern(pattern, text--, matchlength))
-      return 1;
-    (*matchlength)--;
-  }
-
-  return 0;
-}
-
-static int matchquestion(regex_t p, regex_t* pattern, const char* text, int* matchlength)
-{
-  if (p.type == UNUSED)
+  RE_TRACE("match '%s' '"PRITEXT"'", regex, PRITEXTARGS(text_ptr, text_end));
+  if (regex[0] == '^') {
+    context->match_length = 0;
+    if (!RE_MATCH_START_ONLY(context, regex + 1, text_call(text_ptr, text_end)))
+      return 0;
+    *out_match_start = 0;
     return 1;
-  if (matchpattern(pattern, text, matchlength))
+  }
+
+  const char *text_start = text_ptr;
+  for (;; text_inc(&text_ptr, text_end)) {
+    context->match_length = 0;
+    if (RE_MATCH_START_ONLY(context, regex, text_call(text_ptr, text_end))) {
+      *out_match_start = text_ptr - text_start;
       return 1;
-  if (*text && matchone(p, *text++))
-  {
-    if (matchpattern(pattern, text, matchlength))
-    {
-      (*matchlength)++;
-      return 1;
     }
-  }
-  return 0;
-}
-
-
-#if 0
-
-/* Recursive matching */
-static int matchpattern(regex_t* pattern, const char* text, int *matchlength)
-{
-  int pre = *matchlength;
-  if ((pattern[0].type == UNUSED) || (pattern[1].type == QUESTIONMARK))
-  {
-    return matchquestion(pattern[1], &pattern[2], text, matchlength);
-  }
-  else if (pattern[1].type == STAR)
-  {
-    return matchstar(pattern[0], &pattern[2], text, matchlength);
-  }
-  else if (pattern[1].type == PLUS)
-  {
-    return matchplus(pattern[0], &pattern[2], text, matchlength);
-  }
-  else if ((pattern[0].type == END) && pattern[1].type == UNUSED)
-  {
-    return text[0] == '\0';
-  }
-  else if ((text[0] != '\0') && matchone(pattern[0], text[0]))
-  {
-    (*matchlength)++;
-    return matchpattern(&pattern[1], text+1);
-  }
-  else
-  {
-    *matchlength = pre;
-    return 0;
+    if (text_is_empty(text_ptr, text_end))
+      return 0;
   }
 }
-
-#else
-
-/* Iterative matching */
-static int matchpattern(regex_t* pattern, const char* text, int* matchlength)
-{
-  int pre = *matchlength;
-  do
-  {
-    if ((pattern[0].type == UNUSED) || (pattern[1].type == QUESTIONMARK))
-    {
-      return matchquestion(pattern[0], &pattern[2], text, matchlength);
-    }
-    else if (pattern[1].type == STAR)
-    {
-      return matchstar(pattern[0], &pattern[2], text, matchlength);
-    }
-    else if (pattern[1].type == PLUS)
-    {
-      return matchplus(pattern[0], &pattern[2], text, matchlength);
-    }
-    else if ((pattern[0].type == END) && pattern[1].type == UNUSED)
-    {
-      return (text[0] == '\0');
-    }
-/*  Branching is not working properly
-    else if (pattern[1].type == BRANCH)
-    {
-      return (matchpattern(pattern, text) || matchpattern(&pattern[2], text));
-    }
-*/
-  (*matchlength)++;
-  }
-  while ((text[0] != '\0') && matchone(*pattern++, *text++));
-
-  *matchlength = pre;
-  return 0;
-}
-
-#endif

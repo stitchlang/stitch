@@ -62,7 +62,7 @@ def main(cmd_args):
                 else:
                     sys.exit("is \\{} (ascii=0x{:02X}) a REGEX escape or a C escape? (from pattern {})".format(part[0], ord(part[0]), pattern))
 
-            out.write("    \"^{}\",\n".format("\\".join(new_parts).replace('"', '\\"')))
+            out.write("    \"{}\",\n".format("\\".join(new_parts).replace('"', '\\"')))
         out.write("};\n")
 
 main(sys.argv[1:])
