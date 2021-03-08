@@ -3,7 +3,7 @@ import sys
 import os
 import subprocess
 import inspect
-from typing import List, Dict, Union, Tuple
+from typing import List, Dict, Union, Tuple, Any
 
 import lex
 import parse
@@ -56,7 +56,7 @@ def runTests(commands: List[CommandTest], test_line: int, verification_mode: boo
     for cmd in commands:
         stdout_builder = prototype.StringBuilder()
         stderr_builder = prototype.StringBuilder()
-        result = None
+        result: Any = None
         try:
             nodes, end = parse.parseCommand(cmd.line, 0)
             assert(end == len(cmd.line))

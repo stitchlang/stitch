@@ -11,3 +11,28 @@ T = TypeVar('T')
 class Ref(Generic[T]):
     def __init__(self, value: T):
         self.value = value
+
+# Emulates C string pointer semantics by using a Python str and an int offset
+class StringPtr:
+    def __init__(self, full_string: str, offset: int):
+        self.full_string = full_string
+        self.offset = offset
+    def charAt(self, offset: int) -> str:
+        assert(offset >= 0)
+        # python will bounds check this for us
+        return self.full_string[self.offset + offset]
+    def toStringWithLimitOffset(self, limit_offset: int) -> str:
+        assert(limit_offset <= len(self.full_string))
+        assert(self.offset <= limit_offset)
+        return self.full_string[self.offset:limit_offset]
+    def toStringWithLength(self, length: int) -> str:
+        assert(length >= 0)
+        return self.toStringWithLimitOffset(self.offset + length)
+    def toStringWithLimit(self, limit: 'StringPtr') -> str:
+        assert(self.full_string is limit.full_string)
+        assert(self.offset <= limit.offset)
+        return self.full_string[self.offset:limit.offset]
+    def subtract(self, lower: 'StringPtr') -> int:
+        assert(self.full_string is lower.full_string)
+        assert(self.offset >= lower.offset)
+        return self.offset - lower.offset

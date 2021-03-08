@@ -1,9 +1,9 @@
 from enum import Enum
-from typing import List, Dict, Set, Union, Tuple, Optional, Pattern
+from typing import List, Dict, Set, Union, Tuple, Optional
 import re
 
 import tokens
-import cish
+from cish import Ref, StringPtr
 
 class TokenKind(Enum):
     INLINE_WHITESPACE = 0
@@ -53,17 +53,20 @@ class SyntaxError(Exception):
 # TODO: this can be implemented better
 #       the string returned should never exceed max_len, so the [..snip..]
 #       should cut off the actual characters of s as well
-def preview(s, max_len):
+def preview(s: str, max_len: int):
     newline = s.find("\n")
     cutoff = len(s) if (newline == -1) else newline - 1
     if cutoff > max_len:
         return s[:max_len] + "[..snip..]"
     return s[:cutoff]
 
+def preview2(text: StringPtr, limit: StringPtr, max_len: int):
+    return preview(text.toStringWithLimit(limit), max_len)
+
 # this functions mirrors the one in lex.c
-def lex(text: str, pattern_index_ref: cish.Ref[int]) -> int:
+def lex(text: StringPtr, limit: StringPtr, pattern_index_ref: Ref[int]) -> int:
     for i, pattern in enumerate(PATTERNS[pattern_index_ref.value:], start=pattern_index_ref.value):
-        match = pattern.re.match(text)
+        match = pattern.re.match(text.toStringWithLimit(limit))
         if match:
             match_length = len(match.group())
             assert(match_length > 0)
@@ -71,12 +74,12 @@ def lex(text: str, pattern_index_ref: cish.Ref[int]) -> int:
             return match_length
     return 0
 
-def afterLexVerifyOnlyOneMatch(text: str, pattern_index: int) -> None:
-    other_pattern_index_obj = cish.Ref(pattern_index + 1)
-    match_length = lex(text, other_pattern_index_obj)
+def afterLexVerifyOnlyOneMatch(text: StringPtr, limit: StringPtr, pattern_index: int) -> None:
+    other_pattern_index_obj = Ref(pattern_index + 1)
+    match_length = lex(text, limit, other_pattern_index_obj)
     if match_length > 0:
         raise Exception("TokenPatternProblem: both patterns '{}' and '{}' matched a string starting with '{}'".format(
-            PATTERNS[pattern_index].kind, PATTERNS[other_pattern_index_obj.value].kind, text[:match_length]))
+            PATTERNS[pattern_index].kind, PATTERNS[other_pattern_index_obj.value].kind, text.toStringWithLength(match_length)))
 
 # NOTE: verify_one_match verifies that only 1 lexer pattern is matching the next string.
 #       I think that maintaining this property on my lexer means that all the patterns
@@ -91,21 +94,22 @@ def afterLexVerifyOnlyOneMatch(text: str, pattern_index: int) -> None:
 def scan(src: str, pos: int, verify_one_match: bool = True) -> Optional[Tuple[Pattern,int]]:
     if pos == len(src):
         return None
-    next = src[pos:]
+    next = StringPtr(src, pos)
+    limit = StringPtr(src, len(src))
 
-    match_pattern_index_obj = cish.Ref(0)
-    match_length = lex(next, match_pattern_index_obj)
+    match_pattern_index_obj = Ref(0)
+    match_length = lex(next, limit, match_pattern_index_obj)
     if match_length > 0:
         if verify_one_match:
-            afterLexVerifyOnlyOneMatch(next, match_pattern_index_obj.value)
+            afterLexVerifyOnlyOneMatch(next, limit, match_pattern_index_obj.value)
         return (PATTERNS[match_pattern_index_obj.value], match_length)
 
     # time to try to figure out what went wrong
     src_prefix = src[:pos]
-    c = next[0]
+    c = next.charAt(0)
     if c == '"':
-        raise SyntaxError(src_prefix, "missing close quote for: {}".format(preview(next, 30)))
+        raise SyntaxError(src_prefix, "missing close quote for: {}".format(preview2(next, limit, 30)))
     
     # I think we need at most 2 characters to see what went wrong
-    bad_str = next[:min(len(next), 2)]
+    bad_str = next.toStringWithLength(min(limit.subtract(next), 2))
     raise SyntaxError(src_prefix, "unrecognized character sequence '{}'".format(bad_str))

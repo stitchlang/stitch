@@ -779,6 +779,7 @@ def enforceBuiltinArgCount(builtin: Builtin, actual: int) -> Optional[Error]:
         suffix = "" if (builtin.arg_count == 1) else "s"
         return SemanticError("@{} takes {} argument{} but got {}".format(
             builtin.name, builtin.arg_count, suffix, actual))
+    return None
 
 def runBuiltin(cmd_ctx: CommandContext, builtin: Builtin, nodes: List[parse.Node]):
     if builtin.returns_bool:
