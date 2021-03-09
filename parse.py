@@ -7,22 +7,23 @@
 
 from typing import List, Dict, Set, Union, Tuple, Optional
 
+from cish import Bytes, isBytesType
 import tokens
 import lex
 
 class Node:
-    def __init__(self, src: bytes):
+    def __init__(self, src: Bytes):
         assert(isinstance(src, bytes))
         self.src = src
 class NodeToken(Node):
-    def __init__(self, src: bytes, s: bytes):
+    def __init__(self, src: Bytes, s: Bytes):
         assert(isinstance(s, bytes))
         Node.__init__(self, src)
         self.s = s
     def __repr__(self):
         return "Token({})".format(self.s)
 class NodeVariable(Node):
-    def __init__(self, src, id: bytes, is_at: bool):
+    def __init__(self, src, id: Bytes, is_at: bool):
         assert(isinstance(id, bytes))
         Node.__init__(self, src)
         self.id = id
@@ -30,13 +31,13 @@ class NodeVariable(Node):
     def __repr__(self):
         return "Variable({}{})".format("@" if self.is_at else "$", self.id)
 class NodeInlineCommand(Node):
-    def __init__(self, src: bytes, nodes: List[Node]):
+    def __init__(self, src: Bytes, nodes: List[Node]):
         Node.__init__(self, src)
         self.nodes = nodes
     def __repr__(self):
         return "InlineCommand({})".format(", ".join([str(n) for n in self.nodes]))
 class NodeMultiple(Node):
-    def __init__(self, src: bytes, nodes: List[Node]):
+    def __init__(self, src: Bytes, nodes: List[Node]):
         Node.__init__(self, src)
         self.nodes = nodes
     def __repr__(self):
@@ -56,7 +57,7 @@ class ParseToken:
         self.pattern = pattern
         self.length = length
     # returns True on EOF
-    def skipInlineWhitespace(self, src: bytes) -> bool:
+    def skipInlineWhitespace(self, src: Bytes) -> bool:
         if self.pattern.kind == lex.TokenKind.INLINE_WHITESPACE:
             token_start = self.pos + self.length
             lex_token = lex.scan(src, token_start)
@@ -70,7 +71,7 @@ class ParseToken:
         return False
 
 
-def parseNode(src: bytes, token: ParseToken) -> Tuple[Node, Optional[ParseToken]]:
+def parseNode(src: Bytes, token: ParseToken) -> Tuple[Node, Optional[ParseToken]]:
     assert(token.pos < len(src))
     assert(token.pattern.kind != lex.TokenKind.INLINE_WHITESPACE)
     assert(token.pattern.kind != lex.TokenKind.COMMENT)
@@ -120,8 +121,8 @@ def parseNode(src: bytes, token: ParseToken) -> Tuple[Node, Optional[ParseToken]
             pattern.kind == lex.TokenKind.CLOSE_PAREN):
             return node, token
 
-def parseCommand(src: bytes, cmd_start: int) -> Tuple[List[Node],int]:
-    assert(type(src) == bytes)
+def parseCommand(src: Bytes, cmd_start: int) -> Tuple[List[Node],int]:
+    assert(isBytesType(type(src)))
     nodes: List[Node] = []
     lex_token = lex.scan(src, cmd_start)
     if not lex_token:

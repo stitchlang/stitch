@@ -2,8 +2,8 @@ from enum import Enum
 from typing import List, Dict, Set, Union, Tuple, Optional
 import re
 
+from cish import Ref, StringPtr, Bytes, isBytesType
 import tokens
-from cish import Ref, StringPtr
 
 class TokenKind(Enum):
     INLINE_WHITESPACE = 0
@@ -19,7 +19,7 @@ class TokenKind(Enum):
     ESCAPE_SEQUENCE = 10
 
 class Pattern:
-    def __init__(self, kind: TokenKind, re_string: bytes):
+    def __init__(self, kind: TokenKind, re_string: Bytes):
         assert(isinstance(re_string, bytes))
         self.kind = kind
         self.re = re.compile(b"^" + re_string)
@@ -35,7 +35,7 @@ with open(tokens.getTokensTxtFilename(), "rb") as tokens_file:
             kind = getattr(TokenKind, name.decode('ascii'))
         PATTERNS.append(Pattern(kind, pattern))
 
-def countLinesAndColumns(s: bytes) -> Tuple[int,int]:
+def countLinesAndColumns(s: Bytes) -> Tuple[int,int]:
     assert(type(s) == bytes)
     line = 1
     column = 1
@@ -48,7 +48,7 @@ def countLinesAndColumns(s: bytes) -> Tuple[int,int]:
     return line, column
 
 class SyntaxError(Exception):
-    def __init__(self, src_prefix: bytes, message_str: str):
+    def __init__(self, src_prefix: Bytes, message_str: str):
         assert(isinstance(src_prefix, bytes))
         assert(isinstance(message_str, str))
         super().__init__(message_str)
@@ -57,7 +57,7 @@ class SyntaxError(Exception):
 # TODO: this can be implemented better
 #       the string returned should never exceed max_len, so the [..snip..]
 #       should cut off the actual characters of s as well
-def preview(src: bytes, max_len: int) -> str:
+def preview(src: Bytes, max_len: int) -> str:
     assert(isinstance(src, bytes))
     newline = src.find(b"\n")
     cutoff = len(src) if (newline == -1) else newline - 1
@@ -96,8 +96,8 @@ def afterLexVerifyOnlyOneMatch(text: StringPtr, limit: StringPtr, pattern_index:
 #       I think we take about a 10% hit to performance when verify_one_match is enabled.
 #
 # TODO: remove this verify_one_match argument when I know my combined lex patterns are regular
-def scan(src: bytes, pos: int, verify_one_match: bool = True) -> Optional[Tuple[Pattern,int]]:
-    assert(type(src) == bytes)
+def scan(src: Bytes, pos: int, verify_one_match: bool = True) -> Optional[Tuple[Pattern,int]]:
+    assert(isBytesType(type(src)))
     if pos == len(src):
         return None
     next = StringPtr(src, pos)

@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
 import sys
 import os
+import mmap
 import subprocess
 import re
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import List, Dict, Set, Union, Tuple, Optional
 
+from cish import Bytes, isBytesType
 import lex
 import parse
 
 def eprint(msg_str: str):
     print(msg_str, file=sys.stderr)
 
-def stripNewline(s: bytes):
+def stripNewline(s: Bytes):
     assert(isinstance(s, bytes))
     if len(s) > 0 and s[-1] == b"\n":
         if len(s) > 2 and s[-2] == b"\r":
@@ -89,7 +91,7 @@ class UnknownString(Unknown):
 UNKNOWN_STRING = UnknownString()
 
 class BinaryOperator(StitchObject):
-    def __init__(self, name: bytes):
+    def __init__(self, name: Bytes):
         assert(isinstance(name, bytes))
         self.name = name
         self.src_name_str = "@" + name.decode('ascii')
@@ -102,7 +104,7 @@ class BinaryOperator(StitchObject):
     def apply(self, verification_mode: bool, left: Bool, right: StitchObject):
         pass
 class ChainableBinaryOperator(BinaryOperator):
-    def __init__(self, name: bytes):
+    def __init__(self, name: Bytes):
         BinaryOperator.__init__(self, name)
     @abstractmethod
     def shortcircuit(self, result: Bool):
@@ -152,7 +154,7 @@ class EqOperator(BinaryOperator):
         assert(isinstance(left, UnknownString))
         return UNKNOWN_BOOL
 class CompareOperator(BinaryOperator):
-    def __init__(self, name: bytes, func):
+    def __init__(self, name: Bytes, func):
         BinaryOperator.__init__(self, name)
         self.func = func
     def initialValue(self, operand):
@@ -196,7 +198,7 @@ class UnknownCommandResult(Unknown):
         return "CommandResult"
 UNKNOWN_COMMAND_RESULT = UnknownCommandResult()
 
-def countLinesAndColumns(s: bytes):
+def countLinesAndColumns(s: Bytes):
     assert(type(s) == bytes)
     line = 1
     column = 1
@@ -262,7 +264,7 @@ class UnknownExitCode:
 UNKNOWN_EXIT_CODE = UnknownExitCode()
 
 class GlobalContext:
-    def __init__(self, doverify: bool, callerworkdir: bytes):
+    def __init__(self, doverify: bool, callerworkdir: Bytes):
         assert(type(callerworkdir) == bytes)
         self.doverify = doverify
         self.callerworkdir = callerworkdir
@@ -300,7 +302,7 @@ class DataHandler(ABC):
     def isEmpty(self):
         pass
     @abstractmethod
-    def handle(self, s: bytes):
+    def handle(self, s: Bytes):
         pass
 class StringBuilder(DataHandler):
     def __init__(self):
@@ -310,7 +312,7 @@ class StringBuilder(DataHandler):
         return "capture"
     def isEmpty(self):
         return len(self.output) == 0
-    def handle(self, s: bytes):
+    def handle(self, s: Bytes):
         assert(type(s) == bytes)
         if len(s) > 0:
             self.output += s
@@ -322,7 +324,7 @@ class ConsolePrinter(DataHandler):
         return "console"
     def isEmpty(self):
         return True
-    def handle(self, s: bytes):
+    def handle(self, s: Bytes):
         assert(type(s) == bytes)
         if len(s) > 0:
             if s[-1] == b'\n':
@@ -555,9 +557,10 @@ class BuiltinMethods:
             return UNKNOWN_EXIT_CODE
         # TODO: should I be caching files?
         try:
-            with open(program_file, "rb") as file:
+            with open(program_file, "r+b") as file:
+                src = mmap.mmap(file.fileno(), 0)
                 # TODO: try mmap if it is supported
-                src = file.read()
+                #src = file.read()
         except FileNotFoundError:
             return MissingStitchScript(program_file.decode('utf8'))
         result = runFile(cmd_ctx.script.global_ctx,
@@ -920,7 +923,7 @@ def runExternalProgram(verification_mode: bool, stdout_handler: DataHandler,
         stderr_handler.handle(result.stderr)
     return ExitCode(result.returncode)
 
-def tryLookupCommandVar(cmd_ctx: CommandContext, name: bytes):
+def tryLookupCommandVar(cmd_ctx: CommandContext, name: Bytes):
     ctx: Optional[CommandContext] = cmd_ctx
     while ctx:
         obj = ctx.var_map.get(name)
@@ -928,7 +931,7 @@ def tryLookupCommandVar(cmd_ctx: CommandContext, name: bytes):
             return obj
         ctx = ctx.parent
 
-def tryLookupUserVar(cmd_ctx: CommandContext, name: bytes) -> Optional[StitchObject]:
+def tryLookupUserVar(cmd_ctx: CommandContext, name: Bytes) -> Optional[StitchObject]:
     cmd_obj = tryLookupCommandVar(cmd_ctx, name)
     if cmd_obj:
         return cmd_obj
@@ -937,7 +940,7 @@ def tryLookupUserVar(cmd_ctx: CommandContext, name: bytes) -> Optional[StitchObj
         return script_obj
     return None
 
-def tryLookupBuiltinVar(script_ctx: ScriptContext, name: bytes) -> Optional[StitchObject]:
+def tryLookupBuiltinVar(script_ctx: ScriptContext, name: Bytes) -> Optional[StitchObject]:
     script_obj = script_ctx.script_specific_builtin_objects.get(name)
     if script_obj:
         return script_obj
@@ -946,7 +949,7 @@ def tryLookupBuiltinVar(script_ctx: ScriptContext, name: bytes) -> Optional[Stit
         return global_obj
     return None
 
-def stdoutOnlyHandler(stdout: bytes, multiline: bool):
+def stdoutOnlyHandler(stdout: Bytes, multiline: bool):
     assert(isinstance(stdout, bytes))
     if multiline:
         return String(stdout)
@@ -1093,7 +1096,7 @@ def runBinaryExpression(cmd_ctx: CommandContext, nodes: List[parse.Node], first_
         if next_op.id != op.name:
             return SemanticError("'{}' and '@{}' cannot be chained".format(op, next_op.id.decode('ascii')))
 
-def runSrc(script_ctx: ScriptContext, src: bytes, stdout_handler: DataHandler, stderr_handler: DataHandler) -> Union[Error,ExitCode]:
+def runSrc(script_ctx: ScriptContext, src: Bytes, stdout_handler: DataHandler, stderr_handler: DataHandler) -> Union[Error,ExitCode]:
     pos = 0
     while pos < len(src):
         nodes, end = parse.parseCommand(src, pos)
@@ -1143,10 +1146,10 @@ def normalizeFilename(filename):
     # TODO: implement this
     return filename
 
-def runFile(global_ctx: GlobalContext, full_filename: Optional[bytes], src: bytes,
+def runFile(global_ctx: GlobalContext, full_filename: Optional[bytes], src: Union[bytes,mmap.mmap],
             stdout_handler: DataHandler, stderr_handler: DataHandler) -> Union[Error,ExitCode]:
     assert((full_filename is None) or isinstance(full_filename, bytes))
-    assert(isinstance(src, bytes))
+    assert(isBytesType(type(src)))
 
     full_filename_str = full_filename.decode('utf8') if full_filename else "<the -c command>"
 
@@ -1276,10 +1279,11 @@ def main():
             sys.exit("Error: too many command-line arguments")
         filename_str = first_arg
         full_filename = os.path.abspath(first_arg).encode('utf8')
-        with open(first_arg, "rb") as file:
+        with open(first_arg, "r+b") as file:
+            src = mmap.mmap(file.fileno(), 0)
             # TODO: try mmap if it is supported
             # NOTE: this will require using bytes instead of strings in Python
-            src = file.read()
+            #src = file.read()
 
     sandbox_path, callerworkdir = sandboxCallerWorkdir()
     global_ctx = GlobalContext(doverify, callerworkdir.encode('utf8'))

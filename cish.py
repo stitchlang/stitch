@@ -3,8 +3,8 @@
 #
 # This will help in creating a python implementation
 # that matches my C implementation more closely.
-
-from typing import TypeVar, Generic
+import mmap
+from typing import Type, TypeVar, Generic, Union
 
 T = TypeVar('T')
 
@@ -12,10 +12,15 @@ class Ref(Generic[T]):
     def __init__(self, value: T):
         self.value = value
 
+Bytes = Union[bytes,mmap.mmap]
+def isBytesType(obj_type: Type) -> bool:
+    assert(isinstance(obj_type, Type))
+    return (obj_type is bytes) or (obj_type is mmap.mmap)
+
 # Emulates C string pointer semantics by using Python's bytes type and an int offset
 class StringPtr:
-    def __init__(self, full_string: bytes, offset: int):
-        assert(isinstance(full_string, bytes))
+    def __init__(self, full_string: Bytes, offset: int):
+        assert(isBytesType(type(full_string)))
         self.full_string = full_string
         self.offset = offset
     def charAt(self, offset: int) -> int:
