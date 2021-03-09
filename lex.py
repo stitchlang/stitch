@@ -19,26 +19,28 @@ class TokenKind(Enum):
     ESCAPE_SEQUENCE = 10
 
 class Pattern:
-    def __init__(self, kind: TokenKind, re_string: str):
+    def __init__(self, kind: TokenKind, re_string: bytes):
+        assert(isinstance(re_string, bytes))
         self.kind = kind
-        self.re = re.compile("^" + re_string)
+        self.re = re.compile(b"^" + re_string)
 
-PATTERNS = []
-with open(tokens.getTokensTxtFilename(), "r") as tokens_file:
+PATTERNS: List[Pattern] = []
+with open(tokens.getTokensTxtFilename(), "rb") as tokens_file:
     for line in tokens_file:
         name, pattern = tokens.parseLine(line)
         #print("{:20} {}".format(name, pattern))
-        if name.startswith("DELIMITED_STRING_"):
+        if name.startswith(b"DELIMITED_STRING_"):
             kind = TokenKind.DELIMITED_STRING
         else:
-            kind = getattr(TokenKind, name)
+            kind = getattr(TokenKind, name.decode('ascii'))
         PATTERNS.append(Pattern(kind, pattern))
 
-def countLinesAndColumns(s: str):
+def countLinesAndColumns(s: bytes) -> Tuple[int,int]:
+    assert(type(s) == bytes)
     line = 1
     column = 1
     for c in s:
-        if c == "\n":
+        if c == ord("\n"):
             line += 1
             column = 1
         else:
@@ -46,21 +48,24 @@ def countLinesAndColumns(s: str):
     return line, column
 
 class SyntaxError(Exception):
-    def __init__(self, src_prefix: str, message: str):
-        super().__init__(message)
+    def __init__(self, src_prefix: bytes, message_str: str):
+        assert(isinstance(src_prefix, bytes))
+        assert(isinstance(message_str, str))
+        super().__init__(message_str)
         self.src_prefix = src_prefix
 
 # TODO: this can be implemented better
 #       the string returned should never exceed max_len, so the [..snip..]
 #       should cut off the actual characters of s as well
-def preview(s: str, max_len: int):
-    newline = s.find("\n")
-    cutoff = len(s) if (newline == -1) else newline - 1
+def preview(src: bytes, max_len: int) -> str:
+    assert(isinstance(src, bytes))
+    newline = src.find(b"\n")
+    cutoff = len(src) if (newline == -1) else newline - 1
     if cutoff > max_len:
-        return s[:max_len] + "[..snip..]"
-    return s[:cutoff]
+        return (src[:max_len] + b"[..snip..]").decode('ascii')
+    return src[:cutoff].decode('ascii')
 
-def preview2(text: StringPtr, limit: StringPtr, max_len: int):
+def previewStringPtr(text: StringPtr, limit: StringPtr, max_len: int) -> str:
     return preview(text.toStringWithLimit(limit), max_len)
 
 # this functions mirrors the one in lex.c
@@ -79,7 +84,7 @@ def afterLexVerifyOnlyOneMatch(text: StringPtr, limit: StringPtr, pattern_index:
     match_length = lex(text, limit, other_pattern_index_obj)
     if match_length > 0:
         raise Exception("TokenPatternProblem: both patterns '{}' and '{}' matched a string starting with '{}'".format(
-            PATTERNS[pattern_index].kind, PATTERNS[other_pattern_index_obj.value].kind, text.toStringWithLength(match_length)))
+            PATTERNS[pattern_index].kind, PATTERNS[other_pattern_index_obj.value].kind, text.toStringWithLength(match_length).decode('utf8')))
 
 # NOTE: verify_one_match verifies that only 1 lexer pattern is matching the next string.
 #       I think that maintaining this property on my lexer means that all the patterns
@@ -91,7 +96,8 @@ def afterLexVerifyOnlyOneMatch(text: StringPtr, limit: StringPtr, pattern_index:
 #       I think we take about a 10% hit to performance when verify_one_match is enabled.
 #
 # TODO: remove this verify_one_match argument when I know my combined lex patterns are regular
-def scan(src: str, pos: int, verify_one_match: bool = True) -> Optional[Tuple[Pattern,int]]:
+def scan(src: bytes, pos: int, verify_one_match: bool = True) -> Optional[Tuple[Pattern,int]]:
+    assert(type(src) == bytes)
     if pos == len(src):
         return None
     next = StringPtr(src, pos)
@@ -107,9 +113,9 @@ def scan(src: str, pos: int, verify_one_match: bool = True) -> Optional[Tuple[Pa
     # time to try to figure out what went wrong
     src_prefix = src[:pos]
     c = next.charAt(0)
-    if c == '"':
-        raise SyntaxError(src_prefix, "missing close quote for: {}".format(preview2(next, limit, 30)))
+    if c == ord('"'):
+        raise SyntaxError(src_prefix, "missing close quote for: {}".format(previewStringPtr(next, limit, 30)))
     
     # I think we need at most 2 characters to see what went wrong
     bad_str = next.toStringWithLength(min(limit.subtract(next), 2))
-    raise SyntaxError(src_prefix, "unrecognized character sequence '{}'".format(bad_str))
+    raise SyntaxError(src_prefix, "unrecognized character sequence '{}'".format(bad_str.decode('ascii')))

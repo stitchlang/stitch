@@ -12,23 +12,24 @@ class Ref(Generic[T]):
     def __init__(self, value: T):
         self.value = value
 
-# Emulates C string pointer semantics by using a Python str and an int offset
+# Emulates C string pointer semantics by using Python's bytes type and an int offset
 class StringPtr:
-    def __init__(self, full_string: str, offset: int):
+    def __init__(self, full_string: bytes, offset: int):
+        assert(isinstance(full_string, bytes))
         self.full_string = full_string
         self.offset = offset
-    def charAt(self, offset: int) -> str:
+    def charAt(self, offset: int) -> int:
         assert(offset >= 0)
         # python will bounds check this for us
         return self.full_string[self.offset + offset]
-    def toStringWithLimitOffset(self, limit_offset: int) -> str:
+    def toStringWithLimitOffset(self, limit_offset: int) -> bytes:
         assert(limit_offset <= len(self.full_string))
         assert(self.offset <= limit_offset)
         return self.full_string[self.offset:limit_offset]
-    def toStringWithLength(self, length: int) -> str:
+    def toStringWithLength(self, length: int) -> bytes:
         assert(length >= 0)
         return self.toStringWithLimitOffset(self.offset + length)
-    def toStringWithLimit(self, limit: 'StringPtr') -> str:
+    def toStringWithLimit(self, limit: 'StringPtr') -> bytes:
         assert(self.full_string is limit.full_string)
         assert(self.offset <= limit.offset)
         return self.full_string[self.offset:limit.offset]
