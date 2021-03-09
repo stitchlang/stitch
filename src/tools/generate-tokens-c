@@ -26,11 +26,11 @@ def main(cmd_args):
     print("TOKENS_SRC: {}".format(tokens_src))
 
     patterns = []
-    with open(tokens_txt, "r") as tokens_file:
+    with open(tokens_txt, "rb") as tokens_file:
         for line in tokens_file:
             name, pattern = tokens.parseLine(line)
             #print("{:20} {}".format(name, pattern))
-            patterns.append((name, pattern))
+            patterns.append((name.decode('ascii'), pattern.decode('ascii')))
 
     with open(tokens_hdr, "w") as out:
         out.write("#define TOKEN_COUNT {}\n".format(len(patterns)))
