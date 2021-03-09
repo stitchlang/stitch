@@ -2,12 +2,12 @@
 # This tool is ported from https://github.com/bl0nd/chive/blob/master/chive
 # chive - Variant switcher
 
-@set prog_name chive
-@set version 0.1.0
+prog_name = chive
+version = 0.1.0
 @setenv EDITOR (@envdefault EDITOR vi)
 
 @setenv XDG_CONFIG_HOME (@envdefault XDG_CONFIG_HOME (@env HOME)/.config)
-@set config_dir (@env XDG_CONFIG_HOME)/$prog_name
+config_dir = (@env XDG_CONFIG_HOME)/$prog_name
 
 # Speed up script by not using unicode.
 @setenv LC_ALL C

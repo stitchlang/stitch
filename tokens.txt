@@ -1,13 +1,14 @@
 INLINE_WHITESPACE       [ \t]+
 BUILTIN_ID              @[a-zA-Z0-9_\.]+@?
 USER_ID                 \$[a-zA-Z0-9_\.]+\$?
-ARG                     [^ \t\n#()@$"]+
+ARG                     [^ \t\n#()@$"=]+
 NEWLINE                 \n
+ASSIGN_OP               =
 QUOTED_STRING           "[^"]*"
 COMMENT                 #[^\n]*
 OPEN_PAREN              \(
 CLOSE_PAREN             \)
-ESCAPE_SEQUENCE         @[@#$")(]
+ESCAPE_SEQUENCE         @[@#$")(=]
 DELIMITED_STRING_DOUBLEQUOTE      @%"[^"]*"
 DELIMITED_STRING_SINGLEQUOTE      @%'[^']*'
 DELIMITED_STRING_VERTBAR          @%\|[^|]*\|

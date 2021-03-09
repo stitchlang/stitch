@@ -22,8 +22,8 @@
 #
 rm -rf @scriptdir/scratch
 mkdir @scriptdir/scratch
-@set file @scriptdir/scratch/@%|file with crazy characters like *[{}]<>"'|
-@set target (@echo @scriptdir/scratch/the target file)
+file = @scriptdir/scratch/@%|file with crazy characters like *[{}]<>"'|
+target = (@echo @scriptdir/scratch/the target file)
 touch $file
 
 cp $file $target
@@ -51,9 +51,9 @@ cp $file $target
 #     - there's no wordsplitting
 #     - there's no pathname expansion
 #
-@set foo bar
+foo = bar
 @assert $foo @eq bar
-@set foo notbar
+foo = notbar
 @assert @not ($foo @eq bar)
 
 @note --------------------------------------------------------------------------------
@@ -69,7 +69,7 @@ cp $file $target
 #         tar xf bar.tar
 #
 #     Equivalent:
-#         @set dir (dirname $f)
+#         dir = (dirname $f)
 #         cat $dir/foo
 #         git -C $dir status
 #         @withcwd $dir tar xf bar.tar
@@ -77,9 +77,9 @@ cp $file $target
 # Note that unlike the BASH example, the equivalent example is "correct".
 rm -rf @scriptdir/scratch
 mkdir @scriptdir/scratch
-@set f @scriptdir/scratch
+f = @scriptdir/scratch
 
-@set dir $f
+dir = $f
 ls $dir
 
 @note --------------------------------------------------------------------------------
@@ -94,8 +94,8 @@ ls $dir
 # program. Instead, stitch provides its own builtins for handling Bool objects, in
 # this case we can use @assert.
 #
-@set foo bar
-@set bar foo
+foo = bar
+bar = foo
 
 @assert ($foo @eq bar) @and ($bar @eq foo)
 
@@ -105,7 +105,7 @@ ls $dir
 # This one looks like a problem with the '[[' program rather than with BASH itself.
 # However, stitch's binary comparison operators return Bool objects that cannot
 # be passed to external programs, so this pitfall becomes a semantic type error in stitch.
-@set foo 8
+foo = 8
 
 @assert $foo @gt 7
 

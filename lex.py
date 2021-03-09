@@ -11,12 +11,13 @@ class TokenKind(Enum):
     USER_ID = 2
     ARG = 3
     NEWLINE = 4
-    QUOTED_STRING = 5
-    COMMENT = 6
-    OPEN_PAREN = 7
-    CLOSE_PAREN = 8
-    DELIMITED_STRING = 9
-    ESCAPE_SEQUENCE = 10
+    ASSIGN_OP = 5
+    QUOTED_STRING = 6
+    COMMENT = 7
+    OPEN_PAREN = 8
+    CLOSE_PAREN = 9
+    DELIMITED_STRING = 10
+    ESCAPE_SEQUENCE = 11
 
 class Pattern:
     def __init__(self, kind: TokenKind, re_string: bytes):

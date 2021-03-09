@@ -14,11 +14,11 @@
 
 @setenv RTLDLIST "/nix/store/xg6ilb9g9zhi2zg1dpi4zcp288rhnvns-glibc-2.30/lib/ld-linux.so.2 /nix/store/xg6ilb9g9zhi2zg1dpi4zcp288rhnvns-glibc-2.30/lib64/ld-linux-x86-64.so.2 /nix/store/xg6ilb9g9zhi2zg1dpi4zcp288rhnvns-glibc-2.30/libx32/ld-linux-x32.so.2"
 
-@set warn ""
-@set bind_now ""
-@set verbose ""
+warn = ""
+bind_now = ""
+verbose = ""
 
-@set unused @false
+unused = @false
 
 #while test $# -gt 0; do
 #  case "$1" in
@@ -89,14 +89,14 @@
 #  return 1;
 #}
 
-@set add_env (@echo LD_TRACE_LOADED_OBJECTS=1 LD_WARN=warn LD_BIND_NOW=$bind_now)
-@set add_env (@echo $add_env LD_LIBRARY_VERSION=@$verify_out)
-@set add_env (@echo $add_env LD_VERBOSE=$verbose)
+add_env = (@echo "LD_TRACE_LOADED_OBJECTS=1" "LD_WARN=warn" "LD_BIND_NOW="$bind_now)
+add_env = (@echo $add_env "LD_LIBRARY_VERSION=$verify_out")
+add_env = (@echo $add_env "LD_VERBOSE="$verbose)
 # TODO: remove this later
 @echo $add_env
 @if $unused
     # TODO: figure out what this is doing...???
-    #@set add_env (@echo $add_env LD_DEBUG=\"$LD_DEBUG${LD_DEBUG:+,}unused\"")
+    #add_env = (@echo $add_env LD_DEBUG=\"$LD_DEBUG${LD_DEBUG:+,}unused\"")
 @end
 
 # The following command substitution is needed to make ldd work in SELinux

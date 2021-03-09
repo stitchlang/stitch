@@ -41,6 +41,11 @@ class NodeMultiple(Node):
         self.nodes = nodes
     def __repr__(self):
         return "Multiple({})".format(", ".join([str(n) for n in self.nodes]))
+class NodeAssign(Node):
+    def __init__(self, src: bytes):
+        Node.__init__(self, src)
+    def __repr__(self):
+        return "Assign".format(self.varname, self.value)
 
 def combineNodes(existing_node: Optional[Node], new_node: Node) -> Node:
     if not existing_node:
@@ -89,6 +94,9 @@ def parseNode(src: bytes, token: ParseToken) -> Tuple[Node, Optional[ParseToken]
             next_token_start = token_end
         elif token.pattern.kind == lex.TokenKind.ARG:
             node = combineNodes(node, NodeToken(token_src, token_src))
+            next_token_start = token_end
+        elif token.pattern.kind == lex.TokenKind.ASSIGN_OP:
+            node = combineNodes(node, NodeAssign(token_src))
             next_token_start = token_end
         elif token.pattern.kind == lex.TokenKind.QUOTED_STRING:
             node = combineNodes(node, NodeToken(token_src, token_src[1:-1]))

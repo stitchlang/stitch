@@ -49,7 +49,7 @@ class CommandResultTest(CommandTest):
         return "CommandResultTest line={}, exitcode={}, stdout={}".format(self.line, self.exitcode, self.stdout)
     def verify(self, result, test_line):
         if type(result) != prototype.CommandResult:
-            sys.exit("{}({}): Error: expected a CommandResult but got {}".format(__file__, test_line, result))
+            sys.exit("{}({}): Error: expected a CommandResult but got {}: {}".format(__file__, test_line, type(result).__name__, result))
         if result.exitcode != self.exitcode:
             sys.exit("{}({}): Error: expected Command to return exitcode {} but got {}".format(
                 __file__, test_line, self.exitcode, result.exitcode))
@@ -199,6 +199,7 @@ def main():
     testCommand(b'@echo @"', 0, b'"\n')
     testCommand(b"@echo @)", 0, b")\n")
     testCommand(b"@echo @(", 0, b"(\n")
+    testCommand(b"@echo @=", 0, b"=\n")
 
     testSemanticError(b"@multiline", "@multiline requires at least 1 argument")
     testSemanticError(b"@multiline @true", "the @multiline builtin is only supported within an (..inline command..)")
@@ -360,13 +361,31 @@ def main():
     testSemanticError(b"@haveprog", "@haveprog takes 1 argument but got 0")
     testSemanticError(b"@haveprog a b", "@haveprog takes 1 argument but got 2")
 
-    testSemanticError(b"@set", "@set takes 2 arguments but got 0")
-    testSemanticError(b"@set foo", "@set takes 2 arguments but got 1")
-    testCommand(b"@set foo bar", 0, b"")
-    testSemanticError(b"@set @false bar", "@set requires a String for its 1st argument but got Bool")
-    testSemanticError(b"@set @echo bar", "@set requires a String for its 1st argument but got Builtin")
-    testCommand(b"@set (@echo foo) bar", 0, b"")
-    testCommand(b"@set foo @false", 0, b"")
+    #
+    # The assign '=' operator
+    #
+    testSemanticError(b"=", "unexpected '='")
+    testSemanticError(b"foo =", "expected 1 argument after '=' but got 0")
+    testSemanticError(b"= foo", "unexpected '='")
+    testSemanticError(b"= = foo", "unexpected '='")
+    testSemanticError(b"foo = =", "unexpected '='")
+    testSemanticError(b"=foo = foo", "'=' requires space separation")
+    testSemanticError(b"foo = =foo", "'=' requires space separation")
+    testSemanticError(b"foo = bar baz", "expected 1 argument after '=' but got 2")
+    testSemanticError(b"@not = bar", "expected a String before '=' but got Builtin")
+    testSemanticError(b"@echo =", "expected 1 argument after '=' but got 0")
+    testSemanticError(b"foo = @not", "expected a String or Bool after '=' but got Builtin")
+    testSemanticError(b"@true = bar", "expected a String before '=' but got Bool")
+    testSemanticError(b"@missing = bar", "'@missing' is undefined")
+    testSemanticError(b"foo = @missing", "'@missing' is undefined")
+    testSemanticError(b"@not foo = bat", "unexpected '='")
+    testCommand(b"foo = bar", 0, b"")
+    testSemanticError(b"foo= bar", "'=' requires space separation")
+    testSemanticError(b"foo =bar", "'=' requires space separation")
+    testSemanticError(b"foo=bar", "'=' requires space separation")
+
+    testCommand(b"(@echo foo) = bar", 0, b"")
+    testCommand(b"foo = @false", 0, b"")
 
     testSemanticError(b"@settmp", "@settmp requires at least 3 arguments but got 0")
     testSemanticError(b"@settmp a", "@settmp requires at least 3 arguments but got 1")
@@ -378,7 +397,7 @@ def main():
     testSemanticError(b"@isdir foo bar", "@isdir takes 1 argument but got 2")
 
     testCommands([
-        CommandResultTest(b"@set foo bar", 0, b""),
+        CommandResultTest(b"foo = bar", 0, b""),
         CommandResultTest(b"@assert $foo @eq bar", 0, b""),
         ErrorTest        (b"@assert @not ($foo @eq bar)", prototype.AssertError, "@assert failed"),
     ], verification_mode=False)
@@ -394,8 +413,8 @@ def main():
     testSemanticError(b"@setenv", "@setenv takes 2 arguments but got 0")
     testSemanticError(b"@setenv FOO", "@setenv takes 2 arguments but got 1")
     testSemanticError(b"@setenv FOO BAR BAZ", "@setenv takes 2 arguments but got 3")
-    testSemanticError(b"@setenv @false BAR", "@setenv requires a String for its 1st argument but got Bool")
-    testSemanticError(b"@setenv FOO @false", "@setenv requires a String for its 2nd argument but got Bool")
+    testSemanticError(b"@setenv @false BAR", "@setenv requires 2 Strings but got Bool")
+    testSemanticError(b"@setenv FOO @false", "@setenv requires 2 Strings but got Bool")
     testCommand(b"@setenv FOO BAR", 0, b"")
     # TODO: remove this if/when environment variables are no longer "sticky" across multiple ScriptContexts
     testCommand(b"@unsetenv FOO", 0, b"")

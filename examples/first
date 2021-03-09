@@ -1,18 +1,17 @@
 #!/usr/bin/env stitch
-
 # this is a comment
 @echo Hello, World
 
 # variables
-@set name Fred
+name = Fred
 @echo Hello $name
 
 # if statements and inline commands
 @if @haveprog uname
-    @set arch (uname -m)
+    arch = (uname -m)
     @echo $arch
 @end
 
 # arrays
-# NOT IMPLEMENTED @setarray names args Fred Lisa Joey
+# NOT IMPLEMENTED names = (@array Fred Lisa Joey)
 # NOT IMPLEMENTED @echo Hello @expand.names

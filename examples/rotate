@@ -8,7 +8,7 @@ rm -rf @scriptdir/scratch
 mkdir @scriptdir/scratch
 
 #$set f /home/mtsouk/connections.data
-@set f @scriptdir/scratch/log
+f = @scriptdir/scratch/log
 
 # TODO: fix implementation to not require parens here
 @if @not (@isfile $f)
@@ -16,24 +16,24 @@ mkdir @scriptdir/scratch
 @end
 
 touch $f
-@set maxsize (expr 4096 * 1024)
+maxsize = (expr 4096 * 1024)
 
-@echo DEBUG: maxsize=$maxsize
+@echo DEBUG: "maxsize="$maxsize
 
 # TODO: need piping
 #size=`du -b ${f} | tr -s '\t' ' ' | cut -d' ' -f1`
-@set size (du -b $f)
-@echo DEBUG: A: size=$size
-#@set size (tr -s '\t' ' ' $size)
-#@echo DEBUG: B: size=$size
+size = (du -b $f)
+@echo DEBUG: A: "size="$size
+#size = (tr -s '\t' ' ' $size)
+#@echo DEBUG: B: "size="$size
 
 
 # NOTE: for now just hardcode the size until piping is implemented
-@set size (expr 4096 * 1025)
+size = (expr 4096 * 1025)
 
 @if $size @gt $maxsize
     @echo Rotating!
-    @set timestamp (date +%s)
+    timestamp = (date +%s)
     mv $f $f$.$timestamp
     touch $f
 @end

@@ -376,13 +376,7 @@ class BuiltinMethods:
     def echo(cmd_ctx: CommandContext, args: List[bytes]):
         cmd_ctx.capture.stdout.handle(b" ".join(args))
         return ExitCode(0)
-    @staticmethod
-    def set(cmd_ctx: CommandContext, nodes: List[parse.Node]):
-        assert(len(nodes) == 2)
-        is_unknown = expandSetArgs(cmd_ctx, nodes[0], nodes[1], "@set", cmd_ctx.script.var_map)
-        if isinstance(is_unknown, Error):
-            return is_unknown
-        return UNKNOWN_EXIT_CODE if is_unknown else ExitCode(0)
+    # TODO: maybe remove this?  Maybe @pushscope/@popscope?
     @staticmethod
     def settmp(cmd_ctx: CommandContext, nodes: List[parse.Node]):
         if len(nodes) < 3:
@@ -393,20 +387,14 @@ class BuiltinMethods:
         #print("DEBUG: settmp '{}' to '{}'".format(varname, value))
         return runCommandNodes(cmd_ctx.nextBuiltin(ambiguous_op=None), nodes[2:])
     @staticmethod
-    def setenv(cmd_ctx: CommandContext, nodes: List[parse.Node]):
-        assert(len(nodes) == 2)
-        pair = expandSetArgsCommon(cmd_ctx, nodes[0], nodes[1], "@setenv")
-        if isinstance(pair, Error):
-            return pair
-        name, value = pair
-        assert(value is not None)
-        if isinstance(value, String):
-            if not cmd_ctx.script.verification_mode:
-                os.environ[name.decode('utf8')] = value.value.decode('utf8')
+    def setenv(cmd_ctx: CommandContext, args: List[bytes]):
+        assert(len(args) == 2)
+        name = args[0]
+        value = args[1]
+        if not cmd_ctx.script.verification_mode:
+            os.environ[name.decode('utf8')] = value.decode('utf8')
             return ExitCode(0)
-        if isinstance(value, UnknownString):
-            return UNKNOWN_EXIT_CODE
-        return SemanticError("@setenv requires a String for its 2nd argument but got {}".format(value.userTypeDescriptor()))
+        return UNKNOWN_EXIT_CODE
     @staticmethod
     def unsetenv(cmd_ctx: CommandContext, args: List[bytes]):
         assert(len(args) == 1)
@@ -434,7 +422,7 @@ class BuiltinMethods:
     @staticmethod
     def envdefault(cmd_ctx: CommandContext, nodes: List[parse.Node]):
         assert(len(nodes) == 2)
-        name = expandNode(cmd_ctx, nodes[0])
+        name = expandNode(cmd_ctx, nodes[0], ExpandNodeErrorContext())
         if isinstance(name, Error):
             return name
         if not isinstance(name, String) and not isinstance(name, UnknownString):
@@ -447,7 +435,7 @@ class BuiltinMethods:
                 return ExitCode(0)
 
         # NOTE: we only expand the default value if the environment variable does not exist
-        default = expandNode(cmd_ctx, nodes[1])
+        default = expandNode(cmd_ctx, nodes[1], ExpandNodeErrorContext())
         if isinstance(default, Error):
             return default
         if not isinstance(default, String) and not isinstance(default, UnknownString):
@@ -583,17 +571,19 @@ def operandToBool(op: BinaryOperator, operand: StitchObject) -> Union[Error,Bool
         return UNKNOWN_BOOL
     return opInvalidTypeError(op, operand)
 
+# TODO: probably remove this (after settmp is removed?)
 def expandSetArgsCommon(cmd_ctx: CommandContext, arg1: parse.Node, arg2: parse.Node, builtin_name_str: str) -> Union[Error,Tuple[bytes,StitchObject]]:
-    name = expandNode(cmd_ctx, arg1)
+    name = expandNode(cmd_ctx, arg1, ExpandNodeErrorContext())
     if isinstance(name, Error):
         return name
     if not isinstance(name, String):
         return SemanticError("{} requires a String for its 1st argument but got {}".format(builtin_name_str, name.userTypeDescriptor()))
-    value = expandNode(cmd_ctx, arg2)
+    value = expandNode(cmd_ctx, arg2, ExpandNodeErrorContext())
     if isinstance(value, Error):
         return value
     return (name.value, value)
 
+# TODO: probably remove this (after settmp is removed?)
 def expandSetArgs(cmd_ctx: CommandContext, arg1: parse.Node, arg2: parse.Node, builtin_name_str: str, var_map: Dict[bytes,StitchObject]) -> Union[Error,bool]:
     pair = expandSetArgsCommon(cmd_ctx, arg1, arg2, builtin_name_str)
     if isinstance(pair, Error):
@@ -621,8 +611,6 @@ class CompareOp:
 builtin_objects = {
     b"note": Builtin("note", BuiltinExpandType.ParseNodes, returns_bool=False),
     b"echo": Builtin("echo", BuiltinExpandType.Strings, returns_bool=False),
-    b"set": Builtin("set", BuiltinExpandType.ParseNodes, returns_bool=False, arg_count=2),
-    b"setarray": Builtin("setarray", BuiltinExpandType.ParseNodes, returns_bool=False),
     b"settmp": Builtin("settmp", BuiltinExpandType.ParseNodes, returns_bool=False),
     b"multiline": Builtin("multiline", BuiltinExpandType.ParseNodes, returns_bool=False),
     b"exitcode": Builtin("exitcode", BuiltinExpandType.ParseNodes, returns_bool=True),
@@ -631,7 +619,7 @@ builtin_objects = {
     b"if": Builtin("if_", BuiltinExpandType.ParseNodes, returns_bool=False),
     b"end": Builtin("end", BuiltinExpandType.ParseNodes, returns_bool=False, arg_count=0),
     b"haveprog": Builtin("haveprog", BuiltinExpandType.Strings, returns_bool=True, arg_count=1),
-    b"setenv": Builtin("setenv", BuiltinExpandType.ParseNodes, returns_bool=False, arg_count=2),
+    b"setenv": Builtin("setenv", BuiltinExpandType.Strings, returns_bool=False, arg_count=2),
     b"unsetenv": Builtin("unsetenv", BuiltinExpandType.Strings, returns_bool=False, arg_count=1),
     b"env": Builtin("env", BuiltinExpandType.Strings, returns_bool=False, arg_count=1),
     # NOTE: envdefault must take ParseNodes to support lazy expansion of the default value
@@ -677,10 +665,15 @@ class ExpandNodes:
         def __init__(self, args: List[bytes]):
             self.args = args
 
+# Use to provide extra context for better error messages
+class ExpandNodeErrorContext:
+    def __init__(self, inside_multiple: bool = False):
+        self.inside_multiple = inside_multiple
+
 def expandNodes(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> Union[Error,ExpandNodesResult]:
     assert(len(nodes) > 0)
 
-    obj = expandNode(cmd_ctx, nodes[0])
+    obj = expandNode(cmd_ctx, nodes[0], ExpandNodeErrorContext())
     if isinstance(obj, Error):
         return obj
     #if isinstance(obj, BinaryOperator):
@@ -692,7 +685,7 @@ def expandNodes(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> Union[Error
     if len(nodes) == 1:
         obj_list = [obj]
     else:
-        obj = expandNode(cmd_ctx, nodes[1])
+        obj = expandNode(cmd_ctx, nodes[1], ExpandNodeErrorContext())
         if isinstance(obj, Error):
             return obj
         if isinstance(obj, BinaryOperator):
@@ -712,7 +705,7 @@ def expandNodes(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> Union[Error
         if obj_args_error:
             return obj_args_error
 
-    error = nodesToArgs(cmd_ctx, nodes, args, start=len(obj_list))
+    error = nodesToArgs(cmd_ctx, nodes, args, ExpandNodeErrorContext(), start=len(obj_list))
     if error:
         return error
 
@@ -755,7 +748,7 @@ def expandNodesToBool(cmd_ctx: CommandContext, nodes: List[parse.Node], builtin_
 #    if len(nodes) != 1:
 #        return SemanticError("{} accepts 1 argument but got {}".format(builtin_name_str, len(nodes)))
 #
-#    obj = expandNode(cmd_ctx, nodes[0])
+#    obj = expandNode(cmd_ctx, nodes[0], ExpandNodeErrorContext())
 #    if isinstance(obj, Error):
 #        return obj
 #    if isinstance(obj, Bool):
@@ -772,20 +765,6 @@ def expandNodesToBool(cmd_ctx: CommandContext, nodes: List[parse.Node], builtin_
 #        return UNKNOWN_BOOL
 #
 #    return SemanticError("'{}' expects Bool but got {}".format(builtin_name_str, obj.userTypeDescriptor()))
-
-def expandOneNodeToString(cmd_ctx: CommandContext, nodes: List[parse.Node], builtin_name_str: str) -> Union[Error,String,UnknownString]:
-    if len(nodes) != 1:
-        return SemanticError("{} accepts 1 argument but got {}".format(builtin_name_str, len(nodes)))
-
-    obj = expandNode(cmd_ctx, nodes[0])
-    if isinstance(obj, Error):
-        return obj
-    if isinstance(obj, String):
-        return obj
-    if isinstance(obj, UnknownString):
-        assert(cmd_ctx.script.verification_mode)
-        return UNKNOWN_STRING
-    return SemanticError("'{}' expects String but got {}".format(builtin_name_str, obj.userTypeDescriptor()))
 
 def enforceBuiltinArgCount(builtin: Builtin, actual: int) -> Optional[Error]:
     if builtin.arg_count and (builtin.arg_count != actual):
@@ -808,7 +787,7 @@ def runBuiltin(cmd_ctx: CommandContext, builtin: Builtin, nodes: List[parse.Node
         return func(cmd_ctx, nodes)
     if builtin.expand_type == BuiltinExpandType.Strings:
         args: List[bytes] = []
-        error = nodesToArgs(cmd_ctx, nodes, args)
+        error = nodesToArgs(cmd_ctx, nodes, args, ExpandNodeErrorContext())
         if error:
             if isinstance(error, CannotCoerceToStringError):
                 if builtin.arg_count is None:
@@ -824,6 +803,34 @@ def runBuiltin(cmd_ctx: CommandContext, builtin: Builtin, nodes: List[parse.Node
             return error
         return func(cmd_ctx, args)
     raise Exception("TODO: expand_type {}".format(builtin.expand_type))
+
+def runAssign(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> Optional[Error]:
+    assert(len(nodes) >= 2)
+    assert(isinstance(nodes[1], parse.NodeAssign))
+    if len(nodes) != 3:
+        # should be a syntax error
+        return SemanticError("expected 1 argument after '=' but got {}".format(len(nodes) - 2))
+    args: List[bytes] = []
+    varname = expandNode(cmd_ctx, nodes[0], ExpandNodeErrorContext())
+    if isinstance(varname, Error):
+        return varname
+    if isinstance(varname, UnknownString):
+        # this allow stitch to check more things like undefined variables and type errors with
+        # user variables at verification time
+        return SemanticError("for now, stitch requires variable names to be known at verification time")
+    elif not isinstance(varname, String):
+        return SemanticError("expected a String before '=' but got {}".format(varname.userTypeDescriptor()))
+    value = expandNode(cmd_ctx, nodes[2], ExpandNodeErrorContext())
+    if isinstance(value, Error):
+        return value
+    is_unknown_value = False
+    if isinstance(value, UnknownString) or isinstance(value, UnknownBool):
+        is_unknown_value = True
+    elif (not isinstance(value, String)) and (not isinstance(value, Bool)):
+        return SemanticError("expected a String or Bool after '=' but got {}".format(value.userTypeDescriptor()))
+
+    cmd_ctx.var_map[varname.value] = value
+    return UNKNOWN_EXIT_CODE if is_unknown_value else ExitCode(0)
 
 def runCommandNodes(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> Union[Error,Bool,ExitCode,UnknownBool,UnknownExitCode]:
     assert(len(nodes) > 0)
@@ -846,6 +853,13 @@ def runCommandNodes(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> Union[E
         # NOTE: ignore capture_stdout, just always print to console for now
         eprint(message)
 
+    # NOTE: this part should have been done by parser
+    if len(nodes) >= 2 and isinstance(nodes[1], parse.NodeAssign):
+        error = runAssign(cmd_ctx, nodes)
+        if error:
+            return error
+        return String("")
+
     result = expandNodes(cmd_ctx, nodes)
     if isinstance(result, Error):
         return result
@@ -858,9 +872,9 @@ def runCommandNodes(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> Union[E
     assert(isinstance(result, ExpandNodes.ExternalProgram))
     return runExternalProgram(cmd_ctx.script.verification_mode, cmd_ctx.capture.stdout, cmd_ctx.capture.stderr, result.args)
 
-def nodesToArgs(cmd_ctx: CommandContext, nodes: List[parse.Node], args: List[bytes], start: int = 0) -> Optional[Error]:
+def nodesToArgs(cmd_ctx: CommandContext, nodes: List[parse.Node], args: List[bytes], error_ctx: ExpandNodeErrorContext, start: int = 0) -> Optional[Error]:
     for i, node in enumerate(nodes[start:], start=start):
-        obj = expandNode(cmd_ctx, node)
+        obj = expandNode(cmd_ctx, node, error_ctx)
         if isinstance(obj, Error):
             return obj
         error = objectToArgs(obj, args)
@@ -1014,7 +1028,7 @@ def combineRunResultWithOutputs(cmd_ctx, result):
 
 
 # returns an array of strings and builtin objects
-def expandNode(cmd_ctx: CommandContext, node: parse.Node) -> Union[Error,StitchObject]:
+def expandNode(cmd_ctx: CommandContext, node: parse.Node, error_ctx: ExpandNodeErrorContext) -> Union[Error,StitchObject]:
     if isinstance(node, parse.NodeToken):
         return String(node.s)
 
@@ -1027,6 +1041,11 @@ def expandNode(cmd_ctx: CommandContext, node: parse.Node) -> Union[Error,StitchO
             return SemanticError("'{}' is undefined".format(node.src.decode('utf8')))
         return obj
 
+    if isinstance(node, parse.NodeAssign):
+        if error_ctx.inside_multiple:
+            return SemanticError("'=' requires space separation")
+        return SemanticError("unexpected '='")
+
     if isinstance(node, parse.NodeInlineCommand):
         inline_cmd_ctx = cmd_ctx.createChild()
         result = runCommandNodes(inline_cmd_ctx, node.nodes)
@@ -1034,7 +1053,7 @@ def expandNode(cmd_ctx: CommandContext, node: parse.Node) -> Union[Error,StitchO
 
     if isinstance(node, parse.NodeMultiple):
         args: List[bytes] = []
-        error = nodesToArgs(cmd_ctx, node.nodes, args)
+        error = nodesToArgs(cmd_ctx, node.nodes, args, ExpandNodeErrorContext(inside_multiple=True))
         if error:
             return error
         return String(b"".join(args))
@@ -1072,7 +1091,7 @@ def runBinaryExpression(cmd_ctx: CommandContext, nodes: List[parse.Node], first_
         if index + 1 == len(nodes):
             return SemanticError("missing operand after '{}'".format(op))
 
-        operand_result = expandNode(cmd_ctx, nodes[index+1])
+        operand_result = expandNode(cmd_ctx, nodes[index+1], ExpandNodeErrorContext())
         if isinstance(operand_result, Error):
             return operand_result
         expression_result = op.apply(cmd_ctx.script.verification_mode, expression_result, operand_result)

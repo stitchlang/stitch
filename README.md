@@ -9,17 +9,17 @@ A scripting language that creates programs by "stitching" other programs togethe
 @echo Hello, World
 
 # variables
-@set name Fred
+name = Fred
 @echo Hello $name
 
 # if statements and inline commands
 @if @haveprog uname
-    @set arch (uname -m)
+    arch = (uname -m)
     @echo $arch
 @end
 
 # arrays
-@setarray names args Fred Lisa Joey
+names = (@array Fred Lisa Joey)
 @echo Hello @expand.names
 ```
 
@@ -41,12 +41,17 @@ These are the special characters that cause stitch to deviate from the normal mo
 
 Char | Description
 -----|-------------
-`#`  | a single-line comment, escape with `@#`
-`@`  | start a builtin expression and/or access a builtin object, escape with `@@`
-`$`  | access a user object, escape with `@$`
-`"`  | delimits a string literal, escape with `@"`
-`(`  | start an inline command, escape with `@(`
-`)`  | ends an inline command, escape with `@)`
+`#`  | a single-line comment
+`@`  | start a builtin expression and/or access a builtin object
+`$`  | access a user object
+`"`  | delimits a string literal
+`(`  | start an inline command
+`)`  | ends an inline command
+`=`  | the assignment operator
+
+All of the special characters can currently be escaped with `@X` (where X is the character).  They can also be used inside quoted strings where they have no special meaning.
+
+> NOTE: do I need the `@X` escapes?  why not just use "X"?
 
 # Arguments with Spaces
 
@@ -97,12 +102,12 @@ stitch's primary purpose is to call other programs, when this is not the primary
 
 stitch has a basic type system with the following object types:
 
-| Name     |  Examples   | Description                                                                 |
-|----------|-------------|-----------------------------------------------------------------------------|
-| String   | `foo` `"bar"` | a sequence of characters, this is the default type of most tokens in stitch |
-| Array    | `@setarray foo args a b c` | an array of Strings |
-| Builtin  | `@echo` `@set`  | a "builtin program" |
-| Bool     | `@true` | used by binary expressions like `@true @and @false` and with `@assert @true` |
+| Name     |  Examples      | Description                                                                 |
+|----------|----------------|-----------------------------------------------------------------------------|
+| String   | `foo` `"bar"`  | a sequence of characters, this is the default type of most tokens in stitch |
+| Array    | `(@array a b c)` | an array of Strings |
+| Builtin  | `@echo` `@set` | a "builtin program" |
+| Bool     | `@true`        | used by binary expressions like `@true @and @false` and with `@assert @true` |
 
 > NOTE: Internally I also use an Error object with subclasses for different kinds of errors.  Not sure if this will be exposed to stitch scripts yet.  I also have an object for BinaryOperator along with subclasses, also not sure if this will be exposed to stitch scripts.
 
@@ -110,13 +115,13 @@ stitch has a basic type system with the following object types:
 
 ```sh
 #
-# @set [SCOPE.]VARNAME VALUE
+# VARNAME = VALUE
 #
-@set msg "Hello, my name is Fred"
+msg = "Hello, my name is Fred"
 @echo $msg
 # prints "Hello, my name is Fred"
 
-@set cpu_count (nproc)
+cpu_count = (nproc)
 
 @echo You have $cpu_count cpus
 @echo Expand cpu count with a suffix is $cpu_count$cpus
@@ -143,14 +148,11 @@ Arrays are important because they provide a way to represent one or more strings
 
 ```sh
 #
-# @setarray [SCOPE.]VARNAME splitlines VALUE
-# @setarray [SCOPE.]VARNAME args ARGS...
-#
-# TODO: splitwhitespace?
+# VARNAME = (@array VALUES...)
+# VARNAME = (@splitlines COMMAND...)
 #
 # Example:
-@setarray mounts splitlines (cat /proc/mounts)
-
+mounts = (@splitlines cat /proc/mounts)
 # now the "mounts" variable is an array of all the mounts
 
 # How to use the array in a command?
@@ -200,11 +202,12 @@ This is subject to change, but for now I've just added some builtins to manage e
 I've chosen to use builtins for the time being instead of adding extra syntax because builtins are easy to add/experiment with.  The following shows some more ideas that could be done that require new syntax or new semantics that aren't implemented yet.
 
 ```
+@echo your PATH is $env.PATH
 @echo your PATH is @env.PATH
 @echo your PATH is $$PATH
 @echo your PATH is $%PATH
 
-@set @env.PATH ...
+env.PATH = foo
 ```
 
 # Inline Commands
@@ -219,10 +222,10 @@ I've chosen to use builtins for the time being instead of adding extra syntax be
 
 make -j(nproc)
 
-@set arch (uname -mm)
+arch = (uname -mm)
 @echo arch is $arch
 
-@set files_exist ((@isfile foo) @and (@isfile bar))
+files_exist = ((@isfile foo) @and (@isfile bar))
 ```
 
 ### @multiline
@@ -233,7 +236,7 @@ In general, inline commands are commonly used to return strings that don't conta
 # run the command and return any number of lines of output
 (@multiline PROG ARGS...)
 
-@set myfile_contents (@multiline cat myfile)
+myfile_contents = (@multiline cat myfile)
 ```
 
 ### Capturing exitcode and/or stderr
@@ -241,13 +244,13 @@ In general, inline commands are commonly used to return strings that don't conta
 The following examples show how to prefix an inline command to change whether the exitcode, stdout and/or stderr are captured.
 
 ```sh
-$set foo (COMMAND)
+foo = (COMMAND)
 # exitcode: non-zero is fatal
 # stdout: captured
 # stderr: not captured
 # foo is a String of COMMAND's stdout
 
-$set foo (@exitcode COMMAND)
+foo = (@exitcode COMMAND)
 # exitcode: captured
 # stdout: not captured
 # stderr: not captured
@@ -255,25 +258,25 @@ $set foo (@exitcode COMMAND)
 
 # NOTE: maybe I add @exitcodeint for capturing the exitcode as a String?
 
-$set foo (@stderr COMMAND)
+foo = (@stderr COMMAND)
 # exitcode: non-zero is fatal
 # stdout: not captured
 # stderr: captured
 # foo is a String of COMMAND's stderr
 
-$set foo (@stdout @stderr COMMAND)
+foo = (@stdout @stderr COMMAND)
 # exitcode: non-zero is fatal
 # stdout: captured
 # stderr: captured
 # foo is a CommandResult object with the "out" field set to stdout and the "err" field set to stderr
 
-$set foo (@exitcode @stderr COMMAND)
+foo = (@exitcode @stderr COMMAND)
 # exitcode: captured
 # stdout: not captured
 # stderr: captured
 # foo is a CommandResult object with the "exitcode" field set to the exit code and the "err" field set to stderr
 
-$set foo (@exitcode @stdout @stderr COMMAND)
+foo = (@exitcode @stdout @stderr COMMAND)
 # exitcode: captured
 # stdout: captured
 # stderr: captured
@@ -293,23 +296,23 @@ $set foo (@exitcode @stdout @stderr COMMAND)
 ### Read input and print it
 
 ```sh
-@set input (read)
+input = (read)
 @echo You entered: $input
 ```
 
 ### Random
 
 ```sh
-@set pwd (pwd)
-@set arch (uname -m)
-@set target $arch$-linux-musl
-@set prefix @env.HOME/$target
-@set jobs -j(nproc)
+pwd = (pwd)
+arch = (uname -m)
+target = $arch$-linux-musl
+prefix = @env.HOME/$target
+jobs = -j(nproc)
 
 wget example.come/$target$.tar.xz
 tar xf $target$.tar.xz
 
-@set env.PATH $pwd/$target/bin:@env.PATH
+@setenv PATH $pwd/$target/bin:(@env PATH)
 ```
 
 # Builtin Programs
@@ -334,7 +337,7 @@ Builtin programs accept arguments that have been expanded to various levels:
 
 At the lowest level 1 we have AstNodes.  These arguments are left in their unprocessed form where they have been categorized into Tokens, Variables and Inline Commands. Builtins like `@note`, `@multiline` and `@call` accept AstNodes.  Binary Operators also keep their operands in AstNode form to support "shortcircuting" where the right operand may not be expanded if the final result is already determined from the left operand (note: this is disabled in verification mode).
 
-Skipping past level 2 for now, we have level 3 "Objects" that are accepted by builtins like `@set`, which takes a `String` for its first argument, and either `String`, `Bool` for for its second.
+Skipping past level 2 for now, we have level 3 "Objects" that are accepted by builtins like `@settmp`, which takes a `String` for its first argument, and either `String`, `Bool` for for its second along with a command.
 
 At the final level we have "Strings".  This is the same form that external programs accept and also builtins like `@echo`.
 
@@ -344,7 +347,6 @@ The following lists some of the Builtins and the argument form they take:
 @note AstNode...
 @echo String...
 
-@set String (String|Bool)
 @settmp String (String|Bool) AstNode...
 
 @multiline AstNode...
@@ -621,7 +623,7 @@ foo @out COMMAND... @err COMMAND...
 foo @out @in2file myfile
 
 # to forward out/err to different places, could do multiple lines like this
-@set foo @stage foo args...
+foo = @stage foo args...
 # the @stage COMMAND... builtin will create create a process that has not been started yet
 # now $myprogram.out and $myprogram.err are open file handles
 @attach $foo.out bar
@@ -727,26 +729,25 @@ I want to make a distinction between "incorrect code" and "buggy code".  Incorre
 
 ### The `=` character
 
-Consider making `=` a special character:
+I originally didn't have a special syntax for assigning variables, it use to be this:
 
 ```sh
 @set foo bar
 @set arch (uname -m)
 ```
-Versus
+
+But it seems like adding a special character `=` for variable assignment is worth both the special character and special syntax for readability.
 ```sh
 foo = bar
 arch = (uname -m)
 ```
 
-Which is more readable? There's also this variation:
+Note, I'm not sure but maybe this syntax would be more intiuitive?
 
 ```
 $foo = bar
 $arch = (uname -m)
 ```
-
-With this variation it would have to be clear that `$VAR = VALUE` is not a command, but a different syntax node.  This would complicate the syntax of the language, but that complexity could be outweighed by the "readability" and "familiarity".
 
 ### Idea: Multiple debug/log formats
 

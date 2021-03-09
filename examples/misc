@@ -18,13 +18,13 @@ true
 @assert 2 @lt 3
 @assert @not (3 @lt 2)
 
-@set if_block_executed @false
+if_block_executed = @false
 @if @true
-    @set if_block_executed @true
+    if_block_executed = @true
 @end
 @assert $if_block_executed
 
-@set if_block_executed @false
+if_block_executed = @false
 @if @not @true
     # TODO: maybe there should be a @panic for this? That optionally takes a message?
     @assert @false
@@ -32,10 +32,10 @@ true
 @assert @not $if_block_executed
 
 @if @haveprog which
-    @set direct_which (which ls)
+    direct_which = (which ls)
 
-    @set which which
-    @set indirect_which ($which ls)
+    which = which
+    indirect_which = ($which ls)
 
-    test $direct_which = $indirect_which
+    test $direct_which "=" $indirect_which
 @end
