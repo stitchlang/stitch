@@ -57,7 +57,6 @@ class CommandResultTest(CommandTest):
             sys.exit("{}({}): Error: expected Command to print {} but got {}".format(
                 __file__, test_line, self.stdout, result.stdout))
 
-
 def runTests(commands: List[CommandTest], test_line: int, verification_mode: bool):
     context = prototype.ScriptContext(prototype.GlobalContext(True, SCRIPT_DIR), __file__.encode('utf8'), verification_mode)
     for cmd in commands:
@@ -65,7 +64,7 @@ def runTests(commands: List[CommandTest], test_line: int, verification_mode: boo
         stderr_builder = prototype.StringBuilder()
         result: Any = None
         try:
-            nodes, end = parse.parseCommand(cmd.line, 0)
+            nodes, end = parse.parseCommand(cmd.line, 0, context.allstringliterals)
             assert(end == len(cmd.line))
         except lex.SyntaxError as e:
             result = e
@@ -189,17 +188,18 @@ def main():
 
     testSyntaxError(b"(", "missing close paren for: (")
     testSyntaxError(b"(foo", "missing close paren for: (foo")
-    testSyntaxError(b"(a long command that demonstrates we shouldn't pring this whole thing when we show an error",
+    testSyntaxError(b"(a long command that demonstrates we shouldnt print this whole thing when we show an error",
                     "missing close paren for: (a long command that demonstra[..snip..]")
     testSyntaxError(b"$$", "unrecognized character sequence '$$'")
     testSyntaxError(b"@`", "unrecognized character sequence '@`'")
     testCommand(b"@echo @@", 0, b"@\n")
     testCommand(b"@echo @#", 0, b"#\n")
     testCommand(b"@echo @$", 0, b"$\n")
-    testCommand(b'@echo @"', 0, b'"\n')
     testCommand(b"@echo @)", 0, b")\n")
     testCommand(b"@echo @(", 0, b"(\n")
     testCommand(b"@echo @=", 0, b"=\n")
+    testCommand(b'@echo @"', 0, b'"\n')
+    testCommand(b"@echo @'", 0, b"'\n")
 
     testSemanticError(b"@multiline", "@multiline requires at least 1 argument")
     testSemanticError(b"@multiline @true", "the @multiline builtin is only supported within an (..inline command..)")
@@ -214,21 +214,58 @@ def main():
     testCommand(b'@echo foo', 0, b"foo\n")
     testCommand(b'@echo "foo"', 0, b"foo\n")
 
-    testSyntaxError(b'"', 'missing close quote for: "')
-    testSyntaxError(b'@echo "foo', 'missing close quote for: "foo')
+    #
+    # double-quoted string literals
+    #
+    testSyntaxError(b'"', 'missing double-quote to close: "')
+    testSyntaxError(b'@echo "foo', 'missing double-quote to close: "foo')
     testSyntaxError(b'@echo "01234567890123456789012345678',
-                    'missing close quote for: "01234567890123456789012345678')
+                    'missing double-quote to close: "01234567890123456789012345678')
     testSyntaxError(b'@echo "012345678901234567890123456789',
-                    'missing close quote for: "01234567890123456789012345678[..snip..]')
+                    'missing double-quote to close: "01234567890123456789012345678[..snip..]')
     testCommand(b'@echo @"', 0, b'"\n')
     testCommand(b'@echo "#@$()"', 0, b'#@$()\n')
 
-    # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    # TODO: test @%"..." strings
-    # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    #
+    # single-quoted string literals
+    #
+    testSyntaxError(b"'", "missing single-quote to close: '")
+    testSyntaxError(b"''", "missing 2 single-quote sequence to close: ''")
+    testSyntaxError(b"'''", "missing 3 single-quote sequence to close: '''")
+    testSyntaxError(b"''''", "missing 4 single-quote sequence to close: ''''")
+    testSyntaxError(b"'''''", "missing 5 single-quote sequence to close: '''''")
+    testSyntaxError(b"''''''", "missing 6 single-quote sequence to close: ''''''")
+    testSyntaxError(b"'''''''", "missing 6 single-quote sequence to close: '''''''")
+    testSyntaxError(b"'a", "missing single-quote to close: 'a")
+    testSyntaxError(b"''a", "missing 2 single-quote sequence to close: ''a")
+    testSyntaxError(b"'''a", "missing 3 single-quote sequence to close: '''a")
+    testSyntaxError(b"''''a", "missing 4 single-quote sequence to close: ''''a")
+    testSyntaxError(b"@echo 'foo", "missing single-quote to close: 'foo")
+    testSyntaxError(b"@echo '01234567890123456789012345678",
+                    "missing single-quote to close: '01234567890123456789012345678")
+    testSyntaxError(b"@echo '012345678901234567890123456789",
+                    "missing single-quote to close: '01234567890123456789012345678[..snip..]")
+    #testCommand(b"@echo '#@$()'", 0, b'#@$()\n')
+
+    testSyntaxError(b"@echo '\n", "missing single-quote to close: '")
+    testSyntaxError(b"@echo ''\n''", "missing 2 single-quote sequence to close: ''")
+    testCommand(b"@echo '''\n'''", 0, b"")
+    testCommand(b"@echo '''\nhello'''", 0, b"hello\n")
+    testCommand(b"@echo '''\nhello\nworld'''", 0, b"hello\nworld\n")
+
+    testCommand(b"@echo 'hello\"''", 0, b"hello\"'\n")
+    testCommand(b"@echo ''hello\"'''", 0, b"hello\"'\n")
+    testCommand(b"@echo '''hello\"''''", 0, b"hello\"'\n")
+    testCommand(b"@echo ''''hello\"'''''", 0, b"hello\"'\n")
+    testCommand(b"@echo '''''hello\"''''''", 0, b"hello\"'\n")
+    testCommand(b"@echo ''''''hello\"'''''''", 0, b"hello\"'\n")
+
+    # should be a syntax error because there are no quotes!
+    testSyntaxError(b"@echo 'foo'", "got a single-quote string literal without double-quotes nor newlines, use double quotes instead or invoke @allstringliterals")
+    testCommands([
+        CommandResultTest(b"@allstringliterals", 0, b""),
+        CommandResultTest(b"@echo 'foo'", 0, b"foo\n"),
+    ], verification_mode=False)
 
     #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!

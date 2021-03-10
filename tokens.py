@@ -4,7 +4,7 @@ def getTokensTxtFilename():
     import os
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), "tokens.txt")
 
-TOKENS_FILE_RE = re.compile(b"^([A-Z_]+) *(.*)")
+TOKENS_FILE_RE = re.compile(b"^([A-Z_0-9]+) *(.*)")
 
 def parseLine(line: bytes):
     match = TOKENS_FILE_RE.match(line)

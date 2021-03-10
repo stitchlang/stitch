@@ -4,14 +4,14 @@
 #
 # These pitfalls are taken from https://mywiki.wooledge.org/BashPitfalls
 #
-@note --------------------------------------------------------------------------------
+@note "--------------------------------------------------------------------------------"
 @note "Bash Pitfall #1: for f in $(ls *.mp3)"
-@note --------------------------------------------------------------------------------
-@note Have not implemented any looping yet
+@note "--------------------------------------------------------------------------------"
+@note "Have not implemented any looping yet"
 
-@note --------------------------------------------------------------------------------
+@note "--------------------------------------------------------------------------------"
 @note "Bash Pitfall #2: cp $file $target"
-@note --------------------------------------------------------------------------------
+@note "--------------------------------------------------------------------------------"
 #
 # In stitch this example is correct because:
 #     - variables can have whitespace and are still treated as single arguments
@@ -22,21 +22,21 @@
 #
 rm -rf @scriptdir/scratch
 mkdir @scriptdir/scratch
-file = @scriptdir/scratch/@%|file with crazy characters like *[{}]<>"'|
+file = @scriptdir''/scratch/file with crazy characters like *[{}]<>"'''
 target = (@echo @scriptdir/scratch/the target file)
 touch $file
 
 cp $file $target
 
-@note --------------------------------------------------------------------------------
-@note Bash Pitfall #3: Filenames with leading dashes
-@note --------------------------------------------------------------------------------
-@note this isn't a problem with Bash, it's just a problem with command-line interfaces
-@note in general that scripting languages are vulnerable to.
+@note "--------------------------------------------------------------------------------"
+@note "Bash Pitfall #3: Filenames with leading dashes"
+@note "--------------------------------------------------------------------------------"
+@note "this isn't a problem with Bash, it's just a problem with command-line interfaces"
+@note "in general that scripting languages are vulnerable to."
 
-@note --------------------------------------------------------------------------------
-@note @%'Bash Pitfall #4: [ $foo = "bar" ]'
-@note --------------------------------------------------------------------------------
+@note "--------------------------------------------------------------------------------"
+@note 'Bash Pitfall #4: [ $foo = "bar" ]'
+@note "--------------------------------------------------------------------------------"
 #
 # In stitch the correct syntax is:
 #
@@ -56,9 +56,9 @@ foo = bar
 foo = notbar
 @assert @not ($foo @eq bar)
 
-@note --------------------------------------------------------------------------------
-@note @%'Bash Pitfall #5: cd $(dirname "$f")'
-@note --------------------------------------------------------------------------------
+@note "--------------------------------------------------------------------------------"
+@note 'Bash Pitfall #5: cd $(dirname "$f")'
+@note "--------------------------------------------------------------------------------"
 # Right now stitch does not support a `cd` command. The example below demonstrates
 # the alternatives in order of preference:
 #
@@ -82,9 +82,9 @@ f = @scriptdir/scratch
 dir = $f
 ls $dir
 
-@note --------------------------------------------------------------------------------
-@note @%'Bash Pitfall #6: [ "$foo" = bar && "$bar" = foo ]'
-@note --------------------------------------------------------------------------------
+@note "--------------------------------------------------------------------------------"
+@note 'Bash Pitfall #6: [ "$foo" = bar && "$bar" = foo ]'
+@note "--------------------------------------------------------------------------------"
 # In stitch the equivalent command would be:
 #
 #     [ (($foo @eq bar) @and ($bar @eq foo)) ]
@@ -99,9 +99,9 @@ bar = foo
 
 @assert ($foo @eq bar) @and ($bar @eq foo)
 
-@note --------------------------------------------------------------------------------
+@note "--------------------------------------------------------------------------------"
 @note "Bash Pitfall #7: [[ $foo > 7 ]]"
-@note --------------------------------------------------------------------------------
+@note "--------------------------------------------------------------------------------"
 # This one looks like a problem with the '[[' program rather than with BASH itself.
 # However, stitch's binary comparison operators return Bool objects that cannot
 # be passed to external programs, so this pitfall becomes a semantic type error in stitch.
@@ -109,9 +109,9 @@ foo = 8
 
 @assert $foo @gt 7
 
-@note --------------------------------------------------------------------------------
+@note "--------------------------------------------------------------------------------"
 @note "Bash Pitfall #8: grep foo bar | while read -r; do ((count++)); done"
-@note --------------------------------------------------------------------------------
+@note "--------------------------------------------------------------------------------"
 # we don't have loops yet, but the underlying problem is that `count++` is
 # executed in a subshell, however, this script doesn't do that so it shouldn't
 # be a pitfall

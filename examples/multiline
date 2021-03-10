@@ -1,0 +1,10 @@
+title = "My Webpage!"
+body = "<h1>Hello!</h1>"
+@echo '''
+<html><head/>
+    <title>'''$title'''</title>
+</head><body>
+    '''$body'''
+
+</body></html>
+'''

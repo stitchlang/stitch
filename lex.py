@@ -1,23 +1,28 @@
-from enum import Enum
+from enum import IntEnum
 from typing import List, Dict, Set, Union, Tuple, Optional
 import re
 
 import tokens
 from cish import Ref, StringPtr
 
-class TokenKind(Enum):
+class TokenKind(IntEnum):
     INLINE_WHITESPACE = 0
     BUILTIN_ID = 1
     USER_ID = 2
     ARG = 3
     NEWLINE = 4
     ASSIGN_OP = 5
-    QUOTED_STRING = 6
+    DOUBLE_QUOTED_STRING = 6
     COMMENT = 7
     OPEN_PAREN = 8
     CLOSE_PAREN = 9
-    DELIMITED_STRING = 10
-    ESCAPE_SEQUENCE = 11
+    SINGLE_QUOTED_STRING1 = 10
+    SINGLE_QUOTED_STRING2 = 11
+    SINGLE_QUOTED_STRING3 = 12
+    SINGLE_QUOTED_STRING4 = 13
+    SINGLE_QUOTED_STRING5 = 14
+    SINGLE_QUOTED_STRING6 = 15
+    ESCAPE_SEQUENCE = 16
 
 class Pattern:
     def __init__(self, kind: TokenKind, re_string: bytes):
@@ -30,10 +35,7 @@ with open(tokens.getTokensTxtFilename(), "rb") as tokens_file:
     for line in tokens_file:
         name, pattern = tokens.parseLine(line)
         #print("{:20} {}".format(name, pattern))
-        if name.startswith(b"DELIMITED_STRING_"):
-            kind = TokenKind.DELIMITED_STRING
-        else:
-            kind = getattr(TokenKind, name.decode('ascii'))
+        kind = getattr(TokenKind, name.decode('ascii'))
         PATTERNS.append(Pattern(kind, pattern))
 
 def countLinesAndColumns(s: bytes) -> Tuple[int,int]:
@@ -61,7 +63,7 @@ class SyntaxError(Exception):
 def preview(src: bytes, max_len: int) -> str:
     assert(isinstance(src, bytes))
     newline = src.find(b"\n")
-    cutoff = len(src) if (newline == -1) else newline - 1
+    cutoff = len(src) if (newline == -1) else newline
     if cutoff > max_len:
         return (src[:max_len] + b"[..snip..]").decode('ascii')
     return src[:cutoff].decode('ascii')
@@ -115,8 +117,13 @@ def scan(src: bytes, pos: int, verify_one_match: bool = True) -> Optional[Tuple[
     src_prefix = src[:pos]
     c = next.charAt(0)
     if c == ord('"'):
-        raise SyntaxError(src_prefix, "missing close quote for: {}".format(previewStringPtr(next, limit, 30)))
+        raise SyntaxError(src_prefix, "missing double-quote to close: {}".format(previewStringPtr(next, limit, 30)))
+    next_str = next.toStringWithLimit(limit)
+    for seq in (b"''''''", b"'''''", b"''''", b"'''", b"''", b"'"):
+        if next_str.startswith(seq):
+            phrase = "single-quote" if (len(seq) == 1) else "{} single-quote sequence".format(len(seq))
+            raise SyntaxError(src_prefix, "missing {} to close: {}".format(phrase, previewStringPtr(next, limit, 30)))
     
     # I think we need at most 2 characters to see what went wrong
-    bad_str = next.toStringWithLength(min(limit.subtract(next), 2))
+    bad_str = next_str[:min(limit.subtract(next), 2)]
     raise SyntaxError(src_prefix, "unrecognized character sequence '{}'".format(bad_str.decode('ascii')))

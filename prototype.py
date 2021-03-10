@@ -196,18 +196,6 @@ class UnknownCommandResult(Unknown):
         return "CommandResult"
 UNKNOWN_COMMAND_RESULT = UnknownCommandResult()
 
-def countLinesAndColumns(s: bytes):
-    assert(type(s) == bytes)
-    line = 1
-    column = 1
-    for c in s:
-        if c == "\n":
-            line += 1
-            column = 1
-        else:
-            column += 1
-    return line, column
-
 # TODO: not sure if the Error types will be exposed to stitch yet, or if they
 #       are just an internal detail
 class Error:
@@ -218,7 +206,7 @@ class Error:
 class SyntaxError(Error):
     def __init__(self, filename_str: str, lex_error: lex.SyntaxError):
         assert(isinstance(filename_str, str))
-        line, column = countLinesAndColumns(lex_error.src_prefix)
+        line, column = lex.countLinesAndColumns(lex_error.src_prefix)
         super().__init__("{}(line {} column {}) {}".format(filename_str, line, column, str(lex_error)))
 class SemanticError(Error):
     def __init__(self, message):
@@ -287,6 +275,7 @@ class ScriptContext:
         self.var_map: Dict[bytes,StitchObject] = {}
         self.verification_mode = verification_mode
         self.blockStack: List[ScriptContext.Block] = [ScriptContext.Block(enabled=True)]
+        self.allstringliterals = False
     def pushBlock(self, enabled: bool) -> None:
         self.blockStack.append(ScriptContext.Block(enabled))
     def popBlock(self) -> Optional[Error]:
@@ -369,6 +358,11 @@ class CommandContext:
                           self.builtin_prefix_count + 1, ambiguous_op, self.var_map)
 
 class BuiltinMethods:
+    @staticmethod
+    def allstringliterals(cmd_ctx: CommandContext, nodes: List[parse.Node]):
+        assert(len(nodes) == 0)
+        cmd_ctx.script.allstringliterals = True
+        return ExitCode(0)
     @staticmethod
     def note(cmd_ctx: CommandContext, nodes: List[parse.Node]):
         return ExitCode(0)
@@ -609,6 +603,7 @@ class CompareOp:
 
 # builtin objects that do not change and are the same for all scripts
 builtin_objects = {
+    b"allstringliterals": Builtin("allstringliterals", BuiltinExpandType.ParseNodes, returns_bool=False, arg_count=0),
     b"note": Builtin("note", BuiltinExpandType.ParseNodes, returns_bool=False),
     b"echo": Builtin("echo", BuiltinExpandType.Strings, returns_bool=False),
     b"settmp": Builtin("settmp", BuiltinExpandType.ParseNodes, returns_bool=False),
@@ -1115,7 +1110,7 @@ def runBinaryExpression(cmd_ctx: CommandContext, nodes: List[parse.Node], first_
 def runSrc(script_ctx: ScriptContext, src: bytes, stdout_handler: DataHandler, stderr_handler: DataHandler) -> Union[Error,ExitCode]:
     pos = 0
     while pos < len(src):
-        nodes, end = parse.parseCommand(src, pos)
+        nodes, end = parse.parseCommand(src, pos, script_ctx.allstringliterals)
         assert(end > pos)
         pos = end
 

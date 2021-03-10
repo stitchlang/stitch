@@ -75,7 +75,7 @@ class ParseToken:
         return False
 
 
-def parseNode(src: bytes, token: ParseToken) -> Tuple[Node, Optional[ParseToken]]:
+def parseNode(src: bytes, token: ParseToken, allstringliterals: bool) -> Tuple[Node, Optional[ParseToken]]:
     assert(token.pos < len(src))
     assert(token.pattern.kind != lex.TokenKind.INLINE_WHITESPACE)
     assert(token.pattern.kind != lex.TokenKind.COMMENT)
@@ -98,17 +98,27 @@ def parseNode(src: bytes, token: ParseToken) -> Tuple[Node, Optional[ParseToken]
         elif token.pattern.kind == lex.TokenKind.ASSIGN_OP:
             node = combineNodes(node, NodeAssign(token_src))
             next_token_start = token_end
-        elif token.pattern.kind == lex.TokenKind.QUOTED_STRING:
+        elif token.pattern.kind == lex.TokenKind.DOUBLE_QUOTED_STRING:
             node = combineNodes(node, NodeToken(token_src, token_src[1:-1]))
             next_token_start = token_end
         elif token.pattern.kind == lex.TokenKind.OPEN_PAREN:
-            inline_cmd_nodes, right_paren_pos = parseCommand(src, token_end)
+            inline_cmd_nodes, right_paren_pos = parseCommand(src, token_end, allstringliterals)
             if right_paren_pos == len(src) or src[right_paren_pos] != ord(")"):
                 raise lex.SyntaxError(src[:token.pos], "missing close paren for: {}".format(lex.preview(src[token.pos:], 30)))
             node = combineNodes(node, NodeInlineCommand(src[token.pos:right_paren_pos+1], inline_cmd_nodes))
             next_token_start = right_paren_pos + 1
-        elif token.pattern.kind == lex.TokenKind.DELIMITED_STRING:
-            node = combineNodes(node, NodeToken(token_src, token_src[3:-1]))
+        elif (token.pattern.kind >= lex.TokenKind.SINGLE_QUOTED_STRING1 and
+              token.pattern.kind <= lex.TokenKind.SINGLE_QUOTED_STRING6):
+            quote_count = (token.pattern.kind - lex.TokenKind.SINGLE_QUOTED_STRING1) + 1
+            if not allstringliterals:
+                full_data = token_src[quote_count:-quote_count]
+                if not any(c in full_data for c in b'"\n'):
+                    raise lex.SyntaxError(src[:token.pos], "got a single-quote string literal without double-quotes nor newlines, use double quotes instead or invoke @allstringliterals")
+            data_offset = quote_count
+            if quote_count >= 3 and token_src[quote_count] == ord("\n"):
+                data_offset += 1
+            data = token_src[data_offset:-quote_count]
+            node = combineNodes(node, NodeToken(token_src, token_src[data_offset:-quote_count]))
             next_token_start = token_end
         elif token.pattern.kind == lex.TokenKind.ESCAPE_SEQUENCE:
             node = combineNodes(node, NodeToken(token_src, token_src[1:]))
@@ -128,7 +138,7 @@ def parseNode(src: bytes, token: ParseToken) -> Tuple[Node, Optional[ParseToken]
             pattern.kind == lex.TokenKind.CLOSE_PAREN):
             return node, token
 
-def parseCommand(src: bytes, cmd_start: int) -> Tuple[List[Node],int]:
+def parseCommand(src: bytes, cmd_start: int, allstringliterals: bool) -> Tuple[List[Node],int]:
     assert(type(src) == bytes)
     nodes: List[Node] = []
     lex_token = lex.scan(src, cmd_start)
@@ -144,7 +154,7 @@ def parseCommand(src: bytes, cmd_start: int) -> Tuple[List[Node],int]:
             return nodes, token.pos + token.length
         if token.pattern.kind == lex.TokenKind.CLOSE_PAREN:
             return nodes, token.pos
-        node, next_token = parseNode(src, token)
+        node, next_token = parseNode(src, token, allstringliterals)
         nodes.append(node)
         if not next_token:
             return nodes, len(src)

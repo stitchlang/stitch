@@ -62,5 +62,8 @@ int main(int argc, char *argv[])
   test("#hello", TOKEN_KIND_COMMENT);
   test("\n", TOKEN_KIND_NEWLINE);
   test("#!/usr/bin/env", TOKEN_KIND_COMMENT);
-  test("@%|hello|", TOKEN_KIND_DELIMITED_STRING_VERTBAR);
+  test("\"hello\"", TOKEN_KIND_DOUBLE_QUOTED_STRING);
+  test("'hello'", TOKEN_KIND_SINGLE_QUOTED_STRING1);
+  test("''hello''", TOKEN_KIND_SINGLE_QUOTED_STRING2);
+  test("'''hello\nthere'''", TOKEN_KIND_SINGLE_QUOTED_STRING3);
 }

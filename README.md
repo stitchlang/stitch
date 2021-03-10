@@ -44,46 +44,102 @@ Char | Description
 `#`  | a single-line comment
 `@`  | start a builtin expression and/or access a builtin object
 `$`  | access a user object
-`"`  | delimits a string literal
+`"`  | delimit a string literal
+`'`  | delimit a string literal
 `(`  | start an inline command
-`)`  | ends an inline command
+`)`  | end an inline command
 `=`  | the assignment operator
 
 All of the special characters can currently be escaped with `@X` (where X is the character).  They can also be used inside quoted strings where they have no special meaning.
 
 > NOTE: do I need the `@X` escapes?  why not just use "X"?
 
-# Arguments with Spaces
+# Strings
 
-```sh
-@echolines arg 1 arg 2
+Most things in stitch evaluate to `String` objects.  The line `foo bar` becomes 2 String objects "foo" and "bar".  This behavior is overriden when special characters are encountered.  Quoted string literals can be used To create strings with these special characters:
+
+```
+# printing a normal string
+
+@echo foo
 # prints:
-#   arg
-#   1
-#   arg
-#   2
+#   foo
 
-# How do we use @echolines to print the following instead?
-#   arg 1
-#   arg 2
+# using the '$' special character
 
-#
-# 1. use a string literals
-#
-@echolines "arg 1" "arg 2"
+foo = bar
+@echo $foo
+# prints:
+#   bar
 
-#
-# 2. use inline commands
-#
-@echolines (@echo arg 1) (@echo arg 2)
+# using a quoted string to disable the '$' special character variable expansion
 
-#
-# 3. use a "Delimited String Literal"
-#
-@echolines @%"arg 1" @%"arg 2"
+@echo "$foo"
+# prints:
+#   $foo
+
+# using a single-quoted string to disable the double-quoted string behavior
+
+@echo '"$foo"'
+# prints:
+#   "$foo"
 ```
 
-> NOTE: consider adding support for `@_` so you could do `@echolines arg@_1 arg@_2
+Quoted string literals are WYSIWYG.  There are no escape sequences and there is no variable expansion. The string literal is opened and closed with the same sequence of quote characters.  Quoted string literals can be interpolated with variables/expressions by omitting whitespace between them:
+
+```sh
+name = joe
+age = 54
+message = "your name is "$name" and your age is "$age
+@echo $message
+# prints:
+#   your name is joe and your age is 54
+```
+
+Another technique for interpolation is an inline `@echo` command:
+
+```sh
+message = (@echo your name is $name and your age is $age)
+```
+
+If the string literals contains double-quote characters then single-quotes can be used:
+
+```sh
+@echolines 'fred "ran" a marathon'
+# prints:
+#   fred "ran" a marathon
+```
+
+single-quoted string literals also support multiple delimiters, and once there are at least 3, newlines are also allowed
+
+```sh
+
+content1 = ''now I can have "individual" 'single-quotes' in my string''
+content1 = '''a string with "double-quotes" and ''single-quotes'''''
+content = '''
+
+# here's a multiline string
+
+'''
+
+> NOTE: if a multiline string literal begins with a newline, it is omitted from the string
+
+```
+
+String interpolation still works with multiline strings
+
+```sh
+title = "My Webpage!"
+body = "<h1>Hello!</h1>"
+@echo '''
+<html><head/>
+    <title>'''$title'''</title>
+</head><body>
+    '''$body'''
+
+</body></html>
+'''
+```
 
 # Arguments with special characters
 
@@ -91,7 +147,7 @@ All of the special characters can currently be escaped with `@X` (where X is the
 # awk is a good example to demonstrate because it also makes use of $
 awk "{print $1 $2}"
 
-awk @%|{print "$1" "$2"}|
+awk '{print "$1" "$2"}'
 ```
 
 # When not to use stitch
@@ -390,42 +446,42 @@ Not sure if these should be added yet. I've included them to be considered.
 
 Assuming programs are located the same way as BASH and/or execvp, I should expose this logic through a builtin.
 
-# Delimited String Literals
+# String Literals
 
-WYSIWYG strings make it easier to write correct code because they are easy for humans to verify and copy between applications. Requiring manual edits to escape special characters on strings copied to and from stitch scripts would be error prone. To avoid this, we need syntax to disable the special characters `#`, `@`, `$`, `"`, `(` and `)`.
+> NOTE: this section is old, need to combine with the "Strings" section
 
-The solution for stitch is "Delimited String Literals".  They start with the sequence `@%` followed by a delimiter character.  The string continues until it sees the delimiter character again.  Here are some examples:
+WYSIWYG strings make it easier to write correct code because they are easy for humans to verify and copy between applications. Requiring manual edits to escape special characters on strings copied to and from stitch scripts would be error prone. To avoid this, we need syntax to disable special characters like `#`, `@`, `$`, `"`, `(` and `)`.
+
+For this stitch supports both "double-quoted string literals" and 'single-quoted string literals':
 
 ```sh
-@echo @%"I can use #, @, $, ( and ) in here but not a double-quote"
+@echo "I can use #, @, $, ( and ) in here but not a double-quote"
 # prints:
 #   I can use #, @, $, ( and ) in here but not a double-quote
 
-@echo @%'I can use #, @, $, (, ) and " but not single-quote'
+@echo 'I can use #, @, $, (, ) and " but not single-quote'
 # prints:
 #   I can use #, @, $, (, ) and " but not single-quote
 
-@echo @%|I can use #, @, $, (, ), " and ' but not a pipe character in here|
+@echo ''I can use #, @, $, (, ), " and ' but not 2 consecutive single-quotes''
 # prints:
-#   I can use #, @, $, (, ), " and ' but not a pipe character in here
+#   I can use #, @, $, (, ), " and ' but not 2 consecutive single-quotes
+
+@echo '''I can use #, @, $, (, ), " and '' but not 3 consecutive single-quotes'''
+# prints:
+#   I can use #, @, $, (, ), " and '' but not 3 consecutive single-quotes
 ```
 
-The scripting language should also probably include a way to create multiline strings.  I'll decide on this later.
+If a single-quoted string starts with at least 3 single-quotes, then it also supports newlines
 
-It might also be good to include some shorthand variations like this:
 ```sh
-@echo @" example 1 "
-@echo @' example 1 '
-@echo @| example 1 |
-
-# probably don't do @( ... ) because that could easily get confused with inline commands
-# maybe just @"..." and @'...'
+@echo '''
+this
+is
+a multiline
+string literal
+'''
 ```
-
-I could also support `"..."`.  This would make the double-quote `"` character a special reserved character. Would this make it easier to write correct programs? Keeping the number of reserved characters low makes it simpler to reason about what source is doing.  The question is whether that benefit outweighs needing to type `@"..."` instead of `"..."`.
-
-Note that the same reasoning that applies to WYSIWYG strings would also apply to HEREDOC strings. A special dollar keyword could start a heredoc, tell if it is raw or processed, then specify the sentinel delimiter.
-
 
 ### Idea: detect and assert error when strings are concatenated with no interpolation
 
@@ -444,7 +500,7 @@ This will be interpreted as:
 
 ```
 
-which would be print this:
+which would be printed this:
 ```
 this is a string with double-quotes
 ```
