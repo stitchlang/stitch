@@ -799,7 +799,7 @@ def runBuiltin(cmd_ctx: CommandContext, builtin: Builtin, nodes: List[parse.Node
         return func(cmd_ctx, args)
     raise Exception("TODO: expand_type {}".format(builtin.expand_type))
 
-def runAssign(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> Optional[Error]:
+def runAssign(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> Union[Error,ExitCode,UnknownExitCode]:
     assert(len(nodes) >= 2)
     assert(isinstance(nodes[1], parse.NodeAssign))
     if len(nodes) != 3:
@@ -850,10 +850,7 @@ def runCommandNodes(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> Union[E
 
     # NOTE: this part should have been done by parser
     if len(nodes) >= 2 and isinstance(nodes[1], parse.NodeAssign):
-        error = runAssign(cmd_ctx, nodes)
-        if error:
-            return error
-        return String("")
+        return runAssign(cmd_ctx, nodes)
 
     result = expandNodes(cmd_ctx, nodes)
     if isinstance(result, Error):

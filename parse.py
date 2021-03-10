@@ -45,7 +45,7 @@ class NodeAssign(Node):
     def __init__(self, src: bytes):
         Node.__init__(self, src)
     def __repr__(self):
-        return "Assign".format(self.varname, self.value)
+        return "Assign"
 
 def combineNodes(existing_node: Optional[Node], new_node: Node) -> Node:
     if not existing_node:
