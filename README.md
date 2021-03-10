@@ -56,7 +56,7 @@ All of the special characters can currently be escaped with `@X` (where X is the
 
 # Strings
 
-Most things in stitch evaluate to `String` objects.  The line `foo bar` becomes 2 String objects "foo" and "bar".  This behavior is overriden when special characters are encountered.  Quoted string literals can be used To create strings with these special characters:
+Most things in stitch evaluate to `String` objects.  The line `foo bar` becomes 2 String objects "foo" and "bar".  This behavior is overriden when special characters are encountered.  Quoted string literals can be used to create strings with these special characters:
 
 ```
 # printing a normal string
@@ -91,9 +91,7 @@ Quoted string literals are WYSIWYG.  There are no escape sequences and there is 
 name = joe
 age = 54
 message = "your name is "$name" and your age is "$age
-@echo $message
-# prints:
-#   your name is joe and your age is 54
+@assert $message @eq "your name is joe and your age is 54"
 ```
 
 Another technique for interpolation is an inline `@echo` command:
