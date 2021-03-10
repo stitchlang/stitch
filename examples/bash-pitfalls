@@ -4,22 +4,25 @@
 #
 # These pitfalls are taken from https://mywiki.wooledge.org/BashPitfalls
 #
-@note "--------------------------------------------------------------------------------"
-@note "Bash Pitfall #1: for f in $(ls *.mp3)"
-@note "--------------------------------------------------------------------------------"
-@note "Have not implemented any looping yet"
+@note '''
+--------------------------------------------------------------------------------
+Bash Pitfall #1: for f in $(ls *.mp3)
+--------------------------------------------------------------------------------
+Have not implemented any looping yet
+'''
 
-@note "--------------------------------------------------------------------------------"
-@note "Bash Pitfall #2: cp $file $target"
-@note "--------------------------------------------------------------------------------"
-#
-# In stitch this example is correct because:
-#     - variables can have whitespace and are still treated as single arguments
-#     - there's no $IFS
-#     - variables can have wildcards
-#     - there's no wordsplitting
-#     - there's no pathname expansion
-#
+@note '''
+--------------------------------------------------------------------------------
+Bash Pitfall #2: cp $file $target
+--------------------------------------------------------------------------------
+ In stitch this example is correct because:
+     - variables can have whitespace and are still treated as single arguments
+     - there's no $IFS
+     - variables can have wildcards
+     - there's no wordsplitting
+     - there's no pathname expansion
+'''
+
 rm -rf @scriptdir/scratch
 mkdir @scriptdir/scratch
 file = @scriptdir''/scratch/file with crazy characters like *[{}]<>"'''
@@ -28,53 +31,57 @@ touch $file
 
 cp $file $target
 
-@note "--------------------------------------------------------------------------------"
-@note "Bash Pitfall #3: Filenames with leading dashes"
-@note "--------------------------------------------------------------------------------"
-@note "this isn't a problem with Bash, it's just a problem with command-line interfaces"
-@note "in general that scripting languages are vulnerable to."
+@note '''
+--------------------------------------------------------------------------------
+Bash Pitfall #3: Filenames with leading dashes
+--------------------------------------------------------------------------------
+this isn't a problem with Bash, it's just a problem with command-line interfaces
+in general that scripting languages are vulnerable to.
+'''
 
-@note "--------------------------------------------------------------------------------"
-@note 'Bash Pitfall #4: [ $foo = "bar" ]'
-@note "--------------------------------------------------------------------------------"
-#
-# In stitch the correct syntax is:
-#
-#     $foo @eq bar
-#
-# We avoid the pitfalls because:
-#     - we don't have quoted variable semantics
-#     - if 'foo' does not exist then a "foo is undefined" error will be asserted rather than evaluating it as [ = "bar" ]
-#     - variables can have whitespace and are still treated as single arguments
-#     - there's no $IFS
-#     - variables can have wildcards
-#     - there's no wordsplitting
-#     - there's no pathname expansion
-#
+@note '''
+--------------------------------------------------------------------------------
+Bash Pitfall #4: [ $foo = "bar" ]
+--------------------------------------------------------------------------------
+In stitch the correct syntax is:
+
+     $foo @eq bar
+
+We avoid the pitfalls because:
+    - we don't have quoted variable semantics
+    - if 'foo' does not exist then a "foo is undefined" error will be asserted rather than evaluating it as [ = "bar" ]
+    - variables can have whitespace and are still treated as single arguments
+    - there's no $IFS
+    - variables can have wildcards
+    - there's no wordsplitting
+    - there's no pathname expansion
+'''
 foo = bar
 @assert $foo @eq bar
 foo = notbar
 @assert @not ($foo @eq bar)
 
-@note "--------------------------------------------------------------------------------"
-@note 'Bash Pitfall #5: cd $(dirname "$f")'
-@note "--------------------------------------------------------------------------------"
-# Right now stitch does not support a `cd` command. The example below demonstrates
-# the alternatives in order of preference:
-#
-#     Bash Example:
-#         cd $(dirname "$f")
-#         cat foo
-#         git status
-#         tar xf bar.tar
-#
-#     Equivalent:
-#         dir = (dirname $f)
-#         cat $dir/foo
-#         git -C $dir status
-#         @withcwd $dir tar xf bar.tar
-#
-# Note that unlike the BASH example, the equivalent example is "correct".
+@note '''
+--------------------------------------------------------------------------------
+Bash Pitfall #5: cd $(dirname "$f")
+--------------------------------------------------------------------------------
+Right now stitch does not support a `cd` command. The example below demonstrates
+the alternatives in order of preference:
+
+    Bash Example:
+        cd $(dirname "$f")
+        cat foo
+        git status
+        tar xf bar.tar
+
+    Equivalent:
+        dir = (dirname $f)
+        cat $dir/foo
+        git -C $dir status
+        @withcwd $dir tar xf bar.tar
+
+Note that unlike the BASH example, the equivalent example is "correct".
+'''
 rm -rf @scriptdir/scratch
 mkdir @scriptdir/scratch
 f = @scriptdir/scratch
@@ -82,40 +89,44 @@ f = @scriptdir/scratch
 dir = $f
 ls $dir
 
-@note "--------------------------------------------------------------------------------"
-@note 'Bash Pitfall #6: [ "$foo" = bar && "$bar" = foo ]'
-@note "--------------------------------------------------------------------------------"
-# In stitch the equivalent command would be:
-#
-#     [ (($foo @eq bar) @and ($bar @eq foo)) ]
-#
-# However, in stitch this is a semantic type error, becuase the result of the @and binary
-# operator is a Bool object, which cannot be passed to the external "[" (aka. "test")
-# program. Instead, stitch provides its own builtins for handling Bool objects, in
-# this case we can use @assert.
-#
+@note '''
+--------------------------------------------------------------------------------
+Bash Pitfall #6: [ "$foo" = bar && "$bar" = foo ]
+--------------------------------------------------------------------------------
+In stitch the equivalent command would be:
+
+    [ (($foo @eq bar) @and ($bar @eq foo)) ]
+
+However, in stitch this is a semantic type error, becuase the result of the @and binary
+operator is a Bool object, which cannot be passed to the external "[" (aka. "test")
+program. Instead, stitch provides its own builtins for handling Bool objects, in
+this case we can use @assert.
+'''
 foo = bar
 bar = foo
 
 @assert ($foo @eq bar) @and ($bar @eq foo)
 
-@note "--------------------------------------------------------------------------------"
-@note "Bash Pitfall #7: [[ $foo > 7 ]]"
-@note "--------------------------------------------------------------------------------"
-# This one looks like a problem with the '[[' program rather than with BASH itself.
-# However, stitch's binary comparison operators return Bool objects that cannot
-# be passed to external programs, so this pitfall becomes a semantic type error in stitch.
+@note '''
+--------------------------------------------------------------------------------
+Bash Pitfall #7: [[ $foo > 7 ]]
+--------------------------------------------------------------------------------
+This one looks like a problem with the '[[' program rather than with BASH itself.
+However, stitch's binary comparison operators return Bool objects that cannot
+be passed to external programs, so this pitfall becomes a semantic type error in stitch.
+'''
 foo = 8
 
 @assert $foo @gt 7
 
-@note "--------------------------------------------------------------------------------"
-@note "Bash Pitfall #8: grep foo bar | while read -r; do ((count++)); done"
-@note "--------------------------------------------------------------------------------"
-# we don't have loops yet, but the underlying problem is that `count++` is
-# executed in a subshell, however, this script doesn't do that so it shouldn't
-# be a pitfall
-
+@note '''
+--------------------------------------------------------------------------------
+Bash Pitfall #8: grep foo bar | while read -r; do ((count++)); done
+--------------------------------------------------------------------------------
+we don't have loops yet, but the underlying problem is that `count++` is
+executed in a subshell, however, this script doesn't do that so it shouldn't
+be a pitfall
+'''
 
 
 @note cleaning up

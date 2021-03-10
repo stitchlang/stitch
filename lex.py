@@ -28,7 +28,7 @@ class Pattern:
     def __init__(self, kind: TokenKind, re_string: bytes):
         assert(isinstance(re_string, bytes))
         self.kind = kind
-        self.re = re.compile(b"^" + re_string)
+        self.re = re.compile(b"^" + re_string, re.DOTALL)
 
 PATTERNS: List[Pattern] = []
 with open(tokens.getTokensTxtFilename(), "rb") as tokens_file:
@@ -73,8 +73,9 @@ def previewStringPtr(text: StringPtr, limit: StringPtr, max_len: int) -> str:
 
 # this functions mirrors the one in lex.c
 def lex(text: StringPtr, limit: StringPtr, pattern_index_ref: Ref[int]) -> int:
+    text_bytes = text.toStringWithLimit(limit)
     for i, pattern in enumerate(PATTERNS[pattern_index_ref.value:], start=pattern_index_ref.value):
-        match = pattern.re.match(text.toStringWithLimit(limit))
+        match = pattern.re.match(text_bytes)
         if match:
             match_length = len(match.group())
             assert(match_length > 0)
@@ -116,6 +117,8 @@ def scan(src: bytes, pos: int, verify_one_match: bool = True) -> Optional[Tuple[
     # time to try to figure out what went wrong
     src_prefix = src[:pos]
     c = next.charAt(0)
+    if c == ord('('):
+        raise SyntaxError(src_prefix, "missing close paren for: {}".format(previewStringPtr(next, limit, 30)))
     if c == ord('"'):
         raise SyntaxError(src_prefix, "missing double-quote to close: {}".format(previewStringPtr(next, limit, 30)))
     next_str = next.toStringWithLimit(limit)

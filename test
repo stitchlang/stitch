@@ -252,6 +252,7 @@ def main():
     testCommand(b"@echo '''\n'''", 0, b"")
     testCommand(b"@echo '''\nhello'''", 0, b"hello\n")
     testCommand(b"@echo '''\nhello\nworld'''", 0, b"hello\nworld\n")
+    testCommand(b"@echo '''\n\"hello\"\n'world''''", 0, b"\"hello\"\n'world'\n")
 
     testCommand(b"@echo 'hello\"''", 0, b"hello\"'\n")
     testCommand(b"@echo ''hello\"'''", 0, b"hello\"'\n")

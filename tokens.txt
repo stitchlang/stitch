@@ -8,10 +8,10 @@ DOUBLE_QUOTED_STRING    "[^"\n]*"
 COMMENT                 #[^\n]*
 OPEN_PAREN              \(
 CLOSE_PAREN             \)
-SINGLE_QUOTED_STRING1   '[^'\n]+'*'
-SINGLE_QUOTED_STRING2   ''[^'\n]+'*''
-SINGLE_QUOTED_STRING3   '''[^']+'*'''
-SINGLE_QUOTED_STRING4   ''''[^']+'*''''
-SINGLE_QUOTED_STRING5   '''''[^']+'*'''''
-SINGLE_QUOTED_STRING6   ''''''[^']+'*''''''
+SINGLE_QUOTED_STRING1   '[^'\n][^\n]*'
+SINGLE_QUOTED_STRING2   ''[^'\n][^\n]*''
+SINGLE_QUOTED_STRING3   '''[^'].*'''
+SINGLE_QUOTED_STRING4   ''''[^'].*''''
+SINGLE_QUOTED_STRING5   '''''[^'].*'''''
+SINGLE_QUOTED_STRING6   ''''''[^'].*''''''
 ESCAPE_SEQUENCE         @[@#$"')(=]
