@@ -254,7 +254,7 @@ def main():
     testCommand(b"@echo '''\nhello\nworld'''", 0, b"hello\nworld\n")
     testCommand(b"@echo '''\n\"hello\"\n'world''''", 0, b"\"hello\"\n'world'\n")
 
-    testCommand(b"@echo 'hello\"''", 0, b"hello\"'\n")
+    testCommand(b"@echo 'hello\"'", 0, b"hello\"\n")
     testCommand(b"@echo ''hello\"'''", 0, b"hello\"'\n")
     testCommand(b"@echo '''hello\"''''", 0, b"hello\"'\n")
     testCommand(b"@echo ''''hello\"'''''", 0, b"hello\"'\n")
@@ -266,6 +266,11 @@ def main():
     testCommands([
         CommandResultTest(b"@allstringliterals", 0, b""),
         CommandResultTest(b"@echo 'foo'", 0, b"foo\n"),
+    ], verification_mode=False)
+    testCommands([
+        CommandResultTest(b"name = joe", 0, b""),
+        CommandResultTest(b"age = 64", 0, b""),
+        CommandResultTest(b"@echo '''\nhello '''$name''', you're\n64!!!\n'''", 0, b"hello joe, you're\n64!!!\n"),
     ], verification_mode=False)
 
     #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!

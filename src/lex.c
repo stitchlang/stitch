@@ -7,6 +7,13 @@ unsigned lex(const char *text, const char *limit, enum token_kind *kind)
 {
   for (enum token_kind i = *kind; i < TOKEN_COUNT; i++) {
     struct re_context context = {0};
+    //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    // NOTE: SINGLE_QUOTED_STRING tokens are broken because they depend on using
+    //       non-greedy start *?
+    //       I should add this to tiny-regex-c
+    //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     int match = re_match_start_only(&context, token_pattern_table[i], text, limit);
     // there should be no errors in the regex's
     assert(!context.error);
