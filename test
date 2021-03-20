@@ -13,139 +13,113 @@ import prototype
 SCRIPT_DIR_STR = os.path.dirname(__file__)
 SCRIPT_DIR = SCRIPT_DIR_STR.encode('utf8')
 
-class CommandTest(ABC):
-    def __init__(self, line: bytes):
-        assert(isinstance(line, bytes))
-        self.line = line
-    @abstractmethod
-    def verify(self, result, test_line):
-        pass
+def runInternal(line: bytes, verification_mode: bool):
+    context = prototype.ScriptContext(prototype.GlobalContext(True, SCRIPT_DIR), __file__.encode('utf8'), verification_mode)
+    stdout_builder = prototype.StringBuilder()
+    stderr_builder = prototype.StringBuilder()
+    nodes, end = parse.parseCommand(line, 0, context.allstringliterals)
+    assert(end == len(line))
+    assert(len(nodes) > 0)
+    result = prototype.runCommandNodes(prototype.CommandContext(
+        context, parent=None, depth=0,
+        capture=prototype.Capture(False, stdout_builder, stderr_builder),
+        builtin_prefix_count=0, ambiguous_op=None), nodes)
+    return result, stdout_builder.output, stderr_builder.output
 
-class ErrorTest(CommandTest):
-    def __init__(self, line: bytes, error_type, message):
-        CommandTest.__init__(self, line)
+class Expect(ABC):
+    @abstractmethod
+    def verify(self, result, stdout: bytes, stderr: bytes, test_line: int):
+        pass
+class ExpectExitAndStdout(Expect):
+    def __init__(self, exitcode: int, stdout: bytes):
+        self.exitcode = exitcode
+        self.stdout = stdout
+    def verify(self, result, stdout: bytes, stderr: bytes, test_line: int):
+        if type(result) != prototype.ExitCode:
+            sys.exit("{}({}): Error: expected an ExitCode but got {}: {}".format(__file__, test_line, type(result).__name__, result))
+        if result.value != self.exitcode:
+            sys.exit("{}({}): Error: expected Command to return exitcode {} but got {}".format(
+                __file__, test_line, self.exitcode, result.exitcode.value))
+        if stdout != self.stdout:
+            sys.exit("{}({}): Error: expected Command to print {!r} but got {!r}".format(
+                __file__, test_line, self.stdout, stdout))
+class ExpectError(Expect):
+    def __init__(self, error_type, message):
         self.error_type = error_type
         self.message = message
-    def __repr__(self):
-        return "{}Test line={} message='{}'".format(self.error_type.__name__, self.line, self.message)
-    def verify(self, result, test_line):
+    def verify(self, result, stdout: bytes, stderr: bytes, test_line: int):
         if not isinstance(result, self.error_type):
             sys.exit("{}({}): Error: expected a {} but got {}: '{}'".format(
                 __file__, test_line, self.error_type.__name__, type(result).__name__, result))
         result_msg = str(result)
         if result_msg != self.message:
-            print("{}({}): Error: semantic error message does not match expected:".format(__file__, test_line))
+            print("{}({}): Error: {} message does not match expected:".format(__file__, test_line, self.error_type.__name__))
             print("expected: {}".format(self.message))
             print("actual  : {}".format(result_msg))
             sys.exit(1)
 
-class CommandResultTest(CommandTest):
-    def __init__(self, line, exitcode, stdout: bytes):
-        assert(isinstance(stdout, bytes))
-        CommandTest.__init__(self, line)
-        self.exitcode = exitcode
-        self.stdout = stdout
-    def __repr__(self):
-        return "CommandResultTest line={}, exitcode={}, stdout={}".format(self.line, self.exitcode, self.stdout)
-    def verify(self, result, test_line):
-        if type(result) != prototype.CommandResult:
-            sys.exit("{}({}): Error: expected a CommandResult but got {}: {}".format(__file__, test_line, type(result).__name__, result))
-        if result.exitcode != self.exitcode:
-            sys.exit("{}({}): Error: expected Command to return exitcode {} but got {}".format(
-                __file__, test_line, self.exitcode, result.exitcode))
-        if result.stdout != self.stdout:
-            sys.exit("{}({}): Error: expected Command to print {} but got {}".format(
-                __file__, test_line, self.stdout, result.stdout))
 
-class ObjectTest(CommandTest):
-    def __init__(self, line, obj: prototype.StitchObject):
-        CommandTest.__init__(self, line)
-        self.obj = obj
-    def __repr__(self):
-        return "ObjectTest line={}, obj={}".format(self.line, self.obj)
-    def verify(self, result, test_line):
-        if type(result) != type(self.obj):
-            sys.exit("{}({}): Error: expected a {} but got {}: {}".format(__file__, test_line, type(self.obj).__name__, type(result).__name__, result))
-        if type(self.obj) == prototype.Array:
-            if len(self.obj.elements) != len(result.elements):
-                sys.exit("{}({}): Error: expected an array of {} elements but got {}".format(
-                    __file__, test_line, len(self.obj.elements), len(result.elements)))
-            for i in range(0, len(self.obj.elements)):
-                if len(self.obj.elements[i]) != len(result.elements[i]):
-                    sys.exit("{}({}): Error: elements at index {} '{}' does not match expected '{}'".format(
-                        __file__, test_line, i, result.elements[i], self.obj.elements[i]))
-        else:
-            sys.exit("Error: ObjectTest has not implemented logic to compare objects of type {}".format(type(self.obj).__name__))
-
-def runTests(commands: List[CommandTest], test_line: int, verification_mode: bool):
+def runTest(src: bytes, verification_mode: bool, expect: Expect, test_line: int):
     context = prototype.ScriptContext(prototype.GlobalContext(True, SCRIPT_DIR), __file__.encode('utf8'), verification_mode)
-    for cmd in commands:
-        stdout_builder = prototype.StringBuilder()
-        stderr_builder = prototype.StringBuilder()
-        result: Any = None
-        try:
-            nodes, end = parse.parseCommand(cmd.line, 0, context.allstringliterals)
-            assert(end == len(cmd.line))
-        except lex.SyntaxError as e:
-            result = e
-        if not result:
-            assert(len(nodes) > 0)
-            result = prototype.runCommandNodes(prototype.CommandContext(
-                context, parent=None, depth=0,
-                capture=prototype.Capture(False, stdout_builder, stderr_builder),
-                builtin_prefix_count=0, ambiguous_op=None), nodes)
-            if type(result) == prototype.ExitCode:
-                result = prototype.CommandResult(result.value, stdout_builder.output, stderr_builder.output)
+    stdout_builder = prototype.StringBuilder()
+    stderr_builder = prototype.StringBuilder()
 
-        cmd.verify(result, test_line)
+    result: Any = None
+    try:
+        result = prototype.runSrc(context, src, stdout_builder, stderr_builder)
+    except lex.SyntaxError as e:
+        result = e
+
+    expect.verify(result, stdout_builder.output, stderr_builder.output, test_line)
 
 def getCallerLine():
     return inspect.getframeinfo(inspect.stack()[2][0]).lineno
 
-def testSyntaxError(line, message):
-    test = ErrorTest(line, lex.SyntaxError, message)
-    print("test {}".format(test))
-    runTests([test], getCallerLine(), verification_mode=True)
+def testCommand(src: bytes, exitcode: int, stdout: bytes, verification_mode=False):
+    expect = ExpectExitAndStdout(exitcode, stdout)
+    print("testCommand({!r}, exitcode={}, stdout{!r}".format(src, exitcode, stdout))
+    runTest(src, verification_mode, expect, getCallerLine())
 
-def testSemanticError(line, message):
-    test = ErrorTest(line, prototype.SemanticError, message)
-    print("{}".format(test))
-    runTests([test], getCallerLine(), verification_mode=True)
+def testError(src: bytes, error_type, message: str, verification_mode: bool=True):
+    expect = ExpectError(error_type, message)
+    print("testError({!r}, {}, {})".format(src, error_type.__name__, message))
+    runTest(src, verification_mode, expect, getCallerLine())
 
-def testAssertError(line, message):
-    test = ErrorTest(line, prototype.AssertError, message)
-    print("{}".format(test))
-    runTests([test], getCallerLine(), verification_mode=False)
+def testSyntaxError(src: bytes, message: str):
+    expect = ExpectError(lex.SyntaxError, message)
+    print("testSyntaxError({!r}, {})".format(src, message))
+    runTest(src, True, expect, getCallerLine())
 
-def testError(line, error_type, message):
-    test = ErrorTest(line, error_type, message)
-    print("{}".format(error_type.__name__))
-    runTests([test], getCallerLine(), verification_mode=False)
+def testSemanticError(src: bytes, message: str):
+    expect = ExpectError(prototype.SemanticError, message)
+    print("testSemanticError({!r}, {})".format(src, message))
+    runTest(src, True, expect, getCallerLine())
 
-def testBoolExpression(line, expected):
-    print("testBoolExpression({}, {})".format(line, expected))
-    if expected:
-        command = b"@assert " + line
-    else:
-        command = "@assert @not ({})".format(line.decode('utf8')).encode('utf8')
-    test = CommandResultTest(command, 0, b"")
-    runTests([test], getCallerLine(), verification_mode=False)
+def testAssertError(src: bytes, verification_mode=True):
+    expect = ExpectError(prototype.AssertError, "@assert failed")
+    print("testAssertError({!r})".format(src))
+    runTest(src, verification_mode, expect, getCallerLine())
+
+def testBoolExpression(line: bytes, expected: bool):
+    print("testBoolExpression({!r}, {})".format(line, expected))
+    result, stdout, stderr = runInternal(line, verification_mode=False)
+    if not isinstance(result, prototype.Bool):
+        sys.exit("Error: expected expression to return Bool but got {}: {}".format(type(result).__name__, result))
+    assert(expected == result.value)
 
 def testArrayExpression(line: bytes, expected: prototype.Array):
-    print("testArrayExpression({}, {})".format(line, expected))
-    test = ObjectTest(line, expected)
-    runTests([test], getCallerLine(), verification_mode=False)
-
-def testCommands(commands, verification_mode: bool):
-    print("testCommands(verification_mode={}):".format(verification_mode))
-    for cmd in commands:
-        print("    {}".format(cmd))
-    runTests(commands, getCallerLine(), verification_mode)
-
-def testCommand(line: bytes, exitcode, stdout: bytes):
-    test = CommandResultTest(line, exitcode, stdout)
-    print("{}".format(test))
-    runTests([test], getCallerLine(), verification_mode=False)
+    print("testArrayExpression({!r}, {})".format(line, expected))
+    result, stdout, stderr = runInternal(line, verification_mode=False)
+    test_line = getCallerLine()
+    if not isinstance(result, prototype.Array):
+        sys.exit("Error: expected expression to return Array but got {}: {}".format(type(result).__name__, result))
+    if len(expected.elements) != len(result.elements):
+        sys.exit("{}({}): Error: expected an array of {} elements but got {}".format(
+            __file__, test_line, len(expected.elements), len(result.elements)))
+    for i in range(0, len(expected.elements)):
+        if len(expected.elements[i]) != len(result.elements[i]):
+            sys.exit("{}({}): Error: elements at index {} '{!r}' does not match expected '{!r}'".format(
+                __file__, test_line, i, result.elements[i], expected.elements[i]))
 
 def printForceNewline(s: str):
     print(s, end= "" if s.endswith("\n") else "\n")
@@ -288,15 +262,12 @@ def main():
 
     # should be a syntax error because there are no quotes!
     testSyntaxError(b"@echo 'foo'", "got a single-quote string literal without double-quotes nor newlines, use double quotes instead or invoke @allstringliterals")
-    testCommands([
-        CommandResultTest(b"@allstringliterals", 0, b""),
-        CommandResultTest(b"@echo 'foo'", 0, b"foo\n"),
-    ], verification_mode=False)
-    testCommands([
-        CommandResultTest(b"name = joe", 0, b""),
-        CommandResultTest(b"age = 64", 0, b""),
-        CommandResultTest(b"@echo '''\nhello '''$name''', you're\n64!!!\n'''", 0, b"hello joe, you're\n64!!!\n"),
-    ], verification_mode=False)
+    testCommand(b"@allstringliterals\n@echo 'foo'", 0, b"foo\n")
+    testCommand(b"\n".join([
+        b"name = joe",
+        b"age = 64",
+        b"@echo '''\nhello '''$name''', you're\n64!!!\n'''"]
+    ), 0, b"hello joe, you're\n64!!!\n")
 
     #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -396,7 +367,7 @@ def main():
 
     testSemanticError(b"@assert", "@assert requires at least 1 argument")
     testSemanticError(b"@assert (@array)", "got a command with no arguments, what should the language do here?")
-    testAssertError(b"@assert @false", "@assert failed")
+    testAssertError(b"@assert @false")
     testCommand(b"@assert @true", 0, b"")
     testSemanticError(b"@assert true", "@assert expects a Bool but got a CommandResult")
 
@@ -407,17 +378,20 @@ def main():
     testBoolExpression(b"@not @false", True)
 
     testSemanticError(b"@if", "@if requires at least 1 argument")
-    testCommand(b"@if @false", 0, b"")
-    testCommand(b"@if @true", 0, b"")
-    # TODO: I need to call something like testFile to test "need more '@end'"
-    testCommands([
-        CommandResultTest(b"@if @false", 0, b""),
-        CommandResultTest(b"    @echo hey", 0, b""),
-        CommandResultTest(b"@end", 0, b""),
-        CommandResultTest(b"@if @true", 0, b""),
-        CommandResultTest(b"    @echo hey", 0, b"hey\n"),
-        CommandResultTest(b"@end", 0, b""),
-    ], verification_mode=False)
+    testSemanticError(b"@if @false", "need more '@end'")
+    testSemanticError(b"@if @true", "need more '@end'")
+    testCommand(b"@if @false\n@end", 0, b"")
+    testCommand(b"@if @true\n@end", 0, b"")
+    testCommand(b"\n".join([
+        b"@if @false",
+        b"    @echo hey",
+        b"@end",
+    ]), 0, b"")
+    testCommand(b"\n".join([
+        b"@if @true",
+        b"    @echo hey",
+        b"@end",
+    ]), 0, b"hey\n")
 
     testSemanticError(b"@end", "too many '@end'")
     # need multiple lines to test this otherwise I just get "too many '@end'"
@@ -464,11 +438,11 @@ def main():
     testSemanticError(b"@isdir", "@isdir takes 1 argument but got 0")
     testSemanticError(b"@isdir foo bar", "@isdir takes 1 argument but got 2")
 
-    testCommands([
-        CommandResultTest(b"foo = bar", 0, b""),
-        CommandResultTest(b"@assert $foo @eq bar", 0, b""),
-        ErrorTest        (b"@assert @not ($foo @eq bar)", prototype.AssertError, "@assert failed"),
-    ], verification_mode=False)
+    testAssertError(b"\n".join([
+        b"foo = bar",
+        b"@assert $foo @eq bar",
+        b"@assert @not ($foo @eq bar)",
+    ]))
 
     testCommand(b"@echo hello", 0, b"hello\n")
     testCommand(b"@assert (@exitcode @echo hello)", 0, b"hello\n")
@@ -490,7 +464,7 @@ def main():
     testSemanticError(b"@env", "@env takes 1 argument but got 0")
     testSemanticError(b"@env PWD PWD", "@env takes 1 argument but got 2")
     testSemanticError(b"@env @false", "@env requires a String but got Bool")
-    testError(b"@env THIS_IS_NOT_DEFINED", prototype.UndefinedEnvironmentVariableError, "undefined environment variable 'THIS_IS_NOT_DEFINED'")
+    testError(b"@env THIS_IS_NOT_DEFINED", prototype.UndefinedEnvironmentVariableError, "undefined environment variable 'THIS_IS_NOT_DEFINED'", verification_mode=False)
 
     testSemanticError(b"@envdefault", "@envdefault takes 2 arguments but got 0")
     testSemanticError(b"@envdefault foo", "@envdefault takes 2 arguments but got 1")
@@ -501,31 +475,39 @@ def main():
 
     # test lazy default semantics
     testSemanticError(b"@echo (@envdefault anything @a_semantic_error)", "'@a_semantic_error' is undefined")
-    testCommands([
-        ErrorTest(        b"@echo (@envdefault FOO $does_not_exist)", prototype.SemanticError, "'$does_not_exist' is undefined"),
-        CommandResultTest(b"@setenv FOO bar", 0, b""),
-        CommandResultTest(b"@echo (@envdefault FOO $does_not_exist)", 0, b"bar\n"),
-        CommandResultTest(b"@unsetenv FOO", 0, b""),
-    ], verification_mode=False)
+    testSemanticError(b"@echo (@envdefault anything $does_not_exist)", "'$does_not_exist' is undefined")
+    testCommand(b"\n".join([
+        b"@setenv FOO bar",
+        b"@echo (@envdefault FOO $does_not_exist)",
+        b"@unsetenv FOO",
+    ]), 0, b"bar\n")
 
     testSemanticError(b"@unsetenv", "@unsetenv takes 1 argument but got 0")
     testSemanticError(b"@unsetenv PWD PWD", "@unsetenv takes 1 argument but got 2")
     testSemanticError(b"@unsetenv @false", "@unsetenv requires a String but got Bool")
-    testError(b"@unsetenv THIS_IS_NOT_DEFINED", prototype.UndefinedEnvironmentVariableError, "undefined environment variable 'THIS_IS_NOT_DEFINED'")
+    testError(b"@unsetenv THIS_IS_NOT_DEFINED", prototype.UndefinedEnvironmentVariableError,
+              "undefined environment variable 'THIS_IS_NOT_DEFINED'", verification_mode=False)
 
-    testCommands([
-        ErrorTest        (b"@unsetenv FOO", prototype.UndefinedEnvironmentVariableError, "undefined environment variable 'FOO'"),
-        CommandResultTest(b"@setenv FOO bar", 0, b""),
-        CommandResultTest(b"@assert (@env FOO) @eq bar", 0, b""),
-        ErrorTest        (b"@assert @not ((@env FOO) @eq bar)", prototype.AssertError, "@assert failed"),
+    testError(b"@unsetenv FOO", prototype.UndefinedEnvironmentVariableError, "undefined environment variable 'FOO'", verification_mode=False)
+    testAssertError(b"\n".join([
+        b"@setenv FOO bar",
+        b"@assert (@env FOO) @eq bar",
+        b"@assert @not ((@env FOO) @eq bar)",
+    ]), verification_mode=False)
+    # cleanup since environment variables are global right now
+    testCommand(b"@unsetenv FOO", 0, b"")
+    testCommand(b"\n".join([
+        b"@setenv FOO bar",
+        b"@assert (@env FOO) @eq bar",
         # cleanup since environment variables are global right now
-        CommandResultTest(b"@unsetenv FOO", 0, b""),
-        CommandResultTest(b"@assert (@envdefault FOO bar) @eq bar", 0, b""),
-    ], verification_mode=False)
+        b"@unsetenv FOO",
+        b"@assert (@envdefault FOO bar) @eq bar",
+    ]), 0, b"")
 
     testSemanticError(b"@call", "@call requires at least one argument")
     testSemanticError(b"@call @false", "@call requires Strings but got Bool")
-    testError(b"@call this-file-does-not-exist", prototype.MissingStitchScript, "stitch script 'this-file-does-not-exist' does not exist")
+    testError(b"@call this-file-does-not-exist", prototype.MissingStitchScript,
+              "stitch script 'this-file-does-not-exist' does not exist", verification_mode=False)
 
     #
     # Arrays

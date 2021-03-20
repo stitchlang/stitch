@@ -40,7 +40,7 @@ class BuiltinExpandType(Enum):
     ExpandNodesResult = 1
     Objects = 2
     Strings = 3
-class BuiltinReturnType:
+class BuiltinReturnType(Enum):
     ExitCode = 0
     Bool = 1
     Array = 2
