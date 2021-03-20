@@ -47,14 +47,6 @@ class NodeAssign(Node):
     def __repr__(self):
         return "Assign"
 
-def combineNodes(existing_node: Optional[Node], new_node: Node) -> Node:
-    if not existing_node:
-        return new_node
-    if isinstance(existing_node, NodeMultiple):
-        existing_node.nodes.append(new_node)
-        return existing_node
-    return NodeMultiple(existing_node.src + new_node.src, [existing_node, new_node])
-
 class ParseToken:
     def __init__(self, pos: int, pattern: lex.Pattern, length: int):
         self.pos = pos
@@ -74,6 +66,48 @@ class ParseToken:
             self.pos = token_start
         return False
 
+def parseOneNode(src: bytes, token: ParseToken, allstringliterals: bool) -> Tuple[Node, int]:
+    token_end = token.pos + token.length
+    token_src = src[token.pos:token_end]
+    if token.pattern.kind == lex.TokenKind.BUILTIN_ID:
+        id = token_src[1:].rstrip(b'@')
+        return NodeVariable(token_src, id, is_at=True), token_end
+
+    if token.pattern.kind == lex.TokenKind.USER_ID:
+        return NodeVariable(token_src, token_src[1:].rstrip(b"$"), is_at=False), token_end
+
+    if token.pattern.kind == lex.TokenKind.ARG:
+        return NodeToken(token_src, token_src), token_end
+
+    if token.pattern.kind == lex.TokenKind.ASSIGN_OP:
+        return NodeAssign(token_src), token_end
+
+    if token.pattern.kind == lex.TokenKind.DOUBLE_QUOTED_STRING:
+        return NodeToken(token_src, token_src[1:-1]), token_end
+
+    if token.pattern.kind == lex.TokenKind.OPEN_PAREN:
+        inline_cmd_nodes, right_paren_pos = parseCommand(src, token_end, allstringliterals)
+        if right_paren_pos == len(src) or src[right_paren_pos] != ord(")"):
+            raise lex.SyntaxError(src[:token.pos], "missing close paren for: {}".format(lex.preview(src[token.pos:], 30)))
+        return NodeInlineCommand(src[token.pos:right_paren_pos+1], inline_cmd_nodes), right_paren_pos + 1
+
+    if (token.pattern.kind >= lex.TokenKind.SINGLE_QUOTED_STRING1 and
+        token.pattern.kind <= lex.TokenKind.SINGLE_QUOTED_STRING6):
+        quote_count = (token.pattern.kind - lex.TokenKind.SINGLE_QUOTED_STRING1) + 1
+        if not allstringliterals:
+            full_data = token_src[quote_count:-quote_count]
+            if not any(c in full_data for c in b'"\n'):
+                raise lex.SyntaxError(src[:token.pos], "got a single-quote string literal without double-quotes nor newlines, use double quotes instead or invoke @allstringliterals")
+        data_offset = quote_count
+        if quote_count >= 3 and token_src[quote_count] == ord("\n"):
+            data_offset += 1
+        data = token_src[data_offset:-quote_count]
+        return NodeToken(token_src, token_src[data_offset:-quote_count]), token_end
+
+    if token.pattern.kind == lex.TokenKind.ESCAPE_SEQUENCE:
+        return NodeToken(token_src, token_src[1:]), token_end
+
+    raise Exception("codebug: unhandled token kind {}".format(token.pattern.kind))
 
 def parseNode(src: bytes, token: ParseToken, allstringliterals: bool) -> Tuple[Node, Optional[ParseToken]]:
     assert(token.pos < len(src))
@@ -84,47 +118,13 @@ def parseNode(src: bytes, token: ParseToken, allstringliterals: bool) -> Tuple[N
 
     node: Optional[Node] = None
     while True:
-        token_end = token.pos + token.length
-        token_src = src[token.pos:token_end]
-        if token.pattern.kind == lex.TokenKind.BUILTIN_ID:
-            node = combineNodes(node, NodeVariable(token_src, token_src[1:].rstrip(b'@'), is_at=True))
-            next_token_start = token_end
-        elif token.pattern.kind == lex.TokenKind.USER_ID:
-            node = combineNodes(node, NodeVariable(token_src, token_src[1:].rstrip(b"$"), is_at=False))
-            next_token_start = token_end
-        elif token.pattern.kind == lex.TokenKind.ARG:
-            node = combineNodes(node, NodeToken(token_src, token_src))
-            next_token_start = token_end
-        elif token.pattern.kind == lex.TokenKind.ASSIGN_OP:
-            node = combineNodes(node, NodeAssign(token_src))
-            next_token_start = token_end
-        elif token.pattern.kind == lex.TokenKind.DOUBLE_QUOTED_STRING:
-            node = combineNodes(node, NodeToken(token_src, token_src[1:-1]))
-            next_token_start = token_end
-        elif token.pattern.kind == lex.TokenKind.OPEN_PAREN:
-            inline_cmd_nodes, right_paren_pos = parseCommand(src, token_end, allstringliterals)
-            if right_paren_pos == len(src) or src[right_paren_pos] != ord(")"):
-                raise lex.SyntaxError(src[:token.pos], "missing close paren for: {}".format(lex.preview(src[token.pos:], 30)))
-            node = combineNodes(node, NodeInlineCommand(src[token.pos:right_paren_pos+1], inline_cmd_nodes))
-            next_token_start = right_paren_pos + 1
-        elif (token.pattern.kind >= lex.TokenKind.SINGLE_QUOTED_STRING1 and
-              token.pattern.kind <= lex.TokenKind.SINGLE_QUOTED_STRING6):
-            quote_count = (token.pattern.kind - lex.TokenKind.SINGLE_QUOTED_STRING1) + 1
-            if not allstringliterals:
-                full_data = token_src[quote_count:-quote_count]
-                if not any(c in full_data for c in b'"\n'):
-                    raise lex.SyntaxError(src[:token.pos], "got a single-quote string literal without double-quotes nor newlines, use double quotes instead or invoke @allstringliterals")
-            data_offset = quote_count
-            if quote_count >= 3 and token_src[quote_count] == ord("\n"):
-                data_offset += 1
-            data = token_src[data_offset:-quote_count]
-            node = combineNodes(node, NodeToken(token_src, token_src[data_offset:-quote_count]))
-            next_token_start = token_end
-        elif token.pattern.kind == lex.TokenKind.ESCAPE_SEQUENCE:
-            node = combineNodes(node, NodeToken(token_src, token_src[1:]))
-            next_token_start = token_end
+        next_node, next_token_start = parseOneNode(src, token, allstringliterals)
+        if not node:
+            node = next_node
+        elif isinstance(node, NodeMultiple):
+            node.nodes.append(next_node)
         else:
-            raise Exception("codebug: unhandled token kind {}".format(token.pattern.kind))
+            node = NodeMultiple(node.src + next_node.src, [node, next_node])
 
         lex_token = lex.scan(src, next_token_start)
         if not lex_token:
