@@ -51,11 +51,10 @@ def countLinesAndColumns(s: bytes) -> Tuple[int,int]:
     return line, column
 
 class SyntaxError(Exception):
-    def __init__(self, src_prefix: bytes, message_str: str):
-        assert(isinstance(src_prefix, bytes))
+    def __init__(self, pos: int, message_str: str):
         assert(isinstance(message_str, str))
         super().__init__(message_str)
-        self.src_prefix = src_prefix
+        self.pos = pos
 
 # TODO: this can be implemented better
 #       the string returned should never exceed max_len, so the [..snip..]
@@ -115,18 +114,17 @@ def scan(src: bytes, pos: int, verify_one_match: bool = True) -> Optional[Tuple[
         return (PATTERNS[match_pattern_index_obj.value], match_length)
 
     # time to try to figure out what went wrong
-    src_prefix = src[:pos]
     c = next.charAt(0)
     if c == ord('('):
-        raise SyntaxError(src_prefix, "missing close paren for: {}".format(previewStringPtr(next, limit, 30)))
+        raise SyntaxError(pos, "missing close paren for: {}".format(previewStringPtr(next, limit, 30)))
     if c == ord('"'):
-        raise SyntaxError(src_prefix, "missing double-quote to close: {}".format(previewStringPtr(next, limit, 30)))
+        raise SyntaxError(pos, "missing double-quote to close: {}".format(previewStringPtr(next, limit, 30)))
     next_str = next.toStringWithLimit(limit)
     for seq in (b"''''''", b"'''''", b"''''", b"'''", b"''", b"'"):
         if next_str.startswith(seq):
             phrase = "single-quote" if (len(seq) == 1) else "{} single-quote sequence".format(len(seq))
-            raise SyntaxError(src_prefix, "missing {} to close: {}".format(phrase, previewStringPtr(next, limit, 30)))
+            raise SyntaxError(pos, "missing {} to close: {}".format(phrase, previewStringPtr(next, limit, 30)))
     
     # I think we need at most 2 characters to see what went wrong
     bad_str = next_str[:min(limit.subtract(next), 2)]
-    raise SyntaxError(src_prefix, "unrecognized character sequence '{}'".format(bad_str.decode('ascii')))
+    raise SyntaxError(pos, "unrecognized character sequence '{}'".format(bad_str.decode('ascii')))

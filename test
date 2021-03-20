@@ -14,7 +14,7 @@ SCRIPT_DIR_STR = os.path.dirname(__file__)
 SCRIPT_DIR = SCRIPT_DIR_STR.encode('utf8')
 
 def runInternal(line: bytes, verification_mode: bool):
-    context = prototype.ScriptContext(prototype.GlobalContext(True, SCRIPT_DIR), __file__.encode('utf8'), verification_mode)
+    context = prototype.ScriptContext(prototype.GlobalContext(True, SCRIPT_DIR), __file__.encode('utf8'), line, verification_mode)
     stdout_builder = prototype.StringBuilder()
     stderr_builder = prototype.StringBuilder()
     nodes, end = parse.parseCommand(line, 0, context.allstringliterals)
@@ -60,13 +60,13 @@ class ExpectError(Expect):
 
 
 def runTest(src: bytes, verification_mode: bool, expect: Expect, test_line: int):
-    context = prototype.ScriptContext(prototype.GlobalContext(True, SCRIPT_DIR), __file__.encode('utf8'), verification_mode)
+    context = prototype.ScriptContext(prototype.GlobalContext(True, SCRIPT_DIR), __file__.encode('utf8'), src, verification_mode)
     stdout_builder = prototype.StringBuilder()
     stderr_builder = prototype.StringBuilder()
 
     result: Any = None
     try:
-        result = prototype.runSrc(context, src, stdout_builder, stderr_builder)
+        result = prototype.runScript(context, stdout_builder, stderr_builder)
     except lex.SyntaxError as e:
         result = e
 
@@ -121,10 +121,10 @@ def testArrayExpression(line: bytes, expected: prototype.Array):
             sys.exit("{}({}): Error: elements at index {} '{!r}' does not match expected '{!r}'".format(
                 __file__, test_line, i, result.elements[i], expected.elements[i]))
 
-def printForceNewline(s: str):
-    print(s, end= "" if s.endswith("\n") else "\n")
+def printForceNewline(s: bytes):
+    print(s, end=("" if s.endswith(b"\n") else "\n"))
 
-def expectMatches(output: str, matches: List[str]):
+def expectMatches(output: bytes, matches: List[bytes]):
     for match in matches:
         if match not in output:
             print("Error: did not find expected output")
@@ -175,6 +175,9 @@ def runStitchTests():
         b"this script must be using relative filenames because the sandbox has this file ",
         b"1 file(s) were cleaned from the sandbox",
     ])
+
+    stdout, stderr = runSubProcessTest(1, stitch_args + ["-c", "\n\n @!"])
+    expectMatches(stderr, [b"(line 3 column 2) unrecognized character sequence '@!'"])
 
     result = subprocess.run(stitch_args + ["stitch-tests"])
     if result.returncode != 0:

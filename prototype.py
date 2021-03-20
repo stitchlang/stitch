@@ -218,9 +218,9 @@ class Error:
     def __repr__(self):
         return self.message
 class SyntaxError(Error):
-    def __init__(self, filename_str: str, lex_error: lex.SyntaxError):
+    def __init__(self, filename_str: str, src: bytes, lex_error: lex.SyntaxError):
         assert(isinstance(filename_str, str))
-        line, column = lex.countLinesAndColumns(lex_error.src_prefix)
+        line, column = lex.countLinesAndColumns(src[:lex_error.pos])
         super().__init__("{}(line {} column {}) {}".format(filename_str, line, column, str(lex_error)))
 class SemanticError(Error):
     def __init__(self, message):
@@ -230,9 +230,9 @@ class CannotCoerceToStringError(SemanticError):
         super().__init__("cannot coerce {} to String".format(uncoercable_type))
         self.uncoercable_type = uncoercable_type
 class AssertError(Error):
-    def __init__(self, src):
+    def __init__(self, nodes: List[parse.Node]):
         Error.__init__(self, "@assert failed")
-        self.src = src
+        self.nodes = nodes
 class NonZeroExitCodeError(Error):
     def __init__(self, exitcode: int, stdout: Optional[str], stderr: Optional[str]):
         assert(exitcode != 0)
@@ -276,9 +276,10 @@ class ScriptContext:
             self.enabled = enabled
 
     # TODO: add fields for logging/tracing options?
-    def __init__(self, global_ctx: GlobalContext, scriptfile: Optional[bytes], verification_mode: bool):
+    def __init__(self, global_ctx: GlobalContext, scriptfile: Optional[bytes], src: bytes, verification_mode: bool):
         assert((scriptfile is None) or (type(scriptfile) == bytes))
         self.global_ctx = global_ctx
+        self.src = src
         self.script_specific_builtin_objects = {
             b"scriptfile": String(scriptfile if scriptfile else b"<the -c command>"),
             b"scriptdir": String(os.path.dirname(scriptfile) if scriptfile else b"<the -c command>"),
@@ -519,7 +520,7 @@ class BuiltinMethods:
             return UNKNOWN_EXIT_CODE
         assert(isinstance(result, Bool))
         if not result.value:
-            return AssertError(b" ".join([n.src for n in nodes]))
+            return AssertError(nodes)
         return ExitCode(0)
     @staticmethod
     def if_(cmd_ctx: CommandContext, nodes: List[parse.Node]):
@@ -868,7 +869,7 @@ def runCommandNodes(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> Union[E
     #       in triaging SemanticErrors
     if not cmd_ctx.script.verification_mode and cmd_ctx.builtin_prefix_count == 0:
         # todo: is ("+" * (depth+1)) too inneficient?
-        message = "{} {}".format("+" * (cmd_ctx.depth+1), " ".join([n.src.decode('utf8') for n in nodes]))
+        message = "{} {}".format("+" * (cmd_ctx.depth+1), " ".join([cmd_ctx.script.src[n.pos:n.end].decode('utf8') for n in nodes]))
         # NOTE: ignore capture_stdout, just always print to console for now
         eprint(message)
 
@@ -1057,7 +1058,7 @@ def expandNode(cmd_ctx: CommandContext, node: parse.Node, error_ctx: ExpandNodeE
         else:
             obj = tryLookupUserVar(cmd_ctx, node.id)
         if not obj:
-            return SemanticError("'{}' is undefined".format(node.src.decode('utf8')))
+            return SemanticError("'{}' is undefined".format(cmd_ctx.script.src[node.pos:node.end].decode('utf8')))
         return obj
 
     if isinstance(node, parse.NodeAssign):
@@ -1131,10 +1132,10 @@ def runBinaryExpression(cmd_ctx: CommandContext, nodes: List[parse.Node], first_
         if next_op.id != op.name:
             return SemanticError("'{}' and '@{}' cannot be chained".format(op, next_op.id.decode('ascii')))
 
-def runSrc(script_ctx: ScriptContext, src: bytes, stdout_handler: DataHandler, stderr_handler: DataHandler) -> Union[Error,ExitCode]:
+def runScript(script_ctx: ScriptContext, stdout_handler: DataHandler, stderr_handler: DataHandler) -> Union[Error,ExitCode]:
     pos = 0
-    while pos < len(src):
-        nodes, end = parse.parseCommand(src, pos, script_ctx.allstringliterals)
+    while pos < len(script_ctx.src):
+        nodes, end = parse.parseCommand(script_ctx.src, pos, script_ctx.allstringliterals)
         assert(end > pos)
         pos = end
 
@@ -1199,8 +1200,8 @@ def runFile(global_ctx: GlobalContext, full_filename: Optional[bytes], src: byte
                 eprint("stitch: DEBUG: verifying '{}'".format(full_filename_str))
                 stdout_builder = StringBuilder()
                 stderr_builder = StringBuilder()
-                script_ctx = ScriptContext(global_ctx, full_filename, verification_mode=True)
-                result = runSrc(script_ctx, src, stdout_builder, stderr_builder)
+                script_ctx = ScriptContext(global_ctx, full_filename, src, verification_mode=True)
+                result = runScript(script_ctx, stdout_builder, stderr_builder)
                 if isinstance(result, Error):
                     ## This can happen if the arguments of an assert are known at "verification time"
                     ## i.e. @assert @true
@@ -1221,10 +1222,10 @@ def runFile(global_ctx: GlobalContext, full_filename: Optional[bytes], src: byte
                     #sys.exit("something printed to stderr during verification mode???")
                 eprint("stitch: DEBUG: verification done on '{}'".format(full_filename_str))
 
-        script_ctx = ScriptContext(global_ctx, full_filename, verification_mode=False)
-        return runSrc(script_ctx, src, stdout_handler, stderr_handler)
+        script_ctx = ScriptContext(global_ctx, full_filename, src, verification_mode=False)
+        return runScript(script_ctx, stdout_handler, stderr_handler)
     except lex.SyntaxError as lex_syntax_err:
-        return SyntaxError(full_filename_str, lex_syntax_err)
+        return SyntaxError(full_filename_str, src, lex_syntax_err)
 
 def resolveCallerWorkdir(sandbox_path: str) -> str:
     # TODO: is this the same var on all posix operating systems?
