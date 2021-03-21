@@ -349,6 +349,7 @@ class CommandContext:
     def __init__(
             self,
             script: ScriptContext,
+            is_binary_expr: bool,
             parent: Optional['CommandContext'],
             depth: int,
             capture: Capture,
@@ -357,6 +358,7 @@ class CommandContext:
             var_map: Dict[bytes,StitchObject] = {}
     ):
         self.script = script
+        self.is_binary_expr = is_binary_expr
         self.parent = parent
         self.depth = depth
         self.capture = capture
@@ -364,12 +366,13 @@ class CommandContext:
         # true if the current command is inside an ambiguous operator (currently just @not)
         self.ambiguous_op = ambiguous_op
         self.var_map = var_map
-    def createChild(self) -> 'CommandContext':
-        return type(self)(self.script, self, self.depth+1,
+    def createChild(self, is_binary_expr: bool) -> 'CommandContext':
+        return type(self)(self.script, is_binary_expr, self, self.depth+1,
                           Capture(exitcode=False,stdout=StringBuilder(),stderr=self.capture.stderr),
                           builtin_prefix_count=0, ambiguous_op=None)
     def nextBuiltin(self, ambiguous_op: Optional[str]) -> 'CommandContext':
-        return type(self)(self.script, self.parent, self.depth, self.capture,
+        assert(not self.is_binary_expr)
+        return type(self)(self.script, self.is_binary_expr, self.parent, self.depth, self.capture,
                           self.builtin_prefix_count + 1, ambiguous_op, self.var_map)
 
 class BuiltinMethods:
@@ -1067,7 +1070,7 @@ def expandNode(cmd_ctx: CommandContext, node: parse.Node, error_ctx: ExpandNodeE
         return SemanticError("unexpected '='")
 
     if isinstance(node, parse.NodeInlineCommand):
-        inline_cmd_ctx = cmd_ctx.createChild()
+        inline_cmd_ctx = cmd_ctx.createChild(node.is_binary_expr)
         result = runCommandNodes(inline_cmd_ctx, node.nodes)
         return combineRunResultWithOutputs(inline_cmd_ctx, result)
 
@@ -1135,7 +1138,7 @@ def runBinaryExpression(cmd_ctx: CommandContext, nodes: List[parse.Node], first_
 def runScript(script_ctx: ScriptContext, stdout_handler: DataHandler, stderr_handler: DataHandler) -> Union[Error,ExitCode]:
     pos = 0
     while pos < len(script_ctx.src):
-        nodes, end = parse.parseCommand(script_ctx.src, pos, script_ctx.allstringliterals)
+        nodes, is_binary_expr, end = parse.parseCommand(script_ctx.src, pos, script_ctx.allstringliterals)
         assert(end > pos)
         pos = end
 
@@ -1153,6 +1156,7 @@ def runScript(script_ctx: ScriptContext, stdout_handler: DataHandler, stderr_han
         #        print(message)
         result = runCommandNodes(CommandContext(
             script_ctx,
+            is_binary_expr,
             parent=None,
             depth=0,
             capture=Capture(False, stdout_handler, stderr_handler),

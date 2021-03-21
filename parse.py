@@ -8,6 +8,7 @@
 from typing import List, Dict, Set, Union, Tuple, Optional
 
 import tokens
+from lex import TokenKind, Token, SyntaxError
 import lex
 
 class Node:
@@ -30,9 +31,10 @@ class NodeVariable(Node):
     def __repr__(self):
         return "Variable({}{})".format("@" if self.is_at else "$", self.id)
 class NodeInlineCommand(Node):
-    def __init__(self, pos: int, end: int, nodes: List[Node]):
+    def __init__(self, pos: int, end: int, nodes: List[Node], is_binary_expr: bool):
         Node.__init__(self, pos, end)
         self.nodes = nodes
+        self.is_binary_expr = is_binary_expr
     def __repr__(self):
         return "InlineCommand({})".format(", ".join([str(n) for n in self.nodes]))
 class NodeMultiple(Node):
@@ -47,72 +49,57 @@ class NodeAssign(Node):
     def __repr__(self):
         return "Assign"
 
-class ParseToken:
-    def __init__(self, pos: int, end: int, pattern: lex.Pattern):
-        self.pos = pos
-        self.end = end
-        self.pattern = pattern
-    # returns True on EOF
-    def skipInlineWhitespace(self, src: bytes) -> bool:
-        if self.pattern.kind == lex.TokenKind.INLINE_WHITESPACE:
-            token_start = self.end
-            lex_token = lex.scan(src, token_start)
-            if not lex_token:
-                return True
-            self.pattern, length = lex_token
-            assert(length > 0)
-            # should be impossible to get 2 inline whitespace tokens in a row
-            assert(self.pattern.kind != lex.TokenKind.INLINE_WHITESPACE)
-            self.pos = token_start
-            self.end = token_start + length
-        return False
+def parseOneNode(src: bytes, token: Token, allstringliterals: bool) -> Node:
+    assert(token.pattern_kind != TokenKind.INLINE_WHITESPACE)
+    assert(token.pattern_kind != TokenKind.COMMENT)
+    assert(token.pattern_kind != TokenKind.NEWLINE)
+    assert(token.pattern_kind != TokenKind.CLOSE_PAREN)
 
-def parseOneNode(src: bytes, token: ParseToken, allstringliterals: bool) -> Node:
-    if token.pattern.kind == lex.TokenKind.BUILTIN_ID:
+    if token.pattern_kind == TokenKind.BUILTIN_ID:
         id = src[token.pos+1:token.end].rstrip(b'@')
         return NodeVariable(token.pos, token.end, id, is_at=True)
 
-    if token.pattern.kind == lex.TokenKind.USER_ID:
+    if token.pattern_kind == TokenKind.USER_ID:
         return NodeVariable(token.pos, token.end, src[token.pos+1:token.end].rstrip(b"$"), is_at=False)
 
-    if token.pattern.kind == lex.TokenKind.ARG:
+    if token.pattern_kind == TokenKind.ARG:
         return NodeToken(token.pos, token.end, src[token.pos:token.end])
 
-    if token.pattern.kind == lex.TokenKind.ASSIGN_OP:
+    if token.pattern_kind == TokenKind.ASSIGN_OP:
         return NodeAssign(token.pos, token.end)
 
-    if token.pattern.kind == lex.TokenKind.DOUBLE_QUOTED_STRING:
+    if token.pattern_kind == TokenKind.DOUBLE_QUOTED_STRING:
         return NodeToken(token.pos, token.end, src[token.pos+1:token.end-1])
 
-    if token.pattern.kind == lex.TokenKind.OPEN_PAREN:
-        inline_cmd_nodes, right_paren_pos = parseCommand(src, token.end, allstringliterals)
+    if token.pattern_kind == TokenKind.OPEN_PAREN:
+        inline_cmd_nodes, inline_cmd_is_binary_expr, right_paren_pos = parseCommand(src, token.end, allstringliterals)
         if right_paren_pos == len(src) or src[right_paren_pos] != ord(")"):
-            raise lex.SyntaxError(token.pos, "missing close paren for: {}".format(lex.preview(src[token.pos:], 30)))
-        return NodeInlineCommand(token.pos, right_paren_pos + 1, inline_cmd_nodes)
+            raise SyntaxError(token.pos, "missing close paren for: {}".format(lex.preview(src[token.pos:], 30)))
+        return NodeInlineCommand(token.pos, right_paren_pos + 1, inline_cmd_nodes, inline_cmd_is_binary_expr)
 
-    if (token.pattern.kind >= lex.TokenKind.SINGLE_QUOTED_STRING1 and
-        token.pattern.kind <= lex.TokenKind.SINGLE_QUOTED_STRING6):
-        quote_count = (token.pattern.kind - lex.TokenKind.SINGLE_QUOTED_STRING1) + 1
+    if (token.pattern_kind >= TokenKind.SINGLE_QUOTED_STRING1 and
+        token.pattern_kind <= TokenKind.SINGLE_QUOTED_STRING6):
+        quote_count = (token.pattern_kind - TokenKind.SINGLE_QUOTED_STRING1) + 1
         data_offset = quote_count
         data = src[token.pos+data_offset:token.end-quote_count]
         if not allstringliterals:
             if not any(c in data for c in b'"\n'):
-                raise lex.SyntaxError(token.pos, "got a single-quote string literal without double-quotes nor newlines, use double quotes instead or invoke @allstringliterals")
+                raise SyntaxError(token.pos, "got a single-quote string literal without double-quotes nor newlines, use double quotes instead or invoke @allstringliterals")
         if quote_count >= 3 and data[0] == ord("\n"):
             data = data[1:]
         return NodeToken(token.pos, token.end, data)
 
-    if token.pattern.kind == lex.TokenKind.ESCAPE_SEQUENCE:
+    if token.pattern_kind == TokenKind.ESCAPE_SEQUENCE:
         return NodeToken(token.pos, token.end, src[token.pos+1:token.end])
 
-    raise Exception("codebug: unhandled token kind {}".format(token.pattern.kind))
+    raise Exception("codebug: unhandled token kind {}".format(token.pattern_kind))
 
-def parseNode(src: bytes, token: ParseToken, allstringliterals: bool) -> Tuple[Node, Optional[ParseToken]]:
+def parseNode(src: bytes, token: Token, allstringliterals: bool) -> Tuple[Node, Optional[Token]]:
     assert(token.pos < len(src))
-    assert(token.pattern.kind != lex.TokenKind.INLINE_WHITESPACE)
-    assert(token.pattern.kind != lex.TokenKind.COMMENT)
-    assert(token.pattern.kind != lex.TokenKind.NEWLINE)
-    assert(token.pattern.kind != lex.TokenKind.CLOSE_PAREN)
+    assert(token.pattern_kind != TokenKind.INLINE_WHITESPACE)
+    assert(token.pattern_kind != TokenKind.COMMENT)
+    assert(token.pattern_kind != TokenKind.NEWLINE)
+    assert(token.pattern_kind != TokenKind.CLOSE_PAREN)
 
     node: Optional[Node] = None
     while True:
@@ -127,43 +114,40 @@ def parseNode(src: bytes, token: ParseToken, allstringliterals: bool) -> Tuple[N
             assert(node.end == next_node.pos)
             node = NodeMultiple(node.pos, next_node.end, [node, next_node])
 
-        lex_token = lex.scan(src, node.end)
-        if not lex_token:
+        scan_result = lex.scan(src, node.end)
+        if not scan_result:
             return node, None
-        pattern, token_len = lex_token
-        assert(token_len > 0)
-        token = ParseToken(node.end, node.end + token_len, pattern)
-        if (pattern.kind == lex.TokenKind.INLINE_WHITESPACE or
-            pattern.kind == lex.TokenKind.COMMENT or
-            pattern.kind == lex.TokenKind.NEWLINE or
-            pattern.kind == lex.TokenKind.CLOSE_PAREN):
+        token = Token(node.end, scan_result)
+        if (token.pattern_kind == TokenKind.INLINE_WHITESPACE or
+            token.pattern_kind == TokenKind.COMMENT or
+            token.pattern_kind == TokenKind.NEWLINE or
+            token.pattern_kind == TokenKind.CLOSE_PAREN):
             return node, token
 
-def parseCommand(src: bytes, cmd_start: int, allstringliterals: bool) -> Tuple[List[Node],int]:
+def parseCommand(src: bytes, cmd_start: int, allstringliterals: bool) -> Tuple[List[Node],bool,int]:
     assert(type(src) == bytes)
     nodes: List[Node] = []
-    lex_token = lex.scan(src, cmd_start)
-    if not lex_token:
-        return nodes, cmd_start
-    first_pattern, first_token_len = lex_token
-    assert(first_token_len > 0)
-    token = ParseToken(cmd_start, cmd_start + first_token_len, first_pattern)
-    if token.skipInlineWhitespace(src):
-        return nodes, token.pos
+    token = lex.scanSkipInlineWhitespace(src, cmd_start)
+    if not token:
+        return nodes, False, cmd_start
+    is_binary_expression = False
     while True:
-        if token.pattern.kind == lex.TokenKind.COMMENT or token.pattern.kind == lex.TokenKind.NEWLINE:
-            return nodes, token.end
-        if token.pattern.kind == lex.TokenKind.CLOSE_PAREN:
-            return nodes, token.pos
+        if token.pattern_kind == TokenKind.COMMENT or token.pattern_kind == TokenKind.NEWLINE:
+            return nodes, is_binary_expression, token.end
+        if token.pattern_kind == TokenKind.CLOSE_PAREN:
+            return nodes, is_binary_expression, token.pos
         node, next_token = parseNode(src, token, allstringliterals)
         nodes.append(node)
         if not next_token:
-            return nodes, len(src)
+            return nodes, is_binary_expression, len(src)
         token = next_token
-        if token.pattern.kind == lex.TokenKind.INLINE_WHITESPACE:
-            if token.skipInlineWhitespace(src):
-                return nodes, token.pos
+        if token.pattern_kind == TokenKind.INLINE_WHITESPACE:
+            scan_result = lex.scan(src, token.end)
+            if not scan_result:
+                return nodes, is_binary_expression, token.pos
+            assert(scan_result.pattern_kind != TokenKind.INLINE_WHITESPACE)
+            token = Token(token.end, scan_result)
         else:
-            assert(token.pattern.kind == lex.TokenKind.COMMENT or
-                   token.pattern.kind == lex.TokenKind.NEWLINE or
-                   token.pattern.kind == lex.TokenKind.CLOSE_PAREN)
+            assert(token.pattern_kind == TokenKind.COMMENT or
+                   token.pattern_kind == TokenKind.NEWLINE or
+                   token.pattern_kind == TokenKind.CLOSE_PAREN)

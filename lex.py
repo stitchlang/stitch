@@ -89,6 +89,11 @@ def afterLexVerifyOnlyOneMatch(text: StringPtr, limit: StringPtr, pattern_index:
         raise Exception("TokenPatternProblem: both patterns '{}' and '{}' matched a string starting with '{}'".format(
             PATTERNS[pattern_index].kind, PATTERNS[other_pattern_index_obj.value].kind, text.toStringWithLength(match_length).decode('utf8')))
 
+class ScanResult:
+    def __init__(self, pattern_kind: int, len: int):
+        self.pattern_kind = pattern_kind
+        self.len = len
+
 # NOTE: verify_one_match verifies that only 1 lexer pattern is matching the next string.
 #       I think that maintaining this property on my lexer means that all the patterns
 #       combined form a "regular language".  This means I could represent the entire
@@ -99,7 +104,7 @@ def afterLexVerifyOnlyOneMatch(text: StringPtr, limit: StringPtr, pattern_index:
 #       I think we take about a 10% hit to performance when verify_one_match is enabled.
 #
 # TODO: remove this verify_one_match argument when I know my combined lex patterns are regular
-def scan(src: bytes, pos: int, verify_one_match: bool = True) -> Optional[Tuple[Pattern,int]]:
+def scan(src: bytes, pos: int, verify_one_match: bool = True) -> Optional[ScanResult]:
     assert(type(src) == bytes)
     if pos == len(src):
         return None
@@ -111,7 +116,7 @@ def scan(src: bytes, pos: int, verify_one_match: bool = True) -> Optional[Tuple[
     if match_length > 0:
         if verify_one_match:
             afterLexVerifyOnlyOneMatch(next, limit, match_pattern_index_obj.value)
-        return (PATTERNS[match_pattern_index_obj.value], match_length)
+        return ScanResult(match_pattern_index_obj.value, match_length)
 
     # time to try to figure out what went wrong
     c = next.charAt(0)
@@ -128,3 +133,25 @@ def scan(src: bytes, pos: int, verify_one_match: bool = True) -> Optional[Tuple[
     # I think we need at most 2 characters to see what went wrong
     bad_str = next_str[:min(limit.subtract(next), 2)]
     raise SyntaxError(pos, "unrecognized character sequence '{}'".format(bad_str.decode('ascii')))
+
+class Token:
+    def __init__(self, pos: int, scan_result: ScanResult):
+        assert(scan_result.len > 0)
+        self.pos = pos
+        self.end = pos + scan_result.len
+        self.pattern_kind = scan_result.pattern_kind
+
+def scanSkipInlineWhitespace(src: bytes, pos: int, verify_one_match: bool = True) -> Optional[Token]:
+    result = scan(src, pos, verify_one_match)
+    if not result:
+        return None
+    assert(result.len > 0)
+    if result.pattern_kind == TokenKind.INLINE_WHITESPACE:
+        pos += result.len
+        result = scan(src, pos)
+        if not result:
+            return None
+        assert(result.len > 0)
+        # should be impossible to get 2 inline whitespace results in a row
+        assert(result.pattern_kind != TokenKind.INLINE_WHITESPACE)
+    return Token(pos, result)
