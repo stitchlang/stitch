@@ -4,7 +4,7 @@
 # Also, I should probably include binary operatos in the parse tree instead of using semantic
 # analysis to find them (SyntaxErrors better than SemanticErrors better than RuntimeErrors).
 #
-
+from enum import Enum
 from typing import List, Dict, Set, Union, Tuple, Optional
 
 import tokens
@@ -49,6 +49,30 @@ class NodeAssign(Node):
     def __repr__(self):
         return "Assign"
 
+class BinaryOpKind(Enum):
+    OR = 0
+    AND = 1
+    EQ = 2
+    GT = 3
+    LT = 4
+binary_ops = {
+    b"or": BinaryOpKind.OR,
+    b"and": BinaryOpKind.AND,
+    b"eq": BinaryOpKind.EQ,
+    b"gt": BinaryOpKind.GT,
+    b"lt": BinaryOpKind.LT,
+}
+
+def binaryOpUserString(kind: BinaryOpKind):
+    return "@" + kind.name.lower()
+
+class NodeBinaryOp(Node):
+    def __init__(self, pos: int, end: int, kind: BinaryOpKind):
+        Node.__init__(self, pos, end)
+        self.kind = kind
+    def __repr__(self):
+        return "BinaryOp({})".format(self.kind)
+
 def parseOneNode(src: bytes, token: Token, allstringliterals: bool) -> Node:
     assert(token.pattern_kind != TokenKind.INLINE_WHITESPACE)
     assert(token.pattern_kind != TokenKind.COMMENT)
@@ -57,6 +81,9 @@ def parseOneNode(src: bytes, token: Token, allstringliterals: bool) -> Node:
 
     if token.pattern_kind == TokenKind.BUILTIN_ID:
         id = src[token.pos+1:token.end].rstrip(b'@')
+        binary_op_kind = binary_ops.get(id)
+        if binary_op_kind:
+            return NodeBinaryOp(token.pos, token.end, binary_op_kind)
         return NodeVariable(token.pos, token.end, id, is_at=True)
 
     if token.pattern_kind == TokenKind.USER_ID:
