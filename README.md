@@ -557,14 +557,11 @@ grep foo bar @and $b
 (grep foo bar) @and $b
 ```
 
-Currently we have a few binary operators, `@and`, `@or`, `@eq`, `@gt` and `@lt`.  Here are some more candidates:
+Here are some of the current binary operators: `=`, `@and`, `@or`, `@eq`, `@gt` and `@lt`.  Here are some more candidates:
 
 ```sh
-Node @equals Node
-Node @lessorequal Node
-Node @greaterorequal Node
-Node @less Node
-Node @greater Node
+Node @le Node
+Node @ge Node
 
 # or maybe
 Node @= Node
@@ -575,11 +572,11 @@ Node @< Node
 Node @> Node
 ```
 
-Note that binary expressions always return `Bool` values.  This means that if they appear inside an "inline command", then the return channel is already used up, so boolean expressions always disable capturing stdout when inside an inline command.  They also don't work with command modifiers like `@exitcode`, `@stderr`, `@multiline`, etc.
+When a binary expression returns a `Bool` object the "return channel" is taken by that `Bool` object.  So "stdout capture" is disabled when these operators appear inside an inline command.  They also don't work with command modifiers like `@exitcode`, `@stderr`, `@multiline`, etc.
 
 ### Short Circuting
 
-If the final result of a binary expression has been determined before it has been fully evaluated, the language does not expand the rest of the expression.  Because of this, commands must be checked for binary operators before expanding them.
+If the right hand side of a binary expression is not needed to determine the final result, then it is left unexpanded.  Because of this, commands must be checked for binary operators before expanding them.
 
 ### Binary Expression TODO/Questions
 
@@ -589,13 +586,7 @@ How should Boolean objects be handled at the top-level?  For now I've just made 
 
 * Unary Expressions?
 
-I don't think the language needs an special handling for unary expressions.  I believe these can be handled by builtins, like:
-
-```sh
-@exists PATH
-@isdir PATH
-@isfile PATH
-```
+Unary expressions are currently handled as builtin commands.  If I want to make binary operators a part of the syntax, then I'll need to make a grammatical distinction between commands and unary operators (i.e. command `@echo` vs unary operators `@assert`, `@not`, `@exists`, `@isfile`, etc).  Currently, the grammar does not distinguish between commands and unary operators, so the parser is unable to tell whether a binary operator within a command is in the proper place.  If the parser was made aware of what unary operators are, then it could enforce the correct structure for a binary expression with unary operators preceding it.
 
 # Ambiguous Operators
 
@@ -830,4 +821,4 @@ Maybe stitch should support logging commands using multiple output formats (like
 
 ### Syntax vs Semantics
 
-I have a choice to impelement binary operators like `@and` and `@eq` either though syntax or through semantic analysis.  In general it "seems" like if it's possible to represent something in the syntax, then it should be done.  The syntax layer is simpler so if a feature can be moved to that layer then it seems like it could make the language simpler overall.  I'm not sure if this is correct in all cases though, it's just an intuitiion at the moment.  On the other hand, if I were to put binary operats in the syntax, then it would be much more difficult to add new binary operators, as that would have to be done at the syntax layer, something which is typically immutable in a langauge.  So maybe if something is going to by dynamic/configurable, then it should go into the semantic layer, otherwise, it should go into the syntax layer if possibe?  Still not sure, I'll need to think about this.  Another candidate for this are constructs like `@if`, `@end`, etc.  This also ties into the keywords and `=` character ideas.  If `@if` is moved to the syntax layer then it could be a keyword `if` and if `=` is chosen for variable assignment then it could also be moved to the syntax layer.  Escaping this behavior could be done with quotes `"if" ...` and `a "=" b`. Then again, having every special thing in the language be prefixed with `@` could make things simpler for programmers, but then again, will programmers ever not know that `=` or `if` are not special?  If I start to introduce keywords and new syntax, the cost for new features becomes much higher because now both the language builtins and the user data are in the same namespace, so introducing new stuff means enroaching on the user namespace and breaking their programs that were using those symbols.  Taking all this into account, I should definitely start without keywords and evolve from there. However, the `=` question if more pressing I think.
+I have a choice to impelement binary operators like `@and` and `@eq` either though syntax or through semantic analysis.  In general it "seems" like if it's possible to represent something in the syntax, then it should be done.  The syntax layer is simpler so if a feature can be moved to that layer then it seems like it could make the language simpler overall.  I'm not sure if this is correct in all cases though, it's just an intuitiion at the moment.  On the other hand, if I were to put binary operators in the syntax, then it would be much more difficult to add new binary operators, as that would have to be done at the syntax layer, something which is typically immutable in a langauge.  So maybe if something is going to by dynamic/configurable, then it should go into the semantic layer, otherwise, it should go into the syntax layer if possibe?  Still not sure, I'll need to think about this.  Another candidate for this are constructs like `@if`, `@end`, etc.  This also ties into the keywords and `=` character ideas.  If `@if` is moved to the syntax layer then it could be a keyword `if` and if `=` is chosen for variable assignment then it could also be moved to the syntax layer.  Escaping this behavior could be done with quotes `"if" ...` and `a "=" b`. Then again, having every special thing in the language be prefixed with `@` could make things simpler for programmers, but then again, will programmers ever not know that `=` or `if` are not special?  If I start to introduce keywords and new syntax, the cost for new features becomes much higher because now both the language builtins and the user data are in the same namespace, so introducing new stuff means enroaching on the user namespace and breaking their programs that were using those symbols.  Taking all this into account, I should definitely start without keywords and evolve from there. However, the `=` question if more pressing I think.
