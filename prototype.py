@@ -38,7 +38,7 @@ BOOL_TRUE = Bool(True)
 
 class BuiltinExpandType(Enum):
     ParseNodes = 0
-    ExpandNodesResult = 1
+    CommandKindResult = 1
     Objects = 2
     Strings = 3
 class BuiltinReturnType(Enum):
@@ -103,34 +103,26 @@ class UnknownArray(Unknown):
         return "Array"
 UNKNOWN_ARRAY = UnknownArray()
 
-class BinaryOperator:
+class BinaryEvaluator:
     def __init__(self, kind: BinaryOpKind):
         self.kind = kind
     def __repr__(self):
         return parse.binaryOpUserString(self.kind)
-class AssignOperator(BinaryOperator):
-    def __init__(self):
-        BinaryOperator.__init__(self, BinaryOpKind.ASSIGN)
-class PipeOperator(BinaryOperator):
-    def __init__(self):
-        BinaryOperator.__init__(self, BinaryOpKind.PIPE)
-# A BinaryOperator that evaluates with Stitch Objects
-class ObjectBinaryOperator(BinaryOperator):
     @abstractmethod
     def initialValue(self, operand: StitchObject):
         pass
     @abstractmethod
     def apply(self, verification_mode: bool, left: Bool, right: StitchObject):
         pass
-class ChainableBinaryOperator(ObjectBinaryOperator):
+class ChainableBinaryEvaluator(BinaryEvaluator):
     def __init__(self, kind: BinaryOpKind):
-        ObjectBinaryOperator.__init__(self, kind)
+        BinaryEvaluator.__init__(self, kind)
     @abstractmethod
     def shortcircuit(self, result: Bool):
         return not result.value
-class AndOperator(ChainableBinaryOperator):
+class AndEvaluator(ChainableBinaryEvaluator):
     def __init__(self):
-        ChainableBinaryOperator.__init__(self, BinaryOpKind.AND)
+        ChainableBinaryEvaluator.__init__(self, BinaryOpKind.AND)
     def initialValue(self, operand: StitchObject):
         return operandToBool(self, operand)
     def apply(self, verification_mode: bool, left: Bool, right: StitchObject):
@@ -141,9 +133,9 @@ class AndOperator(ChainableBinaryOperator):
         return right_result
     def shortcircuit(self, result: Bool):
         return not result.value
-class OrOperator(ChainableBinaryOperator):
+class OrEvaluator(ChainableBinaryEvaluator):
     def __init__(self):
-        ChainableBinaryOperator.__init__(self, BinaryOpKind.OR)
+        ChainableBinaryEvaluator.__init__(self, BinaryOpKind.OR)
     def initialValue(self, operand):
         return operandToBool(self, operand)
     def apply(self, verification_mode: bool, left: Bool, right: StitchObject):
@@ -154,9 +146,9 @@ class OrOperator(ChainableBinaryOperator):
         return right_result
     def shortcircuit(self, result: Bool):
         return result.value
-class EqOperator(ObjectBinaryOperator):
+class EqEvaluator(BinaryEvaluator):
     def __init__(self):
-        ObjectBinaryOperator.__init__(self, BinaryOpKind.EQ)
+        BinaryEvaluator.__init__(self, BinaryOpKind.EQ)
     def initialValue(self, operand):
         if isinstance(operand, String):
             return operand
@@ -172,9 +164,9 @@ class EqOperator(ObjectBinaryOperator):
             return opInvalidTypeError(self, right)
         assert(isinstance(left, UnknownString))
         return UNKNOWN_BOOL
-class CompareOperator(ObjectBinaryOperator):
+class CompareEvaluator(BinaryEvaluator):
     def __init__(self, kind: BinaryOpKind, func):
-        ObjectBinaryOperator.__init__(self, kind)
+        BinaryEvaluator.__init__(self, kind)
         self.func = func
     def initialValue(self, operand):
         if isinstance(operand, String):
@@ -584,11 +576,11 @@ class BuiltinMethods:
         assert(len(args) == 1)
         return Array(args[0].splitlines())
 
-def opInvalidTypeError(op: ObjectBinaryOperator, operand: StitchObject):
+def opInvalidTypeError(op: BinaryEvaluator, operand: StitchObject):
     #raise Exception("'{}' does not accept objects of type {}".format(op, operand.userTypeDescriptor()))
     return SemanticError("'{}' does not accept objects of type {}".format(op, operand.userTypeDescriptor()))
 
-def operandToBool(op: ObjectBinaryOperator, operand: StitchObject) -> Union[Error,Bool,UnknownBool]:
+def operandToBool(op: BinaryEvaluator, operand: StitchObject) -> Union[Error,Bool,UnknownBool]:
     if isinstance(operand, Error):
         return operand
     if isinstance(operand, Bool):
@@ -660,14 +652,12 @@ builtin_objects = {
     b"lines2array": Builtin("lines2array", BuiltinExpandType.Strings, BuiltinReturnType.Array, arg_count=1),
 }
 
-binary_ops = {
-    BinaryOpKind.ASSIGN: AssignOperator(),
-    BinaryOpKind.PIPE: PipeOperator(),
-    BinaryOpKind.OR: OrOperator(),
-    BinaryOpKind.AND: AndOperator(),
-    BinaryOpKind.EQ: EqOperator(),
-    BinaryOpKind.GT: CompareOperator(BinaryOpKind.GT, CompareOp.gt),
-    BinaryOpKind.LT: CompareOperator(BinaryOpKind.LT, CompareOp.lt),
+binary_evaluators = {
+    BinaryOpKind.OR: OrEvaluator(),
+    BinaryOpKind.AND: AndEvaluator(),
+    BinaryOpKind.EQ: EqEvaluator(),
+    BinaryOpKind.GT: CompareEvaluator(BinaryOpKind.GT, CompareOp.gt),
+    BinaryOpKind.LT: CompareEvaluator(BinaryOpKind.LT, CompareOp.lt),
 }
 
 def which(name):
@@ -680,86 +670,82 @@ def which(name):
                 return filename
     return None
 
-class ExpandNodesResult:
-    pass
-class ExpandNodes:
-    class Builtin(ExpandNodesResult):
-        def __init__(self, builtin: Builtin):
-            self.builtin = builtin
-    class BinaryExp(ExpandNodesResult):
-        def __init__(self, first: StitchObject, op: BinaryOperator):
-            self.first = first
-            self.op = op
-    class Bool(ExpandNodesResult):
-        def __init__(self, value):
-            self.value = value
-    class ExternalProgram(ExpandNodesResult):
-        def __init__(self, args: List[bytes]):
-            self.args = args
-
 # Use to provide extra context for better error messages
 class ExpandNodeErrorContext:
     def __init__(self, inside_multiple: bool = False):
         self.inside_multiple = inside_multiple
 
-def expandNodes(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> Union[Error,ExpandNodesResult]:
+class CommandKind:
+    pass
+class CommandKinds:
+    class Builtin(CommandKind):
+        def __init__(self, builtin: Builtin):
+            self.builtin = builtin
+    class BinaryExp(CommandKind):
+        def __init__(self, kind: BinaryOpKind):
+            self.kind = kind
+    class Bool(CommandKind):
+        def __init__(self, value: Union[Bool,UnknownBool]):
+            self.value = value
+    class ExternalProgram(CommandKind):
+        pass
+    EXTERNAL_PROGRAM = ExternalProgram()
+
+def expandIfBuiltinProgram(cmd_ctx: CommandContext, node: parse.Node) -> Optional[Builtin]:
+    if isinstance(node, parse.NodeVariable):
+        if node.is_at:
+            obj = tryLookupBuiltinVar(cmd_ctx.script, node.id)
+            if obj:
+                # NOTE: currently we have some special builtins like @false, @true, @scriptdir
+                #       that are not programs, so we special case them for now
+                if isinstance(obj, Builtin):
+                    return obj
+    return None
+def getCommandKind(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> Union[Error,CommandKind]:
     assert(len(nodes) > 0)
 
+    first_builtin_program = expandIfBuiltinProgram(cmd_ctx, nodes[0])
+    if first_builtin_program:
+        return CommandKinds.Builtin(first_builtin_program)
+
+    if len(nodes) >= 2:
+        second_node = nodes[1]
+        if isinstance(second_node, parse.NodeBinaryOp):
+            return CommandKinds.BinaryExp(second_node.kind)
+
     first_obj = expandNode(cmd_ctx, nodes[0], ExpandNodeErrorContext())
-    if isinstance(first_obj, Error):
-        return first_obj
-    if isinstance(first_obj, Builtin):
-        return ExpandNodes.Builtin(first_obj)
-
-    if len(nodes) == 1:
-        obj_list = [first_obj]
-    else:
-        second_obj = expandNodeMaybeBinaryOp(cmd_ctx, nodes[1], ExpandNodeErrorContext())
-        if isinstance(second_obj, Error):
-            return second_obj
-        if isinstance(second_obj, BinaryOperator):
-            return ExpandNodes.BinaryExp(first_obj, second_obj)
-        obj_list = [first_obj, second_obj]
-
     # TODO: are there other special types to handle here?
     if isinstance(first_obj, Bool) or isinstance(first_obj, UnknownBool):
         if len(nodes) != 1:
             return SemanticError("unexpected Bool at the start of a command")
-        return ExpandNodes.Bool(first_obj)
+        return CommandKinds.Bool(first_obj)
 
-    # we must be running an external program
-    args: List[bytes] = []
-    for obj in obj_list:
-        obj_args_error = objectToArgs(obj, args)
-        if obj_args_error:
-            return obj_args_error
-
-    error = nodesToArgs(cmd_ctx, nodes, args, ExpandNodeErrorContext(), start=len(obj_list))
-    if error:
-        return error
-
-    return ExpandNodes.ExternalProgram(args)
+    return CommandKinds.EXTERNAL_PROGRAM
 
 def expandNodesToBool(cmd_ctx: CommandContext, nodes: List[parse.Node], builtin_name_str: str, allow_cmd_result: bool) -> Union[Error,Bool,UnknownBool]:
     if len(nodes) == 0:
         return SemanticError("{} requires at least 1 argument".format(builtin_name_str))
 
-    expand_result = expandNodes(cmd_ctx, nodes)
-    if isinstance(expand_result, Error):
-        return expand_result
-    if isinstance(expand_result, ExpandNodes.Bool):
-        return expand_result.value
-    if isinstance(expand_result, ExpandNodes.BinaryExp):
-        return runBinaryExpression(cmd_ctx, nodes, expand_result.first, expand_result.op)
+    cmd_kind = getCommandKind(cmd_ctx, nodes)
+    if isinstance(cmd_kind, Error):
+        return cmd_kind
+    if isinstance(cmd_kind, CommandKinds.Bool):
+        return cmd_kind.value
+    if isinstance(cmd_kind, CommandKinds.BinaryExp):
+        return runBinaryExpression(cmd_ctx, nodes, cmd_kind.kind)
 
-    if isinstance(expand_result, ExpandNodes.Builtin):
-        next_result = runBuiltin(cmd_ctx, expand_result.builtin, nodes[1:])
+    if isinstance(cmd_kind, CommandKinds.Builtin):
+        next_result = runBuiltin(cmd_ctx, cmd_kind.builtin, nodes[1:])
         if isinstance(next_result, Bool) or isinstance(next_result, UnknownBool):
             return next_result
         # TODO: there are probably more types to handle here
     else:
-        assert(isinstance(expand_result, ExpandNodes.ExternalProgram))
-        next_result = runExternalProgram(cmd_ctx.script.verification_mode, cmd_ctx.capture.stdout, cmd_ctx.capture.stderr, expand_result.args)
+        assert(isinstance(cmd_kind, CommandKinds.ExternalProgram))
+        args: List[bytes] = []
+        error = nodesToArgs(cmd_ctx, nodes, args, ExpandNodeErrorContext())
+        if error:
+            return error
+        next_result = runExternalProgram(cmd_ctx.script.verification_mode, cmd_ctx.capture.stdout, cmd_ctx.capture.stderr, args)
     if isinstance(next_result, Error):
         return next_result
     is_unknown_exit_code = isinstance(next_result, UnknownExitCode)
@@ -796,7 +782,7 @@ def expandNodesToBool(cmd_ctx: CommandContext, nodes: List[parse.Node], builtin_
 #    return SemanticError("'{}' expects Bool but got {}".format(builtin_name_str, obj.userTypeDescriptor()))
 
 def enforceBuiltinArgCount(builtin: Builtin, actual: int) -> Optional[Error]:
-    if builtin.arg_count and (builtin.arg_count != actual):
+    if (builtin.arg_count != None) and (builtin.arg_count != actual):
         suffix = "" if (builtin.arg_count == 1) else "s"
         return SemanticError("{} takes {} argument{} but got {}".format(
             builtin, builtin.arg_count, suffix, actual))
@@ -893,17 +879,21 @@ def runCommandNodes(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> Union[E
         # NOTE: ignore capture_stdout, just always print to console for now
         eprint(message)
 
-    result = expandNodes(cmd_ctx, nodes)
-    if isinstance(result, Error):
-        return result
-    if isinstance(result, ExpandNodes.Builtin):
-        return runBuiltin(cmd_ctx, result.builtin, nodes[1:])
-    if isinstance(result, ExpandNodes.BinaryExp):
-        return runBinaryExpression(cmd_ctx, nodes, result.first, result.op)
-    if isinstance(result, ExpandNodes.Bool):
+    cmd_kind = getCommandKind(cmd_ctx, nodes)
+    if isinstance(cmd_kind, Error):
+        return cmd_kind
+    if isinstance(cmd_kind, CommandKinds.Builtin):
+        return runBuiltin(cmd_ctx, cmd_kind.builtin, nodes[1:])
+    if isinstance(cmd_kind, CommandKinds.BinaryExp):
+        return runBinaryExpression(cmd_ctx, nodes, cmd_kind.kind)
+    if isinstance(cmd_kind, CommandKinds.Bool):
         return SemanticError("unhandled Bool")
-    assert(isinstance(result, ExpandNodes.ExternalProgram))
-    return runExternalProgram(cmd_ctx.script.verification_mode, cmd_ctx.capture.stdout, cmd_ctx.capture.stderr, result.args)
+    assert(isinstance(cmd_kind, CommandKinds.ExternalProgram))
+    args: List[bytes] = []
+    error = nodesToArgs(cmd_ctx, nodes, args, ExpandNodeErrorContext())
+    if error:
+        return error
+    return runExternalProgram(cmd_ctx.script.verification_mode, cmd_ctx.capture.stdout, cmd_ctx.capture.stderr, args)
 
 def nodesToArgs(cmd_ctx: CommandContext, nodes: List[parse.Node], args: List[bytes], error_ctx: ExpandNodeErrorContext, start: int = 0) -> Optional[Error]:
     for i, node in enumerate(nodes[start:], start=start):
@@ -930,7 +920,7 @@ def objectToArgs(obj: StitchObject, args: List[bytes]) -> Optional[Error]:
         return None
     if isinstance(obj, Bool) or isinstance(obj, UnknownBool):
         return CannotCoerceToStringError("Bool")
-    if isinstance(obj, BinaryOperator):
+    if isinstance(obj, BinaryEvaluator):
         return SemanticError("unexpected '{}'".format(obj))
     if isinstance(obj, Builtin):
         return CannotCoerceToStringError("Builtin '{}'".format(obj))
@@ -1065,14 +1055,6 @@ def combineRunResultWithOutputs(cmd_ctx, result):
 
 # returns an array of strings and builtin objects
 def expandNode(cmd_ctx: CommandContext, node: parse.Node, error_ctx: ExpandNodeErrorContext) -> Union[Error,StitchObject]:
-    result = expandNodeMaybeBinaryOp(cmd_ctx, node, error_ctx)
-    if isinstance(result, Error):
-        return result
-    if isinstance(result, BinaryOperator):
-        return SemanticError("unexpected '{}'".format(result))
-    return result
-
-def expandNodeMaybeBinaryOp(cmd_ctx: CommandContext, node: parse.Node, error_ctx: ExpandNodeErrorContext) -> Union[Error,StitchObject,BinaryOperator]:
     if isinstance(node, parse.NodeToken):
         return String(node.s)
 
@@ -1086,7 +1068,7 @@ def expandNodeMaybeBinaryOp(cmd_ctx: CommandContext, node: parse.Node, error_ctx
         return obj
 
     if isinstance(node, parse.NodeBinaryOp):
-        return binary_ops[node.kind]
+        return SemanticError("unexpected '{}'".format(parse.binaryOpUserString(node.kind)))
 
     if isinstance(node, parse.NodeInlineCommand):
         inline_cmd_ctx = cmd_ctx.createChild()
@@ -1113,13 +1095,13 @@ def disableCaptureModifiers(cmd_ctx: CommandContext, error_context_str: str):
         cmd_ctx.capture.stdout = cmd_ctx.parent.capture.stdout
     return None
 
-def runBinaryExpression(cmd_ctx: CommandContext, nodes: List[parse.Node], first_obj: StitchObject, op: BinaryOperator):
-    if op.kind == BinaryOpKind.ASSIGN:
+def runBinaryExpression(cmd_ctx: CommandContext, nodes: List[parse.Node], op_kind: BinaryOpKind):
+    if op_kind == BinaryOpKind.ASSIGN:
         return runAssign(cmd_ctx, nodes)
-    if op.kind == BinaryOpKind.PIPE:
+    if op_kind == BinaryOpKind.PIPE:
         return runPipe(cmd_ctx, nodes)
-    assert(isinstance(op, ObjectBinaryOperator))
 
+    evaluator = binary_evaluators[op_kind]
     if cmd_ctx.ambiguous_op:
         return SemanticError("got binary expression inside ambiguous operator '{}', wrap inside (..parenthesis..)".format(cmd_ctx.ambiguous_op))
 
@@ -1127,25 +1109,29 @@ def runBinaryExpression(cmd_ctx: CommandContext, nodes: List[parse.Node], first_
     if error:
         return error
 
+    first_obj = expandNode(cmd_ctx, nodes[0], ExpandNodeErrorContext())
+    if isinstance(first_obj, Error):
+        return first_obj
+
     stdout_handler = None
-    expression_result = op.initialValue(first_obj)
+    expression_result = evaluator.initialValue(first_obj)
     if isinstance(expression_result, Error):
         return expression_result
-    if isinstance(op, ChainableBinaryOperator) and not cmd_ctx.script.verification_mode and op.shortcircuit(expression_result):
+    if isinstance(evaluator, ChainableBinaryEvaluator) and not cmd_ctx.script.verification_mode and evaluator.shortcircuit(expression_result):
         return expression_result
 
     index = 1
     while True:
         if index + 1 == len(nodes):
-            return SemanticError("missing operand after '{}'".format(op))
+            return SemanticError("missing operand after '{}'".format(evaluator))
 
         operand_result = expandNode(cmd_ctx, nodes[index+1], ExpandNodeErrorContext())
         if isinstance(operand_result, Error):
             return operand_result
-        expression_result = op.apply(cmd_ctx.script.verification_mode, expression_result, operand_result)
+        expression_result = evaluator.apply(cmd_ctx.script.verification_mode, expression_result, operand_result)
         if isinstance(expression_result, Error):
             return expression_result
-        if isinstance(op, ChainableBinaryOperator) and not cmd_ctx.script.verification_mode and op.shortcircuit(expression_result):
+        if isinstance(evaluator, ChainableBinaryEvaluator) and not cmd_ctx.script.verification_mode and evaluator.shortcircuit(expression_result):
             return expression_result
 
         index += 2
@@ -1155,10 +1141,10 @@ def runBinaryExpression(cmd_ctx: CommandContext, nodes: List[parse.Node], first_
         next_op = nodes[index]
         if not isinstance(next_op, parse.NodeBinaryOp):
             if isinstance(next_op, parse.NodeToken):
-                return SemanticError("expected '{}' operator but got token '{}'; commands must be wrapped with (...)".format(op, next_op.s.decode('ascii')))
+                return SemanticError("expected '{}' operator but got token '{}'; commands must be wrapped with (...)".format(evaluator, next_op.s.decode('ascii')))
             return SemanticError("TODO: good error message for node that was expected to be an operand: {}".format(next_op))
-        if next_op.kind != op.kind:
-            return SemanticError("'{}' and '{}' cannot be chained".format(op, parse.binaryOpUserString(next_op.kind)))
+        if next_op.kind != op_kind:
+            return SemanticError("'{}' and '{}' cannot be chained".format(evaluator, parse.binaryOpUserString(next_op.kind)))
 
 def runScript(script_ctx: ScriptContext, stdout_handler: DataHandler, stderr_handler: DataHandler) -> Union[Error,ExitCode]:
     pos = 0
