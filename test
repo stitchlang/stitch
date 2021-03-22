@@ -401,7 +401,7 @@ def main():
     testBoolExpression(b"(@echo foo) @eq bar", False)
 
     testSemanticError(b"@assert", "@assert requires at least 1 argument")
-    testSemanticError(b"@assert (@array)", "got a command with no arguments, what should the language do here?")
+    testSemanticError(b"@assert (@array)", "@assert expects a Bool but got a CommandResult")
     testAssertError(b"@assert @false")
     testCommand(b"@assert @true", 0, b"")
     testSemanticError(b"@assert true", "@assert expects a Bool but got a CommandResult")
@@ -409,7 +409,7 @@ def main():
     testSemanticError(b"@not", "@not requires at least 1 argument")
     testSemanticError(b"@not @true @and @false", "got binary expression inside ambiguous operator '@not', wrap inside (..parenthesis..)")
     # TODO: improve this error
-    testSemanticError(b"@not (@array)", "got a command with no arguments, what should the language do here?")
+    testSemanticError(b"@not (@array)", "unhandled Bool")
     testBoolExpression(b"@not @false", True)
 
     testSemanticError(b"@if", "@if requires at least 1 argument")
@@ -432,7 +432,8 @@ def main():
     testSemanticError(b"@assert @end", "too many '@end'")
     testSemanticError(b"@not @end", "too many '@end'")
 
-    testSemanticError(b"(@array)", "got a command with no arguments, what should the language do here?")
+    testError(b"(@array)", prototype.CommandWithNoArgumentsError, "got a command with no arguments",
+              Options(verification_mode=False))
 
     testSemanticError(b"@haveprog", "@haveprog takes 1 argument but got 0")
     testSemanticError(b"@haveprog a b", "@haveprog takes 1 argument but got 2")

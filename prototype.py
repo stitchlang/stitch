@@ -248,6 +248,9 @@ class NonZeroExitCodeError(Error):
         self.exitcode = exitcode
         self.stdout = stdout
         self.stderr = stderr
+class CommandWithNoArgumentsError(Error):
+    def __init__(self):
+        Error.__init__(self, "got a command with no arguments")
 class MissingProgramError(Error):
     def __init__(self, filename):
         Error.__init__(self, "unable to find program '{}' in PATH".format(filename))
@@ -309,47 +312,24 @@ class ScriptContext:
 
 class Writer(ABC):
     @abstractmethod
-    @abstractmethod
-    def handleUnknownData(self):
-        pass
-    @abstractmethod
     def handle(self, s: bytes):
         pass
-class StringBuilder(Writer):
+class RuntimeWriter(Writer):
+    pass
+class StringBuilder(RuntimeWriter):
     def __init__(self):
         self.output = b""
     @staticmethod
     def descriptor():
         return "capture"
-    def handleUnknownData(self):
-        assert(False) # codebug
     def handle(self, s: bytes):
         assert(type(s) == bytes)
         if len(s) > 0:
             self.output += s
-            #if s[-1] != ord("\n"):
-            #    self.output += b"\n"
-class VerifyWriter(Writer):
-    def __init__(self, builder: StringBuilder):
-        self.builder: Optional[StringBuilder] = builder
-    @staticmethod
-    def descriptor():
-        return "verify"
-    def handleUnknownData(self):
-        self.builder = None
-    def handle(self, s: bytes):
-        if self.builder is not None:
-            self.builder.handle(s)
-
-def newCaptureWriter(verification_mode: bool) -> Writer:
-    return VerifyWriter(StringBuilder()) if verification_mode else StringBuilder()
-
-class ConsoleWriter(Writer):
+class ConsoleWriter(RuntimeWriter):
     @staticmethod
     def descriptor():
         return "console"
-    def handleUnknownData(self):
-        assert(False) # codebug
     def handle(self, s: bytes):
         assert(type(s) == bytes)
         if len(s) > 0:
@@ -359,6 +339,21 @@ class ConsoleWriter(Writer):
                 sys.stdout.buffer.write(s)
                 sys.stdout.buffer.write(b'\n')
 CONSOLE_WRITER = ConsoleWriter()
+
+class VerifyWriter(Writer):
+    def __init__(self, builder: StringBuilder):
+        self.builder: Optional[StringBuilder] = builder
+    @staticmethod
+    def descriptor():
+        return "verify"
+    def handle(self, s: bytes):
+        if self.builder is not None:
+            self.builder.handle(s)
+    def handleUnknownData(self):
+        self.builder = None
+
+def newCaptureWriter(verification_mode: bool) -> Writer:
+    return VerifyWriter(StringBuilder()) if verification_mode else StringBuilder()
 
 class Reader(ABC):
     @abstractmethod
@@ -435,6 +430,7 @@ class BuiltinMethods:
     def echo(cmd_ctx: CommandContext, args: List[bytes], unknown_args: UnknownArray):
         if cmd_ctx.script.verification_mode:
             if not unknown_args.empty():
+                assert(isinstance(cmd_ctx.capture.stdout, VerifyWriter))
                 cmd_ctx.capture.stdout.handleUnknownData()
                 return UNKNOWN_EXIT_CODE
         else:
@@ -447,6 +443,7 @@ class BuiltinMethods:
     def cat(cmd_ctx: CommandContext, args: List[bytes], unknown_args: UnknownArray):
         if cmd_ctx.script.verification_mode:
             if not unknown_args.empty():
+                assert(isinstance(cmd_ctx.capture.stdout, VerifyWriter))
                 cmd_ctx.capture.stdout.handleUnknownData()
                 return UNKNOWN_EXIT_CODE
         else:
@@ -455,6 +452,7 @@ class BuiltinMethods:
         if len(args) == 0:
             if cmd_ctx.capture.stdin is None:
                 assert(cmd_ctx.script.verification_mode)
+                assert(isinstance(cmd_ctx.capture.stdout, VerifyWriter))
                 cmd_ctx.capture.stdout.handleUnknownData()
                 return ExitCode(0)
             while True:
@@ -466,6 +464,7 @@ class BuiltinMethods:
         if len(args) == 1:
             filename = args[0]
             if cmd_ctx.script.verification_mode:
+                assert(isinstance(cmd_ctx.capture.stdout, VerifyWriter))
                 cmd_ctx.capture.stdout.handleUnknownData()
                 return ExitCode(0)
             # TODO: try various methods to cat such as linux 'sendfile"
@@ -516,6 +515,7 @@ class BuiltinMethods:
     def env(cmd_ctx: CommandContext, args: List[bytes], unknown_args: UnknownArray):
         if cmd_ctx.script.verification_mode:
             assertArgCount(1, len(args), unknown_args)
+            assert(isinstance(cmd_ctx.capture.stdout, VerifyWriter))
             cmd_ctx.capture.stdout.handleUnknownData()
             return UNKNOWN_EXIT_CODE
 
@@ -551,6 +551,7 @@ class BuiltinMethods:
         if not isinstance(default, String) and not isinstance(default, UnknownString):
             return SemanticError("@envdefault requires a String for its second argument but got {}".format(default.userTypeDescriptor()))
         if cmd_ctx.script.verification_mode:
+            assert(isinstance(cmd_ctx.capture.stdout, VerifyWriter))
             cmd_ctx.capture.stdout.handleUnknownData()
             return UNKNOWN_EXIT_CODE
         assert(isinstance(name, String))
@@ -871,8 +872,12 @@ def expandNodesToBool(cmd_ctx: CommandContext, nodes: List[parse.Node], builtin_
         args = nodesToArgs(cmd_ctx, nodes, unknown_args, ExpandNodeErrorContext())
         if isinstance(args, Error):
             return args
-        next_result = runExternalProgram(cmd_ctx.script.verification_mode, cmd_ctx.capture.stdout,
-                                         cmd_ctx.capture.stderr, args, unknown_args)
+        if cmd_ctx.script.verification_mode:
+            next_result = UNKNOWN_EXIT_CODE
+        else:
+            assert(isinstance(cmd_ctx.capture.stdout, RuntimeWriter))
+            assert(isinstance(cmd_ctx.capture.stderr, RuntimeWriter))
+            next_result = runExternalProgram(cmd_ctx.capture.stdout, cmd_ctx.capture.stderr, args)
     if isinstance(next_result, Error):
         return next_result
     is_unknown_exit_code = isinstance(next_result, UnknownExitCode)
@@ -1033,7 +1038,11 @@ def runCommandNodes(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> Union[E
     args = nodesToArgs(cmd_ctx, nodes, unknown_args, ExpandNodeErrorContext())
     if isinstance(args, Error):
         return args
-    return runExternalProgram(cmd_ctx.script.verification_mode, cmd_ctx.capture.stdout, cmd_ctx.capture.stderr, args, unknown_args)
+    if cmd_ctx.script.verification_mode:
+        return UNKNOWN_EXIT_CODE
+    assert(isinstance(cmd_ctx.capture.stdout, RuntimeWriter))
+    assert(isinstance(cmd_ctx.capture.stderr, RuntimeWriter))
+    return runExternalProgram(cmd_ctx.capture.stdout, cmd_ctx.capture.stderr, args)
 
 def nodesToArgs(cmd_ctx: CommandContext, nodes: List[parse.Node], unknown_args: UnknownArray, error_ctx: ExpandNodeErrorContext) -> Union[Error,List[bytes]]:
     args: List[bytes] = []
@@ -1074,22 +1083,9 @@ def objectToArgs(obj: StitchObject, args: List[bytes], unknown_args: UnknownArra
 
     return SemanticError("TODO: implement objectToArgs for type {} ({})".format(type(obj), obj))
 
-def runExternalProgram(verification_mode: bool, stdout: Writer, stderr: Writer,
-                       args: List[bytes], unknown_args: UnknownArray) -> Union[Error,ExitCode,UnknownExitCode]:
+def runExternalProgram(stdout: RuntimeWriter, stderr: RuntimeWriter, args: List[bytes]) -> Union[Error,ExitCode]:
     if len(args) == 0:
-        # NOTE: this can happen if the user executed an expanded empty array
-        #       what should we do in this case?
-        # NOTE: this is actually a RuntimeError because we currently don't detect
-        #       this until the array is expanded at runtime
-        return SemanticError("got a command with no arguments, what should the language do here?")
-
-    if verification_mode:
-        stdout.handleUnknownData()
-        stderr.handleUnknownData()
-        return UNKNOWN_EXIT_CODE
-
-    assert(unknown_args.empty())
-
+        return CommandWithNoArgumentsError()
     prog = args[0]
 
     if not b"/" in prog:
