@@ -572,8 +572,28 @@ def main():
     #
     testSyntaxError(b"0@pipe", "'@pipe' requires space separation")
     testSemanticError(b"@pipe", "unexpected '@pipe'")
-    testSemanticError(b"a @pipe b", "@pipe not impl")
+    def testBadPipeNode(node_str, after_only):
+        error = "'@pipe' requires an inline command but got '{}'".format(node_str)
+        if not after_only:
+            testSemanticError("{} @pipe (@echo)".format(node_str).encode('utf8'), error)
+        testSemanticError("(@echo) @pipe {}".format(node_str).encode('utf8'), error)
+
+    testBadPipeNode("a", after_only=False)
+    testBadPipeNode("$foo", after_only=False)
+    testBadPipeNode("@false", after_only=False)
+    testBadPipeNode("@or", after_only=False)
+    testBadPipeNode("@not", after_only=True)
+
+    testSemanticError(b"@not @pipe b", "unexpected '@pipe'")
+    testSemanticError(b"@not (@echo) @pipe (@echo)", "unexpected '@pipe'")
+    testSemanticError(b"(@echo) @pipe (@echo) @false", "expected '@pipe' but got '@false'")
+    #testSemanticError(b"(@true) @pipe (@echo)", "unexpected Bool within @pipe expression")
+    testSemanticError(b"(@echo) @pipe (@true)", "unexpected Bool within @pipe expression")
+    testSemanticError(b"(@true @and @true) @pipe (@echo)", "unexpected binary expression within @pipe expression")
+    testCommand(b"(@echo hello) @pipe (@cat)", 0, b"hello\n")
+    #testSemanticError(b"a @pipe b", "@pipe not impl")
     #testCommand(b"(@echo hello) @pipe (@echo pipes)", 0, b"pipes")
+    #testCommand(b"@assert (@exitcode (@echo) @pipe (@echo))", 0, b"")
 
     runStitchTests()
 

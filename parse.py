@@ -4,6 +4,7 @@
 # Also, I should probably include binary operatos in the parse tree instead of using semantic
 # analysis to find them (SyntaxErrors better than SemanticErrors better than RuntimeErrors).
 #
+from abc import ABC, abstractmethod
 from enum import Enum
 from typing import List, Dict, Set, Union, Tuple, Optional
 
@@ -11,15 +12,20 @@ import tokens
 from lex import TokenKind, Token, SyntaxError
 import lex
 
-class Node:
+class Node(ABC):
     def __init__(self, pos: int, end: int):
         self.pos = pos
         self.end = end
+    @abstractmethod
+    def userString(self, src: bytes) -> str:
+        pass
 class NodeToken(Node):
     def __init__(self, pos: int, end: int, s: bytes):
         assert(isinstance(s, bytes))
         Node.__init__(self, pos, end)
         self.s = s
+    def userString(self, src: bytes) -> str:
+        return self.s.decode('utf8')
     def __repr__(self):
         return "Token({})".format(self.s)
 class NodeVariable(Node):
@@ -28,18 +34,26 @@ class NodeVariable(Node):
         Node.__init__(self, pos, end)
         self.id = id
         self.is_at = is_at
+    def userStringNoSrc(self) -> str:
+        return "{}{}".format("@" if self.is_at else "$", self.id.decode('utf8'))
+    def userString(self, src: bytes) -> str:
+        return self.userStringNoSrc()
     def __repr__(self):
-        return "Variable({}{})".format("@" if self.is_at else "$", self.id)
+        return "Variable({})".format(self.userStringNoSrc())
 class NodeInlineCommand(Node):
     def __init__(self, pos: int, end: int, nodes: List[Node]):
         Node.__init__(self, pos, end)
         self.nodes = nodes
+    def userString(self, src: bytes) -> str:
+        return "(an inline command)"
     def __repr__(self):
         return "InlineCommand({})".format(", ".join([str(n) for n in self.nodes]))
 class NodeMultiple(Node):
     def __init__(self, pos: int, end: int, nodes: List[Node]):
         Node.__init__(self, pos, end)
         self.nodes = nodes
+    def userString(self, src: bytes) -> str:
+        return self.nodes[0].userString(src)
     def __repr__(self):
         return "Multiple({})".format(", ".join([str(n) for n in self.nodes]))
 
@@ -61,6 +75,8 @@ class NodeBinaryOp(Node):
     def __init__(self, pos: int, end: int, kind: BinaryOpKind):
         Node.__init__(self, pos, end)
         self.kind = kind
+    def userString(self, src: bytes) -> str:
+        return binaryOpUserString(self.kind)
     def __repr__(self):
         return "BinaryOp({})".format(self.kind)
 

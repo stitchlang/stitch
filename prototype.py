@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import sys
 import os
+import threading
+from threading import Thread
 import subprocess
 import re
 from abc import ABC, abstractmethod
@@ -340,6 +342,34 @@ class ConsoleWriter(RuntimeWriter):
                 sys.stdout.buffer.write(b'\n')
 CONSOLE_WRITER = ConsoleWriter()
 
+class IncompletePipeWriter(RuntimeWriter):
+    @staticmethod
+    def descriptor():
+        return "incomplete-pipe"
+    #def handleUnknownData(self):
+    #    raise Exception("codebug: cannot write to an incomplete-pipe")
+    def handle(self, s: bytes):
+        raise Exception("codebug: cannot write to an incomplete-pipe")
+INCOMPLETE_PIPE_WRITER = IncompletePipeWriter()
+
+class PipeWriterToBuiltin(RuntimeWriter):
+    def __init__(self):
+        self.data_event: Optional[threading.Event] = threading.Event()
+        self.data_builder = StringBuilder()
+    @staticmethod
+    def descriptor():
+        return "pipe-writer-to-builtin"
+    def handle(self, s: bytes):
+        assert(self.data_event is not None)
+        self.data_builder.handle(s)
+        self.data_event.set()
+    def getReader(self) -> "PipeReaderForBuiltin":
+        return PipeReaderForBuiltin(self)
+    def close(self):
+        assert(self.data_event is not None)
+        self.data_event.set()
+        self.data_event = None
+
 class VerifyWriter(Writer):
     def __init__(self, builder: StringBuilder):
         self.builder: Optional[StringBuilder] = builder
@@ -369,6 +399,36 @@ class ConsoleReader(Reader):
             return None
         return result
 CONSOLE_READER = ConsoleReader()
+
+class IncompletePipeReader(Reader):
+    @staticmethod
+    def descriptor():
+        return "incomplete-pipe"
+    def read(self) -> Optional[bytes]:
+        raise Exception("codebug: cannot write from an incomplete-pipe")
+INCOMPLETE_PIPE_READER = IncompletePipeReader()
+
+class PipeReaderForBuiltin(Reader):
+    def __init__(self, writer: PipeWriterToBuiltin):
+        self.writer = writer
+    @staticmethod
+    def descriptor():
+        return "pipe-reader-for-builtin"
+    def read(self) -> Optional[bytes]:
+        while True:
+            if not self.writer.data_event:
+                break
+            self.writer.data_event.wait()
+            output = self.writer.data_builder.output
+            if len(output) > 0:
+                self.writer.data_builder.output = b""
+                return output
+
+        output = self.writer.data_builder.output
+        if len(output) > 0:
+            self.writer.data_builder.output = b""
+            return output
+        return None
 
 class Capture:
     def __init__(self, exitcode: bool, stdout: Writer, stderr: Writer, stdin: Optional[Reader]):
@@ -404,6 +464,13 @@ class CommandContext:
         stdout = newCaptureWriter(self.script.verification_mode)
         return type(self)(self.script, self, self.depth+1,
                           Capture(exitcode=False,stdout=stdout,stderr=self.capture.stderr,stdin=self.capture.stdin),
+                          builtin_prefix_count=0, ambiguous_op=None)
+    def createPipeChild(self) -> 'CommandContext':
+        return type(self)(self.script, self, self.depth+1,
+                          Capture(exitcode=False,
+                                  stdout=INCOMPLETE_PIPE_WRITER,
+                                  stderr=self.capture.stderr,
+                                  stdin=INCOMPLETE_PIPE_READER),
                           builtin_prefix_count=0, ambiguous_op=None)
     def nextBuiltin(self, ambiguous_op: Optional[str]) -> 'CommandContext':
         return type(self)(self.script, self.parent, self.depth, self.capture,
@@ -997,11 +1064,101 @@ def runAssign(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> Union[Error,E
     cmd_ctx.var_map[varname.value] = value
     return UNKNOWN_EXIT_CODE if is_unknown_value else ExitCode(0)
 
+
+class CommandThread(Thread):
+    def __init__(self, cmd_ctx: CommandContext, nodes: List[parse.Node]):
+        super().__init__()
+        self.cmd_ctx = cmd_ctx
+        self.nodes = nodes
+        self.return_value: Optional[Union[Error,Bool,ExitCode,UnknownBool,UnknownExitCode]] = None
+    def run(self):
+        self.return_value = runCommandNodes(self.cmd_ctx, self.nodes)
+        if isinstance(self.cmd_ctx.capture.stdout, PipeWriterToBuiltin):
+            self.cmd_ctx.capture.stdout.close()
+
+def nextPipeWriter(next_kind: CommandKind) -> Writer:
+    if isinstance(next_kind, CommandKinds.Builtin):
+        return PipeWriterToBuiltin()
+    assert(isinstance(next_kind, CommandKinds.ExternalProgram))
+    return PipWriterToProgram()
+
 def runPipe(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> Union[Error,ExitCode,UnknownExitCode]:
     assert(len(nodes) >= 2)
     assert(isinstance(nodes[1], parse.NodeBinaryOp))
     assert(nodes[1].kind == BinaryOpKind.PIPE)
-    return SemanticError("@pipe not impl")
+    if cmd_ctx.builtin_prefix_count > 0:
+        return SemanticError("unexpected '@pipe'") # better error?
+    def pipeNodeError(node: parse.Node):
+        return SemanticError("'@pipe' requires an inline command but got '{}'".format(node.userString(cmd_ctx.script.src)))
+
+    if not isinstance(nodes[0], parse.NodeInlineCommand):
+        return pipeNodeError(nodes[0])
+    inline_cmd_nodes: List[parse.NodeInlineCommand] = [nodes[0]]
+    i = 1
+    while True:
+        node = nodes[i+1]
+        if not isinstance(node, parse.NodeInlineCommand):
+            return pipeNodeError(node)
+        inline_cmd_nodes.append(node)
+        i += 2
+        if len(nodes) == i:
+            break
+        next_op = nodes[i]
+        if not isinstance(next_op, parse.NodeBinaryOp):
+            return SemanticError("expected '@pipe' but got '{}'".format(next_op.userString(cmd_ctx.script.src)))
+
+    context_list: List[CommandContext] = []
+    inline_cmd_kinds: List[Union[CommandKinds.Builtin,CommandKinds.ExternalProgram]] = []
+    for i, inline_cmd_node in enumerate(inline_cmd_nodes):
+        inline_cmd_ctx = cmd_ctx.createPipeChild()
+        context_list.append(inline_cmd_ctx)
+        cmd_kind = getCommandKind(inline_cmd_ctx, inline_cmd_node.nodes)
+        if isinstance(cmd_kind, Error):
+            return cmd_kind
+        if isinstance(cmd_kind, CommandKinds.BinaryExp):
+            return SemanticError("unexpected binary expression within @pipe expression")
+        if isinstance(cmd_kind, CommandKinds.Bool):
+            return SemanticError("unexpected Bool within @pipe expression")
+        assert(isinstance(cmd_kind, CommandKinds.Builtin) or
+               isinstance(cmd_kind, CommandKinds.ExternalProgram))
+        inline_cmd_kinds.append(cmd_kind)
+
+    next_stdin: Optional[Reader] = cmd_ctx.capture.stdin
+    next_stdout = nextPipeWriter(inline_cmd_kinds[1])
+    for i, inline_cmd_node in enumerate(inline_cmd_nodes):
+        context_list[i].capture.stdin = next_stdin
+        context_list[i].capture.stdout = next_stdout
+        if i + 1 < len(inline_cmd_nodes):
+            next_stdin = next_stdout.getReader()
+            if i + 2 == len(inline_cmd_nodes):
+                next_stdout = cmd_ctx.capture.stdout
+            else:
+                next_stdout = nextPipeWriter(inline_cmd_kinds[i+2])
+
+    threads: List[CommandThread] = []
+    for i, inline_cmd_node in enumerate(inline_cmd_nodes):
+        #print("DEBUG: start thread {}".format(i))
+        thread = CommandThread(context_list[i], inline_cmd_node.nodes)
+        thread.start()
+        threads.append(thread)
+
+    results = []
+    for i, inline_cmd_node in enumerate(inline_cmd_nodes):
+        #print("DEBUG: joining thread {}...".format(i))
+        threads[i].join()
+        if i < len(inline_cmd_nodes) - 1:
+            results.append(threads[i].return_value)
+        else:
+            result = combineRunResultWithOutputs(context_list[i], threads[i].return_value)
+
+    for result in results:
+        if isinstance(result, Error):
+            return result
+        if isinstance(result, ExitCode):
+            continue
+        raise Exception("unhandled pipe command result {}".format(type(result).__name__))
+
+    return result
 
 def runCommandNodes(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> Union[Error,Bool,ExitCode,UnknownBool,UnknownExitCode]:
     assert(len(nodes) > 0)
@@ -1130,7 +1287,7 @@ def tryLookupBuiltinVar(script_ctx: ScriptContext, name: bytes) -> Optional[Stit
         return global_obj
     return None
 
-def stdoutOnlyHandler(stdout: bytes, multiline: bool):
+def stdoutOnlyHandler(stdout: bytes, multiline: bool) -> Union[Error,String]:
     assert(isinstance(stdout, bytes))
     if multiline:
         return String(stdout)
@@ -1154,7 +1311,7 @@ def getCaptureWriterOutput(writer: Writer) -> Union[bytes,UnknownString]:
 def isCaptured(s: Optional[Union[bytes,UnknownString]]):
     return s != None
 
-def combineRunResultWithOutputs(cmd_ctx, result):
+def combineRunResultWithOutputs(cmd_ctx, result) -> Union[Error,String,Array,Bool,CommandResult,UnknownString,UnknownArray,UnknownBool,UnknownCommandResult]:
     if isinstance(result, Error):
         return result
 
