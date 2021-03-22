@@ -52,14 +52,6 @@ class BinaryOpKind(Enum):
     GT = 4
     LT = 5
 
-binary_builtin_id_map = {
-    b"or": BinaryOpKind.OR,
-    b"and": BinaryOpKind.AND,
-    b"eq": BinaryOpKind.EQ,
-    b"gt": BinaryOpKind.GT,
-    b"lt": BinaryOpKind.LT,
-}
-
 def binaryOpUserString(kind: BinaryOpKind):
     if kind == BinaryOpKind.ASSIGN:
         return "="
@@ -71,6 +63,14 @@ class NodeBinaryOp(Node):
         self.kind = kind
     def __repr__(self):
         return "BinaryOp({})".format(self.kind)
+
+binary_builtin_id_map = {
+    b"or": BinaryOpKind.OR,
+    b"and": BinaryOpKind.AND,
+    b"eq": BinaryOpKind.EQ,
+    b"gt": BinaryOpKind.GT,
+    b"lt": BinaryOpKind.LT,
+}
 
 def parseOneNode(src: bytes, token: Token, allstringliterals: bool) -> Node:
     assert(token.pattern_kind != TokenKind.INLINE_WHITESPACE)
