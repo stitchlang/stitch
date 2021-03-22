@@ -4,7 +4,7 @@ import os
 import subprocess
 import inspect
 from abc import ABC, abstractmethod
-from typing import List, Dict, Union, Tuple, Any
+from typing import List, Dict, Union, Tuple, Any, Optional
 
 import lex
 import parse
@@ -13,28 +13,60 @@ import prototype
 SCRIPT_DIR_STR = os.path.dirname(__file__)
 SCRIPT_DIR = SCRIPT_DIR_STR.encode('utf8')
 
-def runInternal(line: bytes, verification_mode: bool):
-    context = prototype.ScriptContext(prototype.GlobalContext(True, SCRIPT_DIR), __file__.encode('utf8'), line, verification_mode)
-    stdout_builder = prototype.StringBuilder()
-    stderr_builder = prototype.StringBuilder()
+class ErrorReader(prototype.Reader):
+    @staticmethod
+    def descriptor():
+        return "error"
+    def read(self) -> Optional[bytes]:
+        raise Exception("stdin has been disabled for this test")
+ERROR_READER = ErrorReader()
+class StringReader(prototype.Reader):
+    def __init__(self, s: bytes):
+        self.s: Optional[bytes] = s
+    @staticmethod
+    def descriptor():
+        return "string"
+    def read(self) -> Optional[bytes]:
+        result = self.s
+        self.s = None
+        return result
+
+class Options:
+    def __init__(self, verification_mode: bool, stdin: Optional[bytes] = None):
+        if stdin is not None:
+            assert(isinstance(stdin, bytes))
+            assert(not verification_mode)
+        self.verification_mode = verification_mode
+        self.stdin = stdin
+    def getStdinReader(self) -> prototype.Reader:
+        if self.stdin:
+            assert(not self.verification_mode)
+            return StringReader(self.stdin)
+        return ERROR_READER
+
+def runInternal(line: bytes, options: Options):
+    context = prototype.ScriptContext(prototype.GlobalContext(True, SCRIPT_DIR), __file__.encode('utf8'), line, options.verification_mode)
+
+    stdout = prototype.newCaptureWriter(options.verification_mode)
+    stderr = prototype.newCaptureWriter(options.verification_mode)
     nodes, end = parse.parseCommand(line, 0, context.allstringliterals)
     assert(end == len(line))
     assert(len(nodes) > 0)
     result = prototype.runCommandNodes(prototype.CommandContext(
         context, parent=None, depth=0,
-        capture=prototype.Capture(False, stdout_builder, stderr_builder),
+        capture=prototype.Capture(False, stdout, stderr, options.getStdinReader()),
         builtin_prefix_count=0, ambiguous_op=None), nodes)
-    return result, stdout_builder.output, stderr_builder.output
+    return result, prototype.getCaptureWriterOutput(stdout), prototype.getCaptureWriterOutput(stderr)
 
 class Expect(ABC):
     @abstractmethod
-    def verify(self, result, stdout: bytes, stderr: bytes, test_line: int):
+    def verify(self, result, stdout: Union[bytes,prototype.UnknownString], stderr: Union[bytes,prototype.UnknownString], test_line: int):
         pass
 class ExpectExitAndStdout(Expect):
     def __init__(self, exitcode: int, stdout: bytes):
         self.exitcode = exitcode
         self.stdout = stdout
-    def verify(self, result, stdout: bytes, stderr: bytes, test_line: int):
+    def verify(self, result, stdout: Union[bytes,prototype.UnknownString], stderr: Union[bytes,prototype.UnknownString], test_line: int):
         if type(result) != prototype.ExitCode:
             sys.exit("{}({}): Error: expected an ExitCode but got {}: {}".format(__file__, test_line, type(result).__name__, result))
         if result.value != self.exitcode:
@@ -47,7 +79,7 @@ class ExpectError(Expect):
     def __init__(self, error_type, message):
         self.error_type = error_type
         self.message = message
-    def verify(self, result, stdout: bytes, stderr: bytes, test_line: int):
+    def verify(self, result, stdout: Union[bytes,prototype.UnknownString], stderr: Union[bytes,prototype.UnknownString], test_line: int):
         if not isinstance(result, self.error_type):
             sys.exit("{}({}): Error: expected a {} but got {}: '{}'".format(
                 __file__, test_line, self.error_type.__name__, type(result).__name__, result))
@@ -58,58 +90,55 @@ class ExpectError(Expect):
             print("actual  : {}".format(result_msg))
             sys.exit(1)
 
-
-def runTest(src: bytes, verification_mode: bool, expect: Expect, test_line: int):
-    context = prototype.ScriptContext(prototype.GlobalContext(True, SCRIPT_DIR), __file__.encode('utf8'), src, verification_mode)
-    stdout_builder = prototype.StringBuilder()
-    stderr_builder = prototype.StringBuilder()
-
+def runTest(src: bytes, expect: Expect, test_line: int, options: Options):
+    context = prototype.ScriptContext(prototype.GlobalContext(True, SCRIPT_DIR), __file__.encode('utf8'), src, options.verification_mode)
+    stdout = prototype.newCaptureWriter(options.verification_mode)
+    stderr = prototype.newCaptureWriter(options.verification_mode)
     result: Any = None
     try:
-        result = prototype.runScript(context, stdout_builder, stderr_builder)
+        result = prototype.runScript(context, stdout, stderr, options.getStdinReader())
     except lex.SyntaxError as e:
         result = e
-
-    expect.verify(result, stdout_builder.output, stderr_builder.output, test_line)
+    expect.verify(result, prototype.getCaptureWriterOutput(stdout), prototype.getCaptureWriterOutput(stderr), test_line)
 
 def getCallerLine():
     return inspect.getframeinfo(inspect.stack()[2][0]).lineno
 
-def testCommand(src: bytes, exitcode: int, stdout: bytes, verification_mode=False):
+def testCommand(src: bytes, exitcode: int, stdout: bytes, options: Options = Options(verification_mode=False)):
     expect = ExpectExitAndStdout(exitcode, stdout)
     print("testCommand({!r}, exitcode={}, stdout{!r}".format(src, exitcode, stdout))
-    runTest(src, verification_mode, expect, getCallerLine())
+    runTest(src, expect, getCallerLine(), options)
 
-def testError(src: bytes, error_type, message: str, verification_mode: bool=True):
+def testError(src: bytes, error_type, message: str, options: Options = Options(verification_mode=True)):
     expect = ExpectError(error_type, message)
     print("testError({!r}, {}, {})".format(src, error_type.__name__, message))
-    runTest(src, verification_mode, expect, getCallerLine())
+    runTest(src, expect, getCallerLine(), options)
 
 def testSyntaxError(src: bytes, message: str):
     expect = ExpectError(lex.SyntaxError, message)
     print("testSyntaxError({!r}, {})".format(src, message))
-    runTest(src, True, expect, getCallerLine())
+    runTest(src, expect, getCallerLine(), Options(verification_mode=True))
 
 def testSemanticError(src: bytes, message: str):
     expect = ExpectError(prototype.SemanticError, message)
     print("testSemanticError({!r}, {})".format(src, message))
-    runTest(src, True, expect, getCallerLine())
+    runTest(src, expect, getCallerLine(), Options(verification_mode=True))
 
-def testAssertError(src: bytes, verification_mode=True):
+def testAssertError(src: bytes, options: Options = Options(verification_mode=True)):
     expect = ExpectError(prototype.AssertError, "@assert failed")
     print("testAssertError({!r})".format(src))
-    runTest(src, verification_mode, expect, getCallerLine())
+    runTest(src, expect, getCallerLine(), options)
 
 def testBoolExpression(line: bytes, expected: bool):
     print("testBoolExpression({!r}, {})".format(line, expected))
-    result, stdout, stderr = runInternal(line, verification_mode=False)
+    result, stdout, stderr = runInternal(line, Options(verification_mode=False))
     if not isinstance(result, prototype.Bool):
         sys.exit("Error: expected expression to return Bool but got {}: {}".format(type(result).__name__, result))
     assert(expected == result.value)
 
 def testArrayExpression(line: bytes, expected: prototype.Array):
     print("testArrayExpression({!r}, {})".format(line, expected))
-    result, stdout, stderr = runInternal(line, verification_mode=False)
+    result, stdout, stderr = runInternal(line, Options(verification_mode=False))
     test_line = getCallerLine()
     if not isinstance(result, prototype.Array):
         sys.exit("Error: expected expression to return Array but got {}: {}".format(type(result).__name__, result))
@@ -269,7 +298,7 @@ def main():
     testCommand(b"\n".join([
         b"name = joe",
         b"age = 64",
-        b"@echo '''\nhello '''$name''', you're\n64!!!\n'''"]
+        b"@echo '''\nhello '''$name''', you're\n64!!!'''"]
     ), 0, b"hello joe, you're\n64!!!\n")
 
     #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -470,14 +499,14 @@ def main():
     testSemanticError(b"@env", "@env takes 1 argument but got 0")
     testSemanticError(b"@env PWD PWD", "@env takes 1 argument but got 2")
     testSemanticError(b"@env @false", "@env requires a String but got Bool")
-    testError(b"@env THIS_IS_NOT_DEFINED", prototype.UndefinedEnvironmentVariableError, "undefined environment variable 'THIS_IS_NOT_DEFINED'", verification_mode=False)
+    testError(b"@env THIS_IS_NOT_DEFINED", prototype.UndefinedEnvironmentVariableError, "undefined environment variable 'THIS_IS_NOT_DEFINED'", Options(verification_mode=False))
 
     testSemanticError(b"@envdefault", "@envdefault takes 2 arguments but got 0")
     testSemanticError(b"@envdefault foo", "@envdefault takes 2 arguments but got 1")
     testSemanticError(b"@envdefault foo bar baz", "@envdefault takes 2 arguments but got 3")
     testSemanticError(b"@envdefault @false foo", "@envdefault requires a String for its first argument but got Bool")
     testSemanticError(b"@envdefault foo @false", "@envdefault requires a String for its second argument but got Bool")
-    testCommand(b"@envdefault THIS_IS_NOT_DEFINED foo", 0, b"foo\n")
+    testCommand(b"@envdefault THIS_IS_NOT_DEFINED foo", 0, b"foo")
 
     # test lazy default semantics
     testSemanticError(b"@echo (@envdefault anything @a_semantic_error)", "'@a_semantic_error' is undefined")
@@ -492,14 +521,15 @@ def main():
     testSemanticError(b"@unsetenv PWD PWD", "@unsetenv takes 1 argument but got 2")
     testSemanticError(b"@unsetenv @false", "@unsetenv requires a String but got Bool")
     testError(b"@unsetenv THIS_IS_NOT_DEFINED", prototype.UndefinedEnvironmentVariableError,
-              "undefined environment variable 'THIS_IS_NOT_DEFINED'", verification_mode=False)
+              "undefined environment variable 'THIS_IS_NOT_DEFINED'", Options(verification_mode=False))
 
-    testError(b"@unsetenv FOO", prototype.UndefinedEnvironmentVariableError, "undefined environment variable 'FOO'", verification_mode=False)
+    testError(b"@unsetenv FOO", prototype.UndefinedEnvironmentVariableError,
+              "undefined environment variable 'FOO'", Options(verification_mode=False))
     testAssertError(b"\n".join([
         b"@setenv FOO bar",
         b"@assert (@env FOO) @eq bar",
         b"@assert @not ((@env FOO) @eq bar)",
-    ]), verification_mode=False)
+    ]), Options(verification_mode=False))
     # cleanup since environment variables are global right now
     testCommand(b"@unsetenv FOO", 0, b"")
     testCommand(b"\n".join([
@@ -513,7 +543,10 @@ def main():
     testSemanticError(b"@call", "@call requires at least one argument")
     testSemanticError(b"@call @false", "@call requires Strings but got Bool")
     testError(b"@call this-file-does-not-exist", prototype.MissingStitchScript,
-              "stitch script 'this-file-does-not-exist' does not exist", verification_mode=False)
+              "stitch script 'this-file-does-not-exist' does not exist", Options(verification_mode=False))
+
+    testSemanticError(b"@cat a b", "'@cat' takes 0 or 1 arguments but got 2")
+    testCommand(b"@cat", 0, b"what", Options(verification_mode=False, stdin=b"what"))
 
     #
     # Arrays
@@ -531,6 +564,7 @@ def main():
     testCommand(b"@echo (@array a b c)", 0, b"a b c\n")
     testCommand(b'@assert "" @eq (@echo (@array))', 0, b"")
     testCommand(b'@assert "a b c" @eq (@echo (@array a b c))', 0, b"")
+    testCommand(b"@echo foo(@array bar baz)buz", 0, b"foobarbazbuz\n")
 
     #
     # Pipes

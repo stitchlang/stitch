@@ -96,12 +96,20 @@ class UnknownString(Unknown):
 UNKNOWN_STRING = UnknownString()
 
 class UnknownArray(Unknown):
-    def __init__(self):
+    def __init__(self, min_count: int, max_count: Optional[int]):
         Unknown.__init__(self, Array)
+        self.min_count = min_count
+        self.max_count = max_count
     @staticmethod
     def userTypeDescriptor():
         return "Array"
-UNKNOWN_ARRAY = UnknownArray()
+    def empty(self):
+        assert((self.max_count == None) or (self.max_count >= self.min_count))
+        return self.max_count == 0
+    def addScalar(self, count: int):
+        self.min_count += count
+        if self.max_count is not None:
+            self.max_count += count
 
 class BinaryEvaluator:
     def __init__(self, kind: BinaryOpKind):
@@ -222,7 +230,8 @@ class SyntaxError(Error):
         line, column = lex.countLinesAndColumns(src[:lex_error.pos])
         super().__init__("{}(line {} column {}) {}".format(filename_str, line, column, str(lex_error)))
 class SemanticError(Error):
-    def __init__(self, message):
+    def __init__(self, message: str):
+        assert(isinstance(message, str))
         super().__init__(message)
 class CannotCoerceToStringError(SemanticError):
     def __init__(self, uncoercable_type):
@@ -298,33 +307,49 @@ class ScriptContext:
             return SemanticError("too many '@end'")
         return None
 
-class DataHandler(ABC):
+class Writer(ABC):
     @abstractmethod
-    def isEmpty(self):
+    @abstractmethod
+    def handleUnknownData(self):
         pass
     @abstractmethod
     def handle(self, s: bytes):
         pass
-class StringBuilder(DataHandler):
+class StringBuilder(Writer):
     def __init__(self):
         self.output = b""
     @staticmethod
     def descriptor():
         return "capture"
-    def isEmpty(self):
-        return len(self.output) == 0
+    def handleUnknownData(self):
+        assert(False) # codebug
     def handle(self, s: bytes):
         assert(type(s) == bytes)
         if len(s) > 0:
             self.output += s
-            if s[-1] != ord("\n"):
-                self.output += b"\n"
-class ConsolePrinter(DataHandler):
+            #if s[-1] != ord("\n"):
+            #    self.output += b"\n"
+class VerifyWriter(Writer):
+    def __init__(self, builder: StringBuilder):
+        self.builder: Optional[StringBuilder] = builder
+    @staticmethod
+    def descriptor():
+        return "verify"
+    def handleUnknownData(self):
+        self.builder = None
+    def handle(self, s: bytes):
+        if self.builder is not None:
+            self.builder.handle(s)
+
+def newCaptureWriter(verification_mode: bool) -> Writer:
+    return VerifyWriter(StringBuilder()) if verification_mode else StringBuilder()
+
+class ConsoleWriter(Writer):
     @staticmethod
     def descriptor():
         return "console"
-    def isEmpty(self):
-        return True
+    def handleUnknownData(self):
+        assert(False) # codebug
     def handle(self, s: bytes):
         assert(type(s) == bytes)
         if len(s) > 0:
@@ -333,16 +358,33 @@ class ConsolePrinter(DataHandler):
             else:
                 sys.stdout.buffer.write(s)
                 sys.stdout.buffer.write(b'\n')
-CONSOLE_PRINTER = ConsolePrinter()
+CONSOLE_WRITER = ConsoleWriter()
+
+class Reader(ABC):
+    @abstractmethod
+    def read(self) -> Optional[bytes]:
+        pass
+class ConsoleReader(Reader):
+    @staticmethod
+    def descriptor():
+        return "console"
+    def read(self) -> Optional[bytes]:
+        result = sys.stdin.buffer.read()
+        if len(result) == 0:
+            return None
+        return result
+CONSOLE_READER = ConsoleReader()
 
 class Capture:
-    def __init__(self, exitcode: bool, stdout: DataHandler, stderr: DataHandler):
+    def __init__(self, exitcode: bool, stdout: Writer, stderr: Writer, stdin: Optional[Reader]):
         self.exitcode = exitcode
         self.stdout = stdout
         self.stderr = stderr
+        self.stdin = stdin
     def __repr__(self):
-        return "Capture(exitcode={},stdout={},stderr={})".format(
-            self.exitcode, self.stdout.descriptor(), self.stderr.descriptor())
+        return "Capture(exitcode={},stdout={},stderr={},stdin={})".format(
+            self.exitcode, self.stdout.descriptor(), self.stderr.descriptor(),
+            "verify" if (self.stdin is None) else self.stdin.descriptor())
 
 class CommandContext:
     def __init__(
@@ -364,12 +406,21 @@ class CommandContext:
         self.ambiguous_op = ambiguous_op
         self.var_map = var_map
     def createChild(self) -> 'CommandContext':
+        stdout = newCaptureWriter(self.script.verification_mode)
         return type(self)(self.script, self, self.depth+1,
-                          Capture(exitcode=False,stdout=StringBuilder(),stderr=self.capture.stderr),
+                          Capture(exitcode=False,stdout=stdout,stderr=self.capture.stderr,stdin=self.capture.stdin),
                           builtin_prefix_count=0, ambiguous_op=None)
     def nextBuiltin(self, ambiguous_op: Optional[str]) -> 'CommandContext':
         return type(self)(self.script, self.parent, self.depth, self.capture,
                           self.builtin_prefix_count + 1, ambiguous_op, self.var_map)
+
+def assertArgCount(expected: int, known_arg_count: int, unknown_args: UnknownArray):
+    if unknown_args.min_count == unknown_args.max_count:
+        assert(expected == known_arg_count + unknown_args.min_count)
+    else:
+        assert(known_arg_count + unknown_args.min_count <= expected)
+        if unknown_args.max_count:
+            assert(known_arg_count + unknown_args.max_count >= expected)
 
 class BuiltinMethods:
     @staticmethod
@@ -381,10 +432,48 @@ class BuiltinMethods:
     def note(cmd_ctx: CommandContext, nodes: List[parse.Node]):
         return ExitCode(0)
     @staticmethod
-    def echo(cmd_ctx: CommandContext, args: List[bytes]):
-        if len(args) > 0:
-            cmd_ctx.capture.stdout.handle(b" ".join(args))
+    def echo(cmd_ctx: CommandContext, args: List[bytes], unknown_args: UnknownArray):
+        if cmd_ctx.script.verification_mode:
+            if not unknown_args.empty():
+                cmd_ctx.capture.stdout.handleUnknownData()
+                return UNKNOWN_EXIT_CODE
+        else:
+            assert(unknown_args.empty())
+        output = b" ".join(args)
+        if len(output) > 0:
+            cmd_ctx.capture.stdout.handle(output + b"\n")
         return ExitCode(0)
+    @staticmethod
+    def cat(cmd_ctx: CommandContext, args: List[bytes], unknown_args: UnknownArray):
+        if cmd_ctx.script.verification_mode:
+            if not unknown_args.empty():
+                cmd_ctx.capture.stdout.handleUnknownData()
+                return UNKNOWN_EXIT_CODE
+        else:
+            assert(unknown_args.empty())
+
+        if len(args) == 0:
+            if cmd_ctx.capture.stdin is None:
+                assert(cmd_ctx.script.verification_mode)
+                cmd_ctx.capture.stdout.handleUnknownData()
+                return ExitCode(0)
+            while True:
+                data = cmd_ctx.capture.stdin.read()
+                if data is None:
+                    return ExitCode(0)
+                cmd_ctx.capture.stdout.handle(data)
+
+        if len(args) == 1:
+            filename = args[0]
+            if cmd_ctx.script.verification_mode:
+                cmd_ctx.capture.stdout.handleUnknownData()
+                return ExitCode(0)
+            # TODO: try various methods to cat such as linux 'sendfile"
+            with open(filename, "rb") as f:
+                cmd_ctx.capture.stdout.handle(f.read())
+            return ExitCode(0)
+
+        return SemanticError("'@cat' takes 0 or 1 arguments but got {}".format(len(args)))
     # TODO: maybe remove this?  Maybe @pushscope/@popscope?
     @staticmethod
     def settmp(cmd_ctx: CommandContext, nodes: List[parse.Node]):
@@ -396,30 +485,42 @@ class BuiltinMethods:
         #print("DEBUG: settmp '{}' to '{}'".format(varname, value))
         return runCommandNodes(cmd_ctx.nextBuiltin(ambiguous_op=None), nodes[2:])
     @staticmethod
-    def setenv(cmd_ctx: CommandContext, args: List[bytes]):
+    def setenv(cmd_ctx: CommandContext, args: List[bytes], unknown_args: UnknownArray):
+        if cmd_ctx.script.verification_mode:
+            assertArgCount(2, len(args), unknown_args)
+            if not unknown_args.empty():
+                return UNKNOWN_EXIT_CODE
+        else:
+            assert(unknown_args.empty())
         assert(len(args) == 2)
         name = args[0]
         value = args[1]
         if not cmd_ctx.script.verification_mode:
             os.environ[name.decode('utf8')] = value.decode('utf8')
-            return ExitCode(0)
-        return UNKNOWN_EXIT_CODE
+        return ExitCode(0)
     @staticmethod
-    def unsetenv(cmd_ctx: CommandContext, args: List[bytes]):
+    def unsetenv(cmd_ctx: CommandContext, args: List[bytes], unknown_args: UnknownArray):
+        if cmd_ctx.script.verification_mode:
+            assertArgCount(1, len(args), unknown_args)
+            return UNKNOWN_EXIT_CODE
+        else:
+            assert(unknown_args.empty())
         assert(len(args) == 1)
         name = args[0]
-        if cmd_ctx.script.verification_mode:
-            return UNKNOWN_EXIT_CODE
         name_str = name.decode('utf8')
         if not name_str in os.environ:
             return UndefinedEnvironmentVariableError(name_str)
         del os.environ[name_str]
         return ExitCode(0)
     @staticmethod
-    def env(cmd_ctx: CommandContext, args: List[bytes]):
-        assert(len(args) == 1)
+    def env(cmd_ctx: CommandContext, args: List[bytes], unknown_args: UnknownArray):
         if cmd_ctx.script.verification_mode:
+            assertArgCount(1, len(args), unknown_args)
+            cmd_ctx.capture.stdout.handleUnknownData()
             return UNKNOWN_EXIT_CODE
+
+        assert(unknown_args.empty())
+        assert(len(args) == 1)
         name = args[0]
         name_str = name.decode('utf8')
         value = os.environ.get(name_str)
@@ -450,6 +551,7 @@ class BuiltinMethods:
         if not isinstance(default, String) and not isinstance(default, UnknownString):
             return SemanticError("@envdefault requires a String for its second argument but got {}".format(default.userTypeDescriptor()))
         if cmd_ctx.script.verification_mode:
+            cmd_ctx.capture.stdout.handleUnknownData()
             return UNKNOWN_EXIT_CODE
         assert(isinstance(name, String))
         assert(isinstance(default, String))
@@ -492,22 +594,28 @@ class BuiltinMethods:
         assert(isinstance(result, Bool))
         return BOOL_FALSE if result.value else BOOL_TRUE
     @staticmethod
-    def isfile(cmd_ctx: CommandContext, args: List[bytes]):
-        assert(len(args) == 1)
+    def isfile(cmd_ctx: CommandContext, args: List[bytes], unknown_args: UnknownArray):
         if cmd_ctx.script.verification_mode:
+            assertArgCount(1, len(args), unknown_args)
             return UNKNOWN_BOOL
+        assert(unknown_args.empty())
+        assert(len(args) == 1)
         return BOOL_TRUE if os.path.isfile(args[0]) else BOOL_FALSE
     @staticmethod
-    def isdir(cmd_ctx: CommandContext, args: List[bytes]):
-        assert(len(args) == 1)
+    def isdir(cmd_ctx: CommandContext, args: List[bytes], unknown_args: UnknownArray):
         if cmd_ctx.script.verification_mode:
+            assertArgCount(1, len(args), unknown_args)
             return UNKNOWN_BOOL
+        assert(unknown_args.empty())
+        assert(len(args) == 1)
         return BOOL_TRUE if os.path.isdir(args[0]) else BOOL_FALSE
     @staticmethod
-    def haveprog(cmd_ctx: CommandContext, args: List[bytes]):
-        assert(len(args) == 1)
+    def haveprog(cmd_ctx: CommandContext, args: List[bytes], unknown_args: UnknownArray):
         if cmd_ctx.script.verification_mode:
+            assertArgCount(1, len(args), unknown_args)
             return UNKNOWN_BOOL
+        assert(unknown_args.empty())
+        assert(len(args) == 1)
         return BOOL_TRUE if which(args[0]) else BOOL_FALSE
 
     @staticmethod
@@ -542,7 +650,12 @@ class BuiltinMethods:
             return error
         return ExitCode(0)
     @staticmethod
-    def call(cmd_ctx: CommandContext, args: List[bytes]):
+    def call(cmd_ctx: CommandContext, args: List[bytes], unknown_args: UnknownArray):
+        if cmd_ctx.script.verification_mode:
+            if len(args) == 0 and unknown_args.empty():
+                return SemanticError("@call requires at least one argument")
+            return UNKNOWN_EXIT_CODE
+        assert(unknown_args.empty())
         if len(args) == 0:
             return SemanticError("@call requires at least one argument")
         program_file = args[0]
@@ -561,7 +674,8 @@ class BuiltinMethods:
                          program_file,
                          src,
                          cmd_ctx.capture.stdout,
-                         cmd_ctx.capture.stderr)
+                         cmd_ctx.capture.stderr,
+                         cmd_ctx.capture.stdin)
         if isinstance(result, Error):
             return result
         assert(isinstance(result, ExitCode))
@@ -569,10 +683,21 @@ class BuiltinMethods:
 
     # arrays are limited to strings only right now, so we can expand all arguments to strings
     @staticmethod
-    def array(cmd_ctx: CommandContext, args: List[bytes]):
+    def array(cmd_ctx: CommandContext, args: List[bytes], unknown_args: UnknownArray):
+        if cmd_ctx.script.verification_mode:
+            if not unknown_args.empty():
+                result = UnknownArray(unknown_args.min_count, unknown_args.max_count)
+                result.addScalar(len(args))
+                return result
+        else:
+            assert(unknown_args.empty())
         return Array(args)
     @staticmethod
-    def lines2array(cmd_ctx: CommandContext, args: List[bytes]):
+    def lines2array(cmd_ctx: CommandContext, args: List[bytes], unknown_args: UnknownArray):
+        if cmd_ctx.script.verification_mode:
+            assertArgCount(1, len(args), unknown_args)
+            if not unknown_args.empty():
+                return UnknownArray(0, None)
         assert(len(args) == 1)
         return Array(args[0].splitlines())
 
@@ -630,6 +755,7 @@ builtin_objects = {
     b"allstringliterals": Builtin("allstringliterals", BuiltinExpandType.ParseNodes, BuiltinReturnType.ExitCode, arg_count=0),
     b"note": Builtin("note", BuiltinExpandType.ParseNodes, BuiltinReturnType.ExitCode),
     b"echo": Builtin("echo", BuiltinExpandType.Strings, BuiltinReturnType.ExitCode),
+    b"cat": Builtin("cat", BuiltinExpandType.Strings, BuiltinReturnType.ExitCode),
     b"settmp": Builtin("settmp", BuiltinExpandType.ParseNodes, BuiltinReturnType.ExitCode),
     b"multiline": Builtin("multiline", BuiltinExpandType.ParseNodes, BuiltinReturnType.ExitCode),
     b"exitcode": Builtin("exitcode", BuiltinExpandType.ParseNodes, BuiltinReturnType.Bool),
@@ -741,11 +867,12 @@ def expandNodesToBool(cmd_ctx: CommandContext, nodes: List[parse.Node], builtin_
         # TODO: there are probably more types to handle here
     else:
         assert(isinstance(cmd_kind, CommandKinds.ExternalProgram))
-        args: List[bytes] = []
-        error = nodesToArgs(cmd_ctx, nodes, args, ExpandNodeErrorContext())
-        if error:
-            return error
-        next_result = runExternalProgram(cmd_ctx.script.verification_mode, cmd_ctx.capture.stdout, cmd_ctx.capture.stderr, args)
+        unknown_args = UnknownArray(0, 0)
+        args = nodesToArgs(cmd_ctx, nodes, unknown_args, ExpandNodeErrorContext())
+        if isinstance(args, Error):
+            return args
+        next_result = runExternalProgram(cmd_ctx.script.verification_mode, cmd_ctx.capture.stdout,
+                                         cmd_ctx.capture.stderr, args, unknown_args)
     if isinstance(next_result, Error):
         return next_result
     is_unknown_exit_code = isinstance(next_result, UnknownExitCode)
@@ -781,11 +908,24 @@ def expandNodesToBool(cmd_ctx: CommandContext, nodes: List[parse.Node], builtin_
 #
 #    return SemanticError("'{}' expects Bool but got {}".format(builtin_name_str, obj.userTypeDescriptor()))
 
-def enforceBuiltinArgCount(builtin: Builtin, actual: int) -> Optional[Error]:
-    if (builtin.arg_count != None) and (builtin.arg_count != actual):
-        suffix = "" if (builtin.arg_count == 1) else "s"
-        return SemanticError("{} takes {} argument{} but got {}".format(
-            builtin, builtin.arg_count, suffix, actual))
+def makeArgCountError(builtin: Builtin, actual: str) -> str:
+    suffix = "" if (builtin.arg_count == 1) else "s"
+    return "{} takes {} argument{} but got {}".format(
+        builtin, builtin.arg_count, suffix, actual)
+
+def enforceBuiltinArgCount(builtin: Builtin, known_arg_count: int, unknown_args: UnknownArray) -> Optional[Error]:
+    if builtin.arg_count is not None:
+        min_arg_count = known_arg_count + unknown_args.min_count
+        if unknown_args.min_count == unknown_args.max_count:
+            if builtin.arg_count != min_arg_count:
+                return SemanticError(makeArgCountError(builtin, str(min_arg_count)))
+        else:
+            if min_arg_count > builtin.arg_count:
+                return SemanticError(makeArgCountError(builtin, "at least {}".format(min_arg_count)))
+            if unknown_args.max_count:
+                max_arg_count = known_arg_count + unknown_args.max_count
+                if max_arg_count < builtin.arg_count:
+                    return SemanticError(makeArgCountError(builtin, "no more than {}".format(max_arg_count)))
     return None
 
 def runBuiltin(cmd_ctx: CommandContext, builtin: Builtin, nodes: List[parse.Node]):
@@ -796,27 +936,27 @@ def runBuiltin(cmd_ctx: CommandContext, builtin: Builtin, nodes: List[parse.Node
 
     func = getattr(BuiltinMethods, builtin.python_name_str)
     if builtin.expand_type == BuiltinExpandType.ParseNodes:
-        error = enforceBuiltinArgCount(builtin, len(nodes))
+        error = enforceBuiltinArgCount(builtin, len(nodes), UnknownArray(0, 0))
         if error:
             return error
         return func(cmd_ctx, nodes)
     if builtin.expand_type == BuiltinExpandType.Strings:
-        args: List[bytes] = []
-        error = nodesToArgs(cmd_ctx, nodes, args, ExpandNodeErrorContext())
-        if error:
-            if isinstance(error, CannotCoerceToStringError):
+        unknown_args = UnknownArray(0, 0)
+        args = nodesToArgs(cmd_ctx, nodes, unknown_args, ExpandNodeErrorContext())
+        if isinstance(args, Error):
+            if isinstance(args, CannotCoerceToStringError):
                 if builtin.arg_count is None:
                     requires = "Strings"
                 elif builtin.arg_count == 1:
                     requires = "a String"
                 else:
                     requires = "{} Strings".format(builtin.arg_count)
-                return SemanticError("{} requires {} but got {}".format(builtin, requires, error.uncoercable_type))
-            return error
-        error = enforceBuiltinArgCount(builtin, len(args))
+                return SemanticError("{} requires {} but got {}".format(builtin, requires, args.uncoercable_type))
+            return args
+        error = enforceBuiltinArgCount(builtin, len(args), unknown_args)
         if error:
             return error
-        return func(cmd_ctx, args)
+        return func(cmd_ctx, args, unknown_args)
     raise Exception("TODO: expand_type {}".format(builtin.expand_type))
 
 def runAssign(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> Union[Error,ExitCode,UnknownExitCode]:
@@ -889,25 +1029,24 @@ def runCommandNodes(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> Union[E
     if isinstance(cmd_kind, CommandKinds.Bool):
         return SemanticError("unhandled Bool")
     assert(isinstance(cmd_kind, CommandKinds.ExternalProgram))
-    args: List[bytes] = []
-    error = nodesToArgs(cmd_ctx, nodes, args, ExpandNodeErrorContext())
-    if error:
-        return error
-    return runExternalProgram(cmd_ctx.script.verification_mode, cmd_ctx.capture.stdout, cmd_ctx.capture.stderr, args)
+    unknown_args = UnknownArray(0, 0)
+    args = nodesToArgs(cmd_ctx, nodes, unknown_args, ExpandNodeErrorContext())
+    if isinstance(args, Error):
+        return args
+    return runExternalProgram(cmd_ctx.script.verification_mode, cmd_ctx.capture.stdout, cmd_ctx.capture.stderr, args, unknown_args)
 
-def nodesToArgs(cmd_ctx: CommandContext, nodes: List[parse.Node], args: List[bytes], error_ctx: ExpandNodeErrorContext, start: int = 0) -> Optional[Error]:
-    for i, node in enumerate(nodes[start:], start=start):
+def nodesToArgs(cmd_ctx: CommandContext, nodes: List[parse.Node], unknown_args: UnknownArray, error_ctx: ExpandNodeErrorContext) -> Union[Error,List[bytes]]:
+    args: List[bytes] = []
+    for node in nodes:
         obj = expandNode(cmd_ctx, node, error_ctx)
         if isinstance(obj, Error):
             return obj
-        error = objectToArgs(obj, args)
+        error = objectToArgs(obj, args, unknown_args)
         if error:
             return error
-    return None
+    return args
 
-UNKNOWN_ARG_STRING = b"<UNKNOWN_ARG_STRING>"
-
-def objectToArgs(obj: StitchObject, args: List[bytes]) -> Optional[Error]:
+def objectToArgs(obj: StitchObject, args: List[bytes], unknown_args: UnknownArray) -> Optional[Error]:
     assert(not isinstance(obj, Error))
     if isinstance(obj, String):
         args.append(obj.value)
@@ -916,7 +1055,15 @@ def objectToArgs(obj: StitchObject, args: List[bytes]) -> Optional[Error]:
         args.extend(obj.elements)
         return None
     if isinstance(obj, UnknownString):
-        args.append(UNKNOWN_ARG_STRING)
+        unknown_args.addScalar(1)
+        return None
+    if isinstance(obj, UnknownArray):
+        unknown_args.addScalar(obj.min_count)
+        if obj.max_count is None:
+            unknown_args.max_count = None
+        else:
+            assert(obj.max_count >= obj.min_count)
+            obj.max_count += obj.max_count - obj.min_count
         return None
     if isinstance(obj, Bool) or isinstance(obj, UnknownBool):
         return CannotCoerceToStringError("Bool")
@@ -927,8 +1074,8 @@ def objectToArgs(obj: StitchObject, args: List[bytes]) -> Optional[Error]:
 
     return SemanticError("TODO: implement objectToArgs for type {} ({})".format(type(obj), obj))
 
-def runExternalProgram(verification_mode: bool, stdout_handler: DataHandler,
-                       stderr_handler: DataHandler, args: List[bytes]) -> Union[Error,ExitCode,UnknownExitCode]:
+def runExternalProgram(verification_mode: bool, stdout: Writer, stderr: Writer,
+                       args: List[bytes], unknown_args: UnknownArray) -> Union[Error,ExitCode,UnknownExitCode]:
     if len(args) == 0:
         # NOTE: this can happen if the user executed an expanded empty array
         #       what should we do in this case?
@@ -937,7 +1084,11 @@ def runExternalProgram(verification_mode: bool, stdout_handler: DataHandler,
         return SemanticError("got a command with no arguments, what should the language do here?")
 
     if verification_mode:
+        stdout.handleUnknownData()
+        stderr.handleUnknownData()
         return UNKNOWN_EXIT_CODE
+
+    assert(unknown_args.empty())
 
     prog = args[0]
 
@@ -948,13 +1099,13 @@ def runExternalProgram(verification_mode: bool, stdout_handler: DataHandler,
         # TODO: on linux we can specify a program file, and not modify args
         args[0] = prog_filename
 
-    stdout = None if isinstance(stdout_handler, ConsolePrinter) else subprocess.PIPE
-    stderr = None if isinstance(stderr_handler, ConsolePrinter) else subprocess.PIPE
-    result = subprocess.run(args, stdout=stdout, stderr=stderr)
-    if not isinstance(stdout_handler, ConsolePrinter):
-        stdout_handler.handle(result.stdout)
-    if not isinstance(stderr_handler, ConsolePrinter):
-        stderr_handler.handle(result.stderr)
+    stdout_option = None if isinstance(stdout, ConsoleWriter) else subprocess.PIPE
+    stderr_option = None if isinstance(stderr, ConsoleWriter) else subprocess.PIPE
+    result = subprocess.run(args, stdout=stdout_option, stderr=stderr_option)
+    if not isinstance(stdout, ConsoleWriter):
+        stdout.handle(result.stdout)
+    if not isinstance(stderr, ConsoleWriter):
+        stderr.handle(result.stderr)
     return ExitCode(result.returncode)
 
 def tryLookupCommandVar(cmd_ctx: CommandContext, name: bytes):
@@ -994,24 +1145,30 @@ def stdoutOnlyHandler(stdout: bytes, multiline: bool):
         return String(stripNewline(lines[0]))
     return UnexpectedMultilineError(stdout)
 
-def isCaptured(s):
+def getCaptureWriterOutput(writer: Writer) -> Union[bytes,UnknownString]:
+    if isinstance(writer, StringBuilder):
+        assert(type(writer.output) == bytes)
+        return writer.output
+    assert isinstance(writer, VerifyWriter)
+    if writer.builder:
+        assert(type(writer.builder.output) == bytes)
+        return writer.builder.output
+    return UNKNOWN_STRING
+
+def isCaptured(s: Optional[Union[bytes,UnknownString]]):
     return s != None
 
 def combineRunResultWithOutputs(cmd_ctx, result):
     if isinstance(result, Error):
         return result
 
-    stdout = None
-    stderr = None
+    stdout: Optional[Union[bytes,UnknownString]] = None
+    stderr: Optional[Union[bytes,UnknownString]] = None
     if cmd_ctx.parent:
         if cmd_ctx.capture.stdout != cmd_ctx.parent.capture.stdout:
-            assert(isinstance(cmd_ctx.capture.stdout, StringBuilder))
-            stdout = cmd_ctx.capture.stdout.output
-            assert(type(stdout) == bytes)
+            stdout = getCaptureWriterOutput(cmd_ctx.capture.stdout)
         if cmd_ctx.capture.stderr != cmd_ctx.parent.capture.stderr:
-            assert(isinstance(cmd_ctx.capture.stderr, StringBuilder))
-            stderr = cmd_ctx.capture.stderr.output
-            assert(type(stderr) == bytes)
+            stderr = getCaptureWriterOutput(cmd_ctx.capture.stderr)
 
     exitcode = None
     if isinstance(result, ExitCode):
@@ -1054,7 +1211,7 @@ def combineRunResultWithOutputs(cmd_ctx, result):
 
 
 # returns an array of strings and builtin objects
-def expandNode(cmd_ctx: CommandContext, node: parse.Node, error_ctx: ExpandNodeErrorContext) -> Union[Error,StitchObject]:
+def expandNode(cmd_ctx: CommandContext, node: parse.Node, error_ctx: ExpandNodeErrorContext) -> Union[Error,StitchObject,UnknownString]:
     if isinstance(node, parse.NodeToken):
         return String(node.s)
 
@@ -1076,10 +1233,12 @@ def expandNode(cmd_ctx: CommandContext, node: parse.Node, error_ctx: ExpandNodeE
         return combineRunResultWithOutputs(inline_cmd_ctx, result)
 
     if isinstance(node, parse.NodeMultiple):
-        args: List[bytes] = []
-        error = nodesToArgs(cmd_ctx, node.nodes, args, ExpandNodeErrorContext(inside_multiple=True))
-        if error:
-            return error
+        unknown_args = UnknownArray(0, 0)
+        args = nodesToArgs(cmd_ctx, node.nodes, unknown_args, ExpandNodeErrorContext(inside_multiple=True))
+        if isinstance(args, Error):
+            return args
+        if not unknown_args.empty():
+            return UNKNOWN_STRING
         return String(b"".join(args))
 
     raise Exception("codebug, unhandled node type {}".format(type(node)))
@@ -1090,8 +1249,12 @@ def disableCaptureModifiers(cmd_ctx: CommandContext, error_context_str: str):
     if cmd_ctx.parent is not None and cmd_ctx.capture.stderr is not cmd_ctx.parent.capture.stderr:
         return SemanticError("@stderr is not compatible with {}".format(error_context_str))
     if cmd_ctx.parent is not None and cmd_ctx.capture.stdout is not cmd_ctx.parent.capture.stdout:
-        assert(isinstance(cmd_ctx.capture.stdout, StringBuilder))
-        assert(len(cmd_ctx.capture.stdout.output) == 0)
+        if isinstance(cmd_ctx.capture.stdout, StringBuilder):
+            assert(len(cmd_ctx.capture.stdout.output) == 0)
+        else:
+            assert(isinstance(cmd_ctx.capture.stdout, VerifyWriter))
+            if cmd_ctx.capture.stdout.builder:
+                assert(len(cmd_ctx.capture.stdout.builder.output) == 0)
         cmd_ctx.capture.stdout = cmd_ctx.parent.capture.stdout
     return None
 
@@ -1113,7 +1276,6 @@ def runBinaryExpression(cmd_ctx: CommandContext, nodes: List[parse.Node], op_kin
     if isinstance(first_obj, Error):
         return first_obj
 
-    stdout_handler = None
     expression_result = evaluator.initialValue(first_obj)
     if isinstance(expression_result, Error):
         return expression_result
@@ -1146,7 +1308,7 @@ def runBinaryExpression(cmd_ctx: CommandContext, nodes: List[parse.Node], op_kin
         if next_op.kind != op_kind:
             return SemanticError("'{}' and '{}' cannot be chained".format(evaluator, parse.binaryOpUserString(next_op.kind)))
 
-def runScript(script_ctx: ScriptContext, stdout_handler: DataHandler, stderr_handler: DataHandler) -> Union[Error,ExitCode]:
+def runScript(script_ctx: ScriptContext, stdout: Writer, stderr: Writer, stdin: Optional[Reader]) -> Union[Error,ExitCode]:
     pos = 0
     while pos < len(script_ctx.src):
         nodes, end = parse.parseCommand(script_ctx.src, pos, script_ctx.allstringliterals)
@@ -1169,7 +1331,7 @@ def runScript(script_ctx: ScriptContext, stdout_handler: DataHandler, stderr_han
             script_ctx,
             parent=None,
             depth=0,
-            capture=Capture(False, stdout_handler, stderr_handler),
+            capture=Capture(False, stdout, stderr, stdin),
             builtin_prefix_count=0,
             ambiguous_op=None
         ), nodes)
@@ -1183,10 +1345,8 @@ def runScript(script_ctx: ScriptContext, stdout_handler: DataHandler, stderr_han
             if result.value != 0:
                 return result
         else:
-            assert(script_ctx.verification_mode and (
-                isinstance(result, UnknownBool) or
-                isinstance(result, UnknownExitCode)
-            ))
+            assert(isinstance(result, UnknownExitCode))
+            assert(script_ctx.verification_mode)
 
     if len(script_ctx.blockStack) != 1:
         return SemanticError("need more '@end'")
@@ -1197,7 +1357,7 @@ def normalizeFilename(filename):
     return filename
 
 def runFile(global_ctx: GlobalContext, full_filename: Optional[bytes], src: bytes,
-            stdout_handler: DataHandler, stderr_handler: DataHandler) -> Union[Error,ExitCode]:
+            stdout: Writer, stderr: Writer, stdin: Optional[Reader]) -> Union[Error,ExitCode]:
     assert((full_filename is None) or isinstance(full_filename, bytes))
     assert(isinstance(src, bytes))
 
@@ -1212,10 +1372,10 @@ def runFile(global_ctx: GlobalContext, full_filename: Optional[bytes], src: byte
                 if normalized_filename:
                     global_ctx.verify_started.add(normalized_filename)
                 eprint("stitch: DEBUG: verifying '{}'".format(full_filename_str))
-                stdout_builder = StringBuilder()
-                stderr_builder = StringBuilder()
+                stdout_verifier = VerifyWriter(StringBuilder())
+                stderr_verifier = VerifyWriter(StringBuilder())
                 script_ctx = ScriptContext(global_ctx, full_filename, src, verification_mode=True)
-                result = runScript(script_ctx, stdout_builder, stderr_builder)
+                result = runScript(script_ctx, stdout_verifier, stderr_verifier, None)
                 if isinstance(result, Error):
                     ## This can happen if the arguments of an assert are known at "verification time"
                     ## i.e. @assert @true
@@ -1226,18 +1386,11 @@ def runFile(global_ctx: GlobalContext, full_filename: Optional[bytes], src: byte
                     #    eprint("stitch: {}: SemanticError: {}".format(full_filename_str, result.message))
                     # I think error will be reported by caller?
                     return result
-                # I'm allowing things to print to stdout during verification mode
-                # because this can allow other mechnisms to get "further" in verification
-                if len(stdout_builder.output) > 0:
-                    pass
-                    #sys.exit("something printed to stdout during verification mode???")
-                if len(stderr_builder.output) > 0:
-                    pass
                     #sys.exit("something printed to stderr during verification mode???")
                 eprint("stitch: DEBUG: verification done on '{}'".format(full_filename_str))
 
         script_ctx = ScriptContext(global_ctx, full_filename, src, verification_mode=False)
-        return runScript(script_ctx, stdout_handler, stderr_handler)
+        return runScript(script_ctx, stdout, stderr, stdin)
     except lex.SyntaxError as lex_syntax_err:
         return SyntaxError(full_filename_str, src, lex_syntax_err)
 
@@ -1336,7 +1489,7 @@ def main():
 
     sandbox_path, callerworkdir = sandboxCallerWorkdir()
     global_ctx = GlobalContext(doverify, callerworkdir.encode('utf8'))
-    result = runFile(global_ctx, full_filename, src, CONSOLE_PRINTER, CONSOLE_PRINTER)
+    result = runFile(global_ctx, full_filename, src, CONSOLE_WRITER, CONSOLE_WRITER, CONSOLE_READER)
     sandbox_clean_count = cleanSandboxDir(sandbox_path, before_execution=False)
     if isinstance(result, Error):
         prefix = "Semantic" if isinstance(result, SemanticError) else ""
