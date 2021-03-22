@@ -46,11 +46,12 @@ class NodeMultiple(Node):
 
 class BinaryOpKind(Enum):
     ASSIGN = 0
-    OR = 1
-    AND = 2
-    EQ = 3
-    GT = 4
-    LT = 5
+    PIPE = 1
+    OR = 2
+    AND = 3
+    EQ = 4
+    GT = 5
+    LT = 6
 
 def binaryOpUserString(kind: BinaryOpKind):
     if kind == BinaryOpKind.ASSIGN:
@@ -65,6 +66,7 @@ class NodeBinaryOp(Node):
         return "BinaryOp({})".format(self.kind)
 
 binary_builtin_id_map = {
+    b"pipe": BinaryOpKind.PIPE,
     b"or": BinaryOpKind.OR,
     b"and": BinaryOpKind.AND,
     b"eq": BinaryOpKind.EQ,

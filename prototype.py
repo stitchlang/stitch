@@ -111,6 +111,9 @@ class BinaryOperator:
 class AssignOperator(BinaryOperator):
     def __init__(self):
         BinaryOperator.__init__(self, BinaryOpKind.ASSIGN)
+class PipeOperator(BinaryOperator):
+    def __init__(self):
+        BinaryOperator.__init__(self, BinaryOpKind.PIPE)
 # A BinaryOperator that evaluates with Stitch Objects
 class ObjectBinaryOperator(BinaryOperator):
     @abstractmethod
@@ -662,6 +665,7 @@ builtin_objects = {
 
 binary_ops = {
     BinaryOpKind.ASSIGN: AssignOperator(),
+    BinaryOpKind.PIPE: PipeOperator(),
     BinaryOpKind.OR: OrOperator(),
     BinaryOpKind.AND: AndOperator(),
     BinaryOpKind.EQ: EqOperator(),
@@ -864,6 +868,12 @@ def runAssign(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> Union[Error,E
 
     cmd_ctx.var_map[varname.value] = value
     return UNKNOWN_EXIT_CODE if is_unknown_value else ExitCode(0)
+
+def runPipe(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> Union[Error,ExitCode,UnknownExitCode]:
+    assert(len(nodes) >= 2)
+    assert(isinstance(nodes[1], parse.NodeBinaryOp))
+    assert(nodes[1].kind == BinaryOpKind.PIPE)
+    return SemanticError("@pipe not impl")
 
 def runCommandNodes(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> Union[Error,Bool,ExitCode,UnknownBool,UnknownExitCode]:
     assert(len(nodes) > 0)
@@ -1109,6 +1119,8 @@ def disableCaptureModifiers(cmd_ctx: CommandContext, error_context_str: str):
 def runBinaryExpression(cmd_ctx: CommandContext, nodes: List[parse.Node], first_obj: StitchObject, op: BinaryOperator):
     if op.kind == BinaryOpKind.ASSIGN:
         return runAssign(cmd_ctx, nodes)
+    if op.kind == BinaryOpKind.PIPE:
+        return runPipe(cmd_ctx, nodes)
     assert(isinstance(op, ObjectBinaryOperator))
 
     if cmd_ctx.ambiguous_op:

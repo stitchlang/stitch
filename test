@@ -532,6 +532,14 @@ def main():
     testCommand(b'@assert "" @eq (@echo (@array))', 0, b"")
     testCommand(b'@assert "a b c" @eq (@echo (@array a b c))', 0, b"")
 
+    #
+    # Pipes
+    #
+    testSyntaxError(b"0@pipe", "'@pipe' requires space separation")
+    testSemanticError(b"@pipe", "unexpected '@pipe'")
+    testSemanticError(b"a @pipe b", "@pipe not impl")
+    #testCommand(b"(@echo hello) @pipe (@echo pipes)", 0, b"pipes")
+
     runStitchTests()
 
     print("test: success")
