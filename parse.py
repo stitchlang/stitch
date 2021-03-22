@@ -43,19 +43,16 @@ class NodeMultiple(Node):
         self.nodes = nodes
     def __repr__(self):
         return "Multiple({})".format(", ".join([str(n) for n in self.nodes]))
-class NodeAssign(Node):
-    def __init__(self, pos: int, end: int):
-        Node.__init__(self, pos, end)
-    def __repr__(self):
-        return "Assign"
 
 class BinaryOpKind(Enum):
-    OR = 0
-    AND = 1
-    EQ = 2
-    GT = 3
-    LT = 4
-binary_ops = {
+    ASSIGN = 0
+    OR = 1
+    AND = 2
+    EQ = 3
+    GT = 4
+    LT = 5
+
+binary_builtin_id_map = {
     b"or": BinaryOpKind.OR,
     b"and": BinaryOpKind.AND,
     b"eq": BinaryOpKind.EQ,
@@ -64,6 +61,8 @@ binary_ops = {
 }
 
 def binaryOpUserString(kind: BinaryOpKind):
+    if kind == BinaryOpKind.ASSIGN:
+        return "="
     return "@" + kind.name.lower()
 
 class NodeBinaryOp(Node):
@@ -81,7 +80,7 @@ def parseOneNode(src: bytes, token: Token, allstringliterals: bool) -> Node:
 
     if token.pattern_kind == TokenKind.BUILTIN_ID:
         id = src[token.pos+1:token.end].rstrip(b'@')
-        binary_op_kind = binary_ops.get(id)
+        binary_op_kind = binary_builtin_id_map.get(id)
         if binary_op_kind:
             return NodeBinaryOp(token.pos, token.end, binary_op_kind)
         return NodeVariable(token.pos, token.end, id, is_at=True)
@@ -93,7 +92,7 @@ def parseOneNode(src: bytes, token: Token, allstringliterals: bool) -> Node:
         return NodeToken(token.pos, token.end, src[token.pos:token.end])
 
     if token.pattern_kind == TokenKind.ASSIGN_OP:
-        return NodeAssign(token.pos, token.end)
+        return NodeBinaryOp(token.pos, token.end, BinaryOpKind.ASSIGN)
 
     if token.pattern_kind == TokenKind.DOUBLE_QUOTED_STRING:
         return NodeToken(token.pos, token.end, src[token.pos+1:token.end-1])
@@ -134,12 +133,18 @@ def parseNode(src: bytes, token: Token, allstringliterals: bool) -> Tuple[Node, 
         assert(next_node.end > next_node.pos)
         if not node:
             node = next_node
-        elif isinstance(node, NodeMultiple):
-            node.nodes.append(next_node)
-            node.end = next_node.end
         else:
-            assert(node.end == next_node.pos)
-            node = NodeMultiple(node.pos, next_node.end, [node, next_node])
+            if isinstance(node, NodeMultiple):
+                assert(node.nodes[-1].end == next_node.pos)
+                node.nodes.append(next_node)
+                node.end = next_node.end
+            else:
+                assert(node.end == next_node.pos)
+                if isinstance(node, NodeBinaryOp):
+                    raise SyntaxError(node.pos, "'{}' requires space separation".format(binaryOpUserString(node.kind)))
+                node = NodeMultiple(node.pos, next_node.end, [node, next_node])
+            if isinstance(next_node, NodeBinaryOp):
+                raise SyntaxError(next_node.pos, "'{}' requires space separation".format(binaryOpUserString(next_node.kind)))
 
         scan_result = lex.scan(src, node.end)
         if not scan_result:

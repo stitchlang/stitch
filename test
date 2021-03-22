@@ -247,7 +247,7 @@ def main():
                     "missing single-quote to close: '01234567890123456789012345678")
     testSyntaxError(b"@echo '012345678901234567890123456789",
                     "missing single-quote to close: '01234567890123456789012345678[..snip..]")
-    #testCommand(b"@echo '#@$()'", 0, b'#@$()\n')
+    testCommand(b'@echo "#@$()"', 0, b"#@$()\n")
 
     testSyntaxError(b"@echo '\n", "missing single-quote to close: '")
     testSyntaxError(b"@echo ''\n''", "missing 2 single-quote sequence to close: ''")
@@ -281,10 +281,13 @@ def main():
     testSemanticError(b"@assert (@exitcode @exitcode true)", "@exitcode is not compatible with @exitcode")
     testSemanticError(b"@assert (@exitcode true @exitcode)", "cannot coerce Builtin '@exitcode' to String")
     testSemanticError(b"@assert (@exitcode @true)", "unhandled Bool")
-    #testSemanticError(b"@assert (@exitcode @multiline true)", "")
+    testSemanticError(b"@assert (@exitcode @multiline true)", "got @multiline but stdout is not being captured?  what's going on?")
     testCommand(b"@assert (@exitcode true)", 0, b"")
     testCommand(b"@assert @not (@exitcode false)", 0, b"")
 
+    testSyntaxError(b"1@and", "'@and' requires space separation")
+    testSyntaxError(b"@and=", "'@and' requires space separation")
+    testSyntaxError(b"=@and", "'=' requires space separation")
     testSemanticError(b"@and", "unexpected '@and'")
     testSemanticError(b"@or", "unexpected '@or'")
     testSemanticError(b"true @and true", "'@and' does not accept objects of type String")
@@ -397,9 +400,8 @@ def main():
     ]), 0, b"hey\n")
 
     testSemanticError(b"@end", "too many '@end'")
-    # need multiple lines to test this otherwise I just get "too many '@end'"
-    #testSemanticError(b"@assert @end", "")
-    #testSemanticError(b"@not @end", "")
+    testSemanticError(b"@assert @end", "too many '@end'")
+    testSemanticError(b"@not @end", "too many '@end'")
 
     testSemanticError(b"(@array)", "got a command with no arguments, what should the language do here?")
 
@@ -409,25 +411,26 @@ def main():
     #
     # The assign '=' operator
     #
+    testSyntaxError(b"=foo = foo", "'=' requires space separation")
+    testSyntaxError(b"foo = =foo", "'=' requires space separation")
+    testSyntaxError(b"foo= bar", "'=' requires space separation")
+    testSyntaxError(b"foo =bar", "'=' requires space separation")
+    testSyntaxError(b"foo=bar", "'=' requires space separation")
     testSemanticError(b"=", "unexpected '='")
     testSemanticError(b"foo =", "expected 1 argument after '=' but got 0")
     testSemanticError(b"= foo", "unexpected '='")
     testSemanticError(b"= = foo", "unexpected '='")
     testSemanticError(b"foo = =", "unexpected '='")
-    testSemanticError(b"=foo = foo", "'=' requires space separation")
-    testSemanticError(b"foo = =foo", "'=' requires space separation")
     testSemanticError(b"foo = bar baz", "expected 1 argument after '=' but got 2")
-    testSemanticError(b"@not = bar", "expected a String before '=' but got Builtin")
-    testSemanticError(b"@echo =", "expected 1 argument after '=' but got 0")
+    testSemanticError(b"@not = bar", "unexpected '='")
+    testSemanticError(b"@echo =", "unexpected '='")
     testSemanticError(b"foo = @not", "expected a String, Bool or Array after '=' but got Builtin")
     testSemanticError(b"@true = bar", "expected a String before '=' but got Bool")
     testSemanticError(b"@missing = bar", "'@missing' is undefined")
     testSemanticError(b"foo = @missing", "'@missing' is undefined")
     testSemanticError(b"@not foo = bat", "unexpected '='")
+    testSemanticError(b"(foo = bar)", "assignment '=' is not allowed inside an inline command")
     testCommand(b"foo = bar", 0, b"")
-    testSemanticError(b"foo= bar", "'=' requires space separation")
-    testSemanticError(b"foo =bar", "'=' requires space separation")
-    testSemanticError(b"foo=bar", "'=' requires space separation")
 
     testCommand(b"(@echo foo) = bar", 0, b"")
     testCommand(b"foo = @false", 0, b"")

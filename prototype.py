@@ -108,15 +108,20 @@ class BinaryOperator:
         self.kind = kind
     def __repr__(self):
         return parse.binaryOpUserString(self.kind)
+class AssignOperator(BinaryOperator):
+    def __init__(self):
+        BinaryOperator.__init__(self, BinaryOpKind.ASSIGN)
+# A BinaryOperator that evaluates with Stitch Objects
+class ObjectBinaryOperator(BinaryOperator):
     @abstractmethod
     def initialValue(self, operand: StitchObject):
         pass
     @abstractmethod
     def apply(self, verification_mode: bool, left: Bool, right: StitchObject):
         pass
-class ChainableBinaryOperator(BinaryOperator):
+class ChainableBinaryOperator(ObjectBinaryOperator):
     def __init__(self, kind: BinaryOpKind):
-        BinaryOperator.__init__(self, kind)
+        ObjectBinaryOperator.__init__(self, kind)
     @abstractmethod
     def shortcircuit(self, result: Bool):
         return not result.value
@@ -146,9 +151,9 @@ class OrOperator(ChainableBinaryOperator):
         return right_result
     def shortcircuit(self, result: Bool):
         return result.value
-class EqOperator(BinaryOperator):
+class EqOperator(ObjectBinaryOperator):
     def __init__(self):
-        BinaryOperator.__init__(self, BinaryOpKind.EQ)
+        ObjectBinaryOperator.__init__(self, BinaryOpKind.EQ)
     def initialValue(self, operand):
         if isinstance(operand, String):
             return operand
@@ -164,9 +169,9 @@ class EqOperator(BinaryOperator):
             return opInvalidTypeError(self, right)
         assert(isinstance(left, UnknownString))
         return UNKNOWN_BOOL
-class CompareOperator(BinaryOperator):
+class CompareOperator(ObjectBinaryOperator):
     def __init__(self, kind: BinaryOpKind, func):
-        BinaryOperator.__init__(self, kind)
+        ObjectBinaryOperator.__init__(self, kind)
         self.func = func
     def initialValue(self, operand):
         if isinstance(operand, String):
@@ -579,11 +584,11 @@ class BuiltinMethods:
         assert(len(args) == 1)
         return Array(args[0].splitlines())
 
-def opInvalidTypeError(op: BinaryOperator, operand: StitchObject):
+def opInvalidTypeError(op: ObjectBinaryOperator, operand: StitchObject):
     #raise Exception("'{}' does not accept objects of type {}".format(op, operand.userTypeDescriptor()))
     return SemanticError("'{}' does not accept objects of type {}".format(op, operand.userTypeDescriptor()))
 
-def operandToBool(op: BinaryOperator, operand: StitchObject) -> Union[Error,Bool,UnknownBool]:
+def operandToBool(op: ObjectBinaryOperator, operand: StitchObject) -> Union[Error,Bool,UnknownBool]:
     if isinstance(operand, Error):
         return operand
     if isinstance(operand, Bool):
@@ -656,6 +661,7 @@ builtin_objects = {
 }
 
 binary_ops = {
+    BinaryOpKind.ASSIGN: AssignOperator(),
     BinaryOpKind.OR: OrOperator(),
     BinaryOpKind.AND: AndOperator(),
     BinaryOpKind.EQ: EqOperator(),
@@ -828,7 +834,12 @@ def runBuiltin(cmd_ctx: CommandContext, builtin: Builtin, nodes: List[parse.Node
 
 def runAssign(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> Union[Error,ExitCode,UnknownExitCode]:
     assert(len(nodes) >= 2)
-    assert(isinstance(nodes[1], parse.NodeAssign))
+    assert(isinstance(nodes[1], parse.NodeBinaryOp))
+    assert(nodes[1].kind == BinaryOpKind.ASSIGN)
+    if cmd_ctx.builtin_prefix_count > 0:
+        return SemanticError("unexpected '='") # better error?
+    if cmd_ctx.depth > 0:
+        return SemanticError("assignment '=' is not allowed inside an inline command")
     if len(nodes) != 3:
         # should be a syntax error
         return SemanticError("expected 1 argument after '=' but got {}".format(len(nodes) - 2))
@@ -874,10 +885,6 @@ def runCommandNodes(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> Union[E
         message = "{} {}".format("+" * (cmd_ctx.depth+1), " ".join([cmd_ctx.script.src[n.pos:n.end].decode('utf8') for n in nodes]))
         # NOTE: ignore capture_stdout, just always print to console for now
         eprint(message)
-
-    # NOTE: this part should have been done by parser
-    if len(nodes) >= 2 and isinstance(nodes[1], parse.NodeAssign):
-        return runAssign(cmd_ctx, nodes)
 
     result = expandNodes(cmd_ctx, nodes)
     if isinstance(result, Error):
@@ -1071,18 +1078,13 @@ def expandNodeMaybeBinaryOp(cmd_ctx: CommandContext, node: parse.Node, error_ctx
             return SemanticError("'{}' is undefined".format(cmd_ctx.script.src[node.pos:node.end].decode('utf8')))
         return obj
 
-    if isinstance(node, parse.NodeAssign):
-        if error_ctx.inside_multiple:
-            return SemanticError("'=' requires space separation")
-        return SemanticError("unexpected '='")
+    if isinstance(node, parse.NodeBinaryOp):
+        return binary_ops[node.kind]
 
     if isinstance(node, parse.NodeInlineCommand):
         inline_cmd_ctx = cmd_ctx.createChild(node.is_binary_expr)
         result = runCommandNodes(inline_cmd_ctx, node.nodes)
         return combineRunResultWithOutputs(inline_cmd_ctx, result)
-
-    if isinstance(node, parse.NodeBinaryOp):
-        return binary_ops[node.kind]
 
     if isinstance(node, parse.NodeMultiple):
         args: List[bytes] = []
@@ -1105,6 +1107,10 @@ def disableCaptureModifiers(cmd_ctx: CommandContext, error_context_str: str):
     return None
 
 def runBinaryExpression(cmd_ctx: CommandContext, nodes: List[parse.Node], first_obj: StitchObject, op: BinaryOperator):
+    if op.kind == BinaryOpKind.ASSIGN:
+        return runAssign(cmd_ctx, nodes)
+    assert(isinstance(op, ObjectBinaryOperator))
+
     if cmd_ctx.ambiguous_op:
         return SemanticError("got binary expression inside ambiguous operator '{}', wrap inside (..parenthesis..)".format(cmd_ctx.ambiguous_op))
 
