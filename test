@@ -17,11 +17,11 @@ def runInternal(line: bytes, verification_mode: bool):
     context = prototype.ScriptContext(prototype.GlobalContext(True, SCRIPT_DIR), __file__.encode('utf8'), line, verification_mode)
     stdout_builder = prototype.StringBuilder()
     stderr_builder = prototype.StringBuilder()
-    nodes, is_binary_expr, end = parse.parseCommand(line, 0, context.allstringliterals)
+    nodes, end = parse.parseCommand(line, 0, context.allstringliterals)
     assert(end == len(line))
     assert(len(nodes) > 0)
     result = prototype.runCommandNodes(prototype.CommandContext(
-        context, is_binary_expr, parent=None, depth=0,
+        context, parent=None, depth=0,
         capture=prototype.Capture(False, stdout_builder, stderr_builder),
         builtin_prefix_count=0, ambiguous_op=None), nodes)
     return result, stdout_builder.output, stderr_builder.output

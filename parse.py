@@ -31,10 +31,9 @@ class NodeVariable(Node):
     def __repr__(self):
         return "Variable({}{})".format("@" if self.is_at else "$", self.id)
 class NodeInlineCommand(Node):
-    def __init__(self, pos: int, end: int, nodes: List[Node], is_binary_expr: bool):
+    def __init__(self, pos: int, end: int, nodes: List[Node]):
         Node.__init__(self, pos, end)
         self.nodes = nodes
-        self.is_binary_expr = is_binary_expr
     def __repr__(self):
         return "InlineCommand({})".format(", ".join([str(n) for n in self.nodes]))
 class NodeMultiple(Node):
@@ -100,10 +99,10 @@ def parseOneNode(src: bytes, token: Token, allstringliterals: bool) -> Node:
         return NodeToken(token.pos, token.end, src[token.pos+1:token.end-1])
 
     if token.pattern_kind == TokenKind.OPEN_PAREN:
-        inline_cmd_nodes, inline_cmd_is_binary_expr, right_paren_pos = parseCommand(src, token.end, allstringliterals)
+        inline_cmd_nodes, right_paren_pos = parseCommand(src, token.end, allstringliterals)
         if right_paren_pos == len(src) or src[right_paren_pos] != ord(")"):
             raise SyntaxError(token.pos, "missing close paren for: {}".format(lex.preview(src[token.pos:], 30)))
-        return NodeInlineCommand(token.pos, right_paren_pos + 1, inline_cmd_nodes, inline_cmd_is_binary_expr)
+        return NodeInlineCommand(token.pos, right_paren_pos + 1, inline_cmd_nodes)
 
     if (token.pattern_kind >= TokenKind.SINGLE_QUOTED_STRING1 and
         token.pattern_kind <= TokenKind.SINGLE_QUOTED_STRING6):
@@ -158,27 +157,26 @@ def parseNode(src: bytes, token: Token, allstringliterals: bool) -> Tuple[Node, 
             token.pattern_kind == TokenKind.CLOSE_PAREN):
             return node, token
 
-def parseCommand(src: bytes, cmd_start: int, allstringliterals: bool) -> Tuple[List[Node],bool,int]:
+def parseCommand(src: bytes, cmd_start: int, allstringliterals: bool) -> Tuple[List[Node],int]:
     assert(type(src) == bytes)
     nodes: List[Node] = []
     token = lex.scanSkipInlineWhitespace(src, cmd_start)
     if not token:
-        return nodes, False, cmd_start
-    is_binary_expression = False
+        return nodes, cmd_start
     while True:
         if token.pattern_kind == TokenKind.COMMENT or token.pattern_kind == TokenKind.NEWLINE:
-            return nodes, is_binary_expression, token.end
+            return nodes, token.end
         if token.pattern_kind == TokenKind.CLOSE_PAREN:
-            return nodes, is_binary_expression, token.pos
+            return nodes, token.pos
         node, next_token = parseNode(src, token, allstringliterals)
         nodes.append(node)
         if not next_token:
-            return nodes, is_binary_expression, len(src)
+            return nodes, len(src)
         token = next_token
         if token.pattern_kind == TokenKind.INLINE_WHITESPACE:
             scan_result = lex.scan(src, token.end)
             if not scan_result:
-                return nodes, is_binary_expression, token.pos
+                return nodes, token.pos
             assert(scan_result.pattern_kind != TokenKind.INLINE_WHITESPACE)
             token = Token(token.end, scan_result)
         else:
