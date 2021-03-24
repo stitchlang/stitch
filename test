@@ -15,6 +15,7 @@ from prototype import (SemanticError, NonZeroExitCodeError, CommandWithNoArgumen
 
 SCRIPT_DIR_STR = os.path.dirname(__file__)
 SCRIPT_DIR = SCRIPT_DIR_STR.encode('utf8')
+STITCH_INTERP_ARGS = [sys.executable, os.path.join(SCRIPT_DIR_STR, "prototype.py")]
 
 class ErrorReader(prototype.Reader):
     @staticmethod
@@ -67,7 +68,7 @@ class ExpectExitAndStdout(Expect):
             sys.exit("{}({}): Error: expected an ExitCode but got {}: {}".format(__file__, test_line, type(result).__name__, result))
         if result.value != self.exitcode:
             sys.exit("{}({}): Error: expected Command to return exitcode {} but got {}".format(
-                __file__, test_line, self.exitcode, result.exitcode.value))
+                __file__, test_line, self.exitcode, result.value))
         if stdout != self.stdout:
             sys.exit("{}({}): Error: expected Command to print {!r} but got {!r}".format(
                 __file__, test_line, self.stdout, stdout))
@@ -202,12 +203,11 @@ def runSubProcessTest(exit_code: int, args: List[str]):
 
 def runStitchTests():
     print("test: running stitch-tests...")
-    stitch_args = [sys.executable, os.path.join(SCRIPT_DIR_STR, "prototype.py")]
 
-    stdout, stderr = runSubProcessTest(0, stitch_args + ["-c", "@echo hello"])
+    stdout, stderr = runSubProcessTest(0, STITCH_INTERP_ARGS + ["-c", "@echo hello"])
     expectMatch(stdout.rstrip(), b"hello")
 
-    stdout, stderr = runSubProcessTest(1, stitch_args + ["-c", "@missing"])
+    stdout, stderr = runSubProcessTest(1, STITCH_INTERP_ARGS + ["-c", "@missing"])
     expectMatch(stdout, b"")
     expectMatches(stderr, b"<the -c command>: SemanticError: '@missing' is undefined")
 
@@ -215,23 +215,55 @@ def runStitchTests():
         make_foo_cmd = "fsutil file createnew foo 0"
     else:
         make_foo_cmd = "touch foo"
-    stdout, stderr = runSubProcessTest(1, stitch_args + ["-c", make_foo_cmd])
+    stdout, stderr = runSubProcessTest(1, STITCH_INTERP_ARGS + ["-c", make_foo_cmd])
     expectMatches(stderr, [
         b"this script must be using relative filenames because the sandbox has this file ",
         b"1 file(s) were cleaned from the sandbox",
     ])
 
-    stdout, stderr = runSubProcessTest(1, stitch_args + ["-c", "\n\n @!"])
+    stdout, stderr = runSubProcessTest(1, STITCH_INTERP_ARGS + ["-c", "\n\n @!"])
     expectMatches(stderr, [b"(line 3 column 2) unrecognized character sequence '@!'"])
 
-    result = subprocess.run(stitch_args + ["stitch-tests"])
+    result = subprocess.run(STITCH_INTERP_ARGS + ["stitch-tests"])
     if result.returncode != 0:
         sys.exit(result.returncode)
 
+
+def updateFile(filename, content: bytes):
+    assert(isinstance(content, bytes))
+    if os.path.exists(filename):
+        with open(filename, "rb") as f:
+            existing_content = f.read()
+        if content == existing_content:
+            return False
+    with open(filename, "wb") as f:
+        f.write(content)
+    return True
+
+def windowsEscapeArg(arg):
+    import re
+    if not arg or re.search(r'(["\s])', arg):
+        return '"' + arg.replace('"', r'\"') + '"'
+    return arg
+
+def windowsSetup():
+    path = os.path.join(SCRIPT_DIR_STR, "assetsfortest", "missing_windows_programs")
+    os.environ["PATH"] = path + ";" + os.environ["PATH"]
+    # generate stitch scripts for other missing programs
+    outdir = os.path.join(SCRIPT_DIR_STR, "out")
+    if not os.path.exists(outdir):
+        os.mkdir(outdir)
+    winprogdir = os.path.join(outdir, "missing_windows_programs")
+    if not os.path.exists(winprogdir):
+        os.mkdir(winprogdir)
+    updateFile(os.path.join(winprogdir, "cat.bat"),
+               '@if "%1"=="" ({0} -c @cat) else ({0} -c "@cat %*")'.format(
+               " ".join([windowsEscapeArg(a) for a in STITCH_INTERP_ARGS])).encode('utf8'))
+    os.environ["PATH"] = winprogdir + ";" + os.environ["PATH"]
+
 def main():
     if os.name == "nt":
-        path = os.path.join(SCRIPT_DIR_STR, "assetsfortest", "missing_windows_programs")
-        os.environ["PATH"] = path + ";" + os.environ["PATH"]
+        windowsSetup()
 
     testSyntaxError(b"(", "missing close paren for: (")
     testSyntaxError(b"(foo", "missing close paren for: (foo")
@@ -664,6 +696,7 @@ def main():
 
     # TODO: implement PipeWriterToProgram and add this test
     # TODO: add "cat" program to Windows?  could use stitch interpreter inside a batch script if necessary
+    testCommand(b"cat @callerworkdir/assetsfortest/hellomsg", 0, b"Hello Stitch!\n")
     #testCommand(b"(@echo hello) @pipe (cat)", 0, "hello\n")
 
     runStitchTests()

@@ -336,11 +336,7 @@ class ConsoleWriter(RuntimeWriter):
     def handle(self, s: bytes):
         assert(type(s) == bytes)
         if len(s) > 0:
-            if s[-1] == b'\n':
-                sys.stdout.buffer.write(s)
-            else:
-                sys.stdout.buffer.write(s)
-                sys.stdout.buffer.write(b'\n')
+            sys.stdout.buffer.write(s)
 CONSOLE_WRITER = ConsoleWriter()
 
 class IncompletePipeWriter(RuntimeWriter):
@@ -552,8 +548,12 @@ class BuiltinMethods:
                 cmd_ctx.capture.stdout.handleUnknownData()
                 return ExitCode(0)
             # TODO: try various methods to cat such as linux 'sendfile"
-            with open(filename, "rb") as f:
-                cmd_ctx.capture.stdout.handle(f.read())
+            try:
+                with open(filename, "rb") as f:
+                    cmd_ctx.capture.stdout.handle(f.read())
+            except FileNotFoundError:
+                cmd_ctx.capture.stderr.handle("error: file not found '{}'".format(filename.decode('utf8')).encode('utf8'))
+                return ExitCode(1)
             return ExitCode(0)
 
         return SemanticError("'@cat' takes 0 or 1 arguments but got {}".format(len(args)))
