@@ -200,7 +200,7 @@ class CompareEvaluator(BinaryEvaluator):
         return opInvalidTypeError(self, right)
 
 class CommandResult(StitchObject):
-    def __init__(self, exitcode: int, stdout: Optional[str], stderr: Optional[str]):
+    def __init__(self, exitcode: int, stdout: Union[None,UnknownString,bytes], stderr: Union[None,UnknownString,bytes]):
         self.exitcode = exitcode
         self.stdout = stdout
         self.stderr = stderr
@@ -244,7 +244,7 @@ class AssertError(Error):
         Error.__init__(self, "@assert failed")
         self.nodes = nodes
 class NonZeroExitCodeError(Error):
-    def __init__(self, exitcode: int, stdout: Optional[str], stderr: Optional[str]):
+    def __init__(self, exitcode: int, stdout: Optional[bytes], stderr: Optional[bytes]):
         assert(exitcode != 0)
         Error.__init__(self, "command failed with exit code {}".format(exitcode))
         self.exitcode = exitcode
@@ -274,8 +274,8 @@ class ExitCode:
         self.value = value
         self.multiline = False
 class UnknownExitCode:
-    pass
-UNKNOWN_EXIT_CODE = UnknownExitCode()
+    def __init__(self):
+        self.multiline = False
 
 class GlobalContext:
     def __init__(self, doverify: bool, callerworkdir: bytes):
@@ -350,7 +350,9 @@ class IncompletePipeWriter(RuntimeWriter):
 INCOMPLETE_PIPE_WRITER = IncompletePipeWriter()
 
 class PipeWriter(RuntimeWriter):
-    pass
+    @abstractmethod
+    def getPipeReader(self) -> "Reader":
+        pass
 
 class PipeWriterToBuiltin(PipeWriter):
     def __init__(self):
@@ -371,7 +373,7 @@ class PipeWriterToBuiltin(PipeWriter):
         self.data_event = None
 
 class VerifyWriter(Writer):
-    def __init__(self, builder: StringBuilder, for_pipe: bool):
+    def __init__(self, builder: Optional[StringBuilder], for_pipe: bool):
         self.builder: Optional[StringBuilder] = builder
         self.for_pipe = for_pipe
     @staticmethod
@@ -512,7 +514,7 @@ class BuiltinMethods:
             if not unknown_args.empty():
                 assert(isinstance(cmd_ctx.capture.stdout, VerifyWriter))
                 cmd_ctx.capture.stdout.handleUnknownData()
-                return UNKNOWN_EXIT_CODE
+                return UnknownExitCode()
         else:
             assert(unknown_args.empty())
         output = b" ".join(args)
@@ -525,7 +527,7 @@ class BuiltinMethods:
             if not unknown_args.empty():
                 assert(isinstance(cmd_ctx.capture.stdout, VerifyWriter))
                 cmd_ctx.capture.stdout.handleUnknownData()
-                return UNKNOWN_EXIT_CODE
+                return UnknownExitCode()
         else:
             assert(unknown_args.empty())
 
@@ -572,7 +574,7 @@ class BuiltinMethods:
         if cmd_ctx.script.verification_mode:
             assertArgCount(2, len(args), unknown_args)
             if not unknown_args.empty():
-                return UNKNOWN_EXIT_CODE
+                return UnknownExitCode()
         else:
             assert(unknown_args.empty())
         assert(len(args) == 2)
@@ -585,7 +587,7 @@ class BuiltinMethods:
     def unsetenv(cmd_ctx: CommandContext, args: List[bytes], unknown_args: UnknownArray):
         if cmd_ctx.script.verification_mode:
             assertArgCount(1, len(args), unknown_args)
-            return UNKNOWN_EXIT_CODE
+            return UnknownExitCode()
         else:
             assert(unknown_args.empty())
         assert(len(args) == 1)
@@ -601,7 +603,7 @@ class BuiltinMethods:
             assertArgCount(1, len(args), unknown_args)
             assert(isinstance(cmd_ctx.capture.stdout, VerifyWriter))
             cmd_ctx.capture.stdout.handleUnknownData()
-            return UNKNOWN_EXIT_CODE
+            return UnknownExitCode()
 
         assert(unknown_args.empty())
         assert(len(args) == 1)
@@ -637,7 +639,7 @@ class BuiltinMethods:
         if cmd_ctx.script.verification_mode:
             assert(isinstance(cmd_ctx.capture.stdout, VerifyWriter))
             cmd_ctx.capture.stdout.handleUnknownData()
-            return UNKNOWN_EXIT_CODE
+            return UnknownExitCode()
         assert(isinstance(name, String))
         assert(isinstance(default, String))
         cmd_ctx.capture.stdout.handle(default.value)
@@ -709,7 +711,7 @@ class BuiltinMethods:
         if isinstance(result, Error):
             return result
         if isinstance(result, UnknownBool):
-            return UNKNOWN_EXIT_CODE
+            return UnknownExitCode()
         assert(isinstance(result, Bool))
         if not result.value:
             return AssertError(nodes)
@@ -726,7 +728,7 @@ class BuiltinMethods:
             isinstance(result, UnknownBool) or
             isinstance(result, UnknownCommandResult)))
         cmd_ctx.script.pushBlock(enabled=True)
-        return UNKNOWN_EXIT_CODE
+        return UnknownExitCode()
     @staticmethod
     def end(cmd_ctx: CommandContext, nodes: List[parse.Node]):
         assert(len(nodes) == 0)
@@ -739,7 +741,7 @@ class BuiltinMethods:
         if cmd_ctx.script.verification_mode:
             if len(args) == 0 and unknown_args.empty():
                 return SemanticError("@call requires at least one argument")
-            return UNKNOWN_EXIT_CODE
+            return UnknownExitCode()
         assert(unknown_args.empty())
         if len(args) == 0:
             return SemanticError("@call requires at least one argument")
@@ -747,7 +749,7 @@ class BuiltinMethods:
         if len(args) > 1:
             sys.exit("Error: @call with more than just a program not implemented")
         if cmd_ctx.script.verification_mode:
-            return UNKNOWN_EXIT_CODE
+            return UnknownExitCode()
         # TODO: should I be caching files?
         try:
             with open(program_file, "rb") as file:
@@ -964,7 +966,7 @@ def expandNodesToBool(cmd_ctx: CommandContext, nodes: List[parse.Node], builtin_
         if isinstance(args, Error):
             return args
         if cmd_ctx.script.verification_mode:
-            next_result = UNKNOWN_EXIT_CODE
+            next_result = UnknownExitCode()
         else:
             assert(isinstance(cmd_ctx.capture.stdout, RuntimeWriter))
             assert(isinstance(cmd_ctx.capture.stderr, RuntimeWriter))
@@ -1086,7 +1088,7 @@ def runAssign(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> Union[Error,E
         return SemanticError("expected a String, Bool or Array after '=' but got {}".format(value.userTypeDescriptor()))
 
     cmd_ctx.var_map[varname.value] = value
-    return UNKNOWN_EXIT_CODE if is_unknown_value else ExitCode(0)
+    return UnknownExitCode() if is_unknown_value else ExitCode(0)
 
 class CommandThread(Thread):
     def __init__(self, cmd_ctx: CommandContext, nodes: List[parse.Node]):
@@ -1099,9 +1101,7 @@ class CommandThread(Thread):
         if isinstance(self.cmd_ctx.capture.stdout, PipeWriterToBuiltin):
             self.cmd_ctx.capture.stdout.close()
 
-def nextPipeWriter(verification_mode: bool, next_kind: CommandKind) -> Writer:
-    if verification_mode:
-        return VerifyWriter(StringBuilder(), for_pipe=True)
+def nextPipeWriter(next_kind: CommandKind) -> PipeWriter:
     if isinstance(next_kind, CommandKinds.Builtin):
         return PipeWriterToBuiltin()
     assert(isinstance(next_kind, CommandKinds.ExternalProgram))
@@ -1160,8 +1160,11 @@ def runPipe(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> ExpressionResul
 
             result = runCommandNodes(context_list[i], inline_cmd_nodes[i].nodes)
             stdout = None
-            if (not on_last) and context_list[i].capture.stdout.builder:
-                stdout = context_list[i].capture.stdout.builder.output
+            if not on_last:
+                writer = context_list[i].capture.stdout
+                assert(isinstance(writer, VerifyWriter))
+                if writer.builder:
+                    stdout = writer.builder.output
 
             if isinstance(result, Error):
                 return result
@@ -1200,11 +1203,12 @@ def runPipe(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> ExpressionResul
                 context_list[i].capture.stdin = None
 
     next_stdin: Optional[Reader] = cmd_ctx.capture.stdin
-    next_stdout = nextPipeWriter(cmd_ctx.script.verification_mode, inline_cmd_kinds[1])
+    next_stdout: Writer = nextPipeWriter(inline_cmd_kinds[1])
     for i, inline_cmd_node in enumerate(inline_cmd_nodes):
         context_list[i].capture.stdin = next_stdin
         context_list[i].capture.stdout = next_stdout
         if i + 1 < len(inline_cmd_nodes):
+            assert(isinstance(next_stdout, PipeWriter))
             next_stdin = next_stdout.getPipeReader()
             if i + 2 == len(inline_cmd_nodes):
                 next_stdout = cmd_ctx.capture.stdout
@@ -1250,7 +1254,7 @@ def runPipe(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> ExpressionResul
         return last_result
     raise Exception("unhandled result type {} for last pipe command".format(type(last_result).__name__))
 
-RunCommandsResult = Union[Error,Bool,ExitCode,CommandResult,UnknownBool,UnknownExitCode,UnknownCommandResult]
+RunCommandsResult = Union[Error,String,Bool,ExitCode,CommandResult,UnknownString,UnknownBool,UnknownExitCode,UnknownCommandResult]
 
 def runCommandNodes(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> RunCommandsResult:
     assert(len(nodes) > 0)
@@ -1298,7 +1302,7 @@ def runCommandNodes(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> RunComm
     if isinstance(args, Error):
         return args
     if cmd_ctx.script.verification_mode:
-        return UNKNOWN_EXIT_CODE
+        return UnknownExitCode()
     assert(isinstance(cmd_ctx.capture.stdout, RuntimeWriter))
     assert(isinstance(cmd_ctx.capture.stderr, RuntimeWriter))
     return runExternalProgram(cmd_ctx.capture.stdout, cmd_ctx.capture.stderr, args)
@@ -1413,7 +1417,9 @@ def getCaptureWriterOutput(writer: Writer) -> Union[bytes,UnknownString]:
 def isCaptured(s: Optional[Union[bytes,UnknownString]]):
     return s != None
 
-def combineRunResultWithOutputs(cmd_ctx: CommandContext, result: RunCommandsResult) -> RunCommandsResult:
+CombineResult = Union[Error,String,Bool,CommandResult,UnknownString,UnknownBool,UnknownCommandResult]
+
+def combineRunResultWithOutputs(cmd_ctx: CommandContext, result: RunCommandsResult) -> CombineResult:
     if isinstance(result, Error):
         return result
 
@@ -1425,33 +1431,34 @@ def combineRunResultWithOutputs(cmd_ctx: CommandContext, result: RunCommandsResu
         if cmd_ctx.capture.stderr != cmd_ctx.parent.capture.stderr:
             stderr = getCaptureWriterOutput(cmd_ctx.capture.stderr)
 
-    exitcode = None
-    if isinstance(result, ExitCode):
-        is_unknown = False
-        exitcode = result.value
-    elif isinstance(result, UnknownExitCode):
-        is_unknown = True
-        exitcode = 0
-
-    if exitcode != None:
+    if isinstance(result, ExitCode) or isinstance(result, UnknownExitCode):
         capture_ec = cmd_ctx.capture.exitcode
-        if (not capture_ec) and (exitcode != 0):
-            return NonZeroExitCodeError(exitcode, stdout, stderr)
+        if (not capture_ec) and isinstance(result, ExitCode) and result.value != 0:
+            return NonZeroExitCodeError(result.value,
+                                        None if isinstance(stdout, UnknownString) else stdout,
+                                        None if isinstance(stderr, UnknownString) else stderr)
         if capture_ec and (not isCaptured(stdout)) and (not isCaptured(stderr)):
-            if is_unknown:
+            if isinstance(result, UnknownExitCode):
                 return UNKNOWN_BOOL
-            return BOOL_TRUE if (exitcode == 0) else BOOL_FALSE
+            return BOOL_TRUE if (result.value == 0) else BOOL_FALSE
         if (not capture_ec) and isCaptured(stdout) and (not isCaptured(stderr)):
-            if is_unknown:
-                return UNKNOWN_STRING
-            return stdoutOnlyHandler(stdout, result.multiline)
+            if isinstance(result, ExitCode):
+                if isinstance(stdout, UnknownString):
+                    return UNKNOWN_STRING
+                assert(isinstance(stdout, bytes))
+                return stdoutOnlyHandler(stdout, result.multiline)
+            assert(isinstance(result, UnknownExitCode))
+            # TODO: should we be verifying this?
+            #assert(isinstance(stdout, UnknownString))
+            return UNKNOWN_STRING
         if (not capture_ec) and (not isCaptured(stdout)) and isCaptured(stderr):
-            if is_unknown:
+            if isinstance(result, UnknownExitCode):
                 return UNKNOWN_STRING
+            assert(isinstance(stderr, bytes))
             return String(stderr)
-
-        if is_unknown:
+        if isinstance(result, UnknownExitCode):
             return UNKNOWN_COMMAND_RESULT
+
         return CommandResult(result.value, stdout, stderr)
 
     if (isinstance(result, Bool) or isinstance(result, Array)
