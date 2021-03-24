@@ -7,8 +7,11 @@ from abc import ABC, abstractmethod
 from typing import List, Dict, Union, Tuple, Any, Optional
 
 import lex
+from lex import SyntaxError
 import parse
 import prototype
+from prototype import (SemanticError, NonZeroExitCodeError, CommandWithNoArgumentsError,
+                       MissingStitchScriptError, MissingProgramError, UndefinedEnvironmentVariableError)
 
 SCRIPT_DIR_STR = os.path.dirname(__file__)
 SCRIPT_DIR = SCRIPT_DIR_STR.encode('utf8')
@@ -20,35 +23,22 @@ class ErrorReader(prototype.Reader):
     def read(self) -> Optional[bytes]:
         raise Exception("stdin has been disabled for this test")
 ERROR_READER = ErrorReader()
-class StringReader(prototype.Reader):
-    def __init__(self, s: bytes):
-        self.s: Optional[bytes] = s
-    @staticmethod
-    def descriptor():
-        return "string"
-    def read(self) -> Optional[bytes]:
-        result = self.s
-        self.s = None
-        return result
 
 class Options:
-    def __init__(self, verification_mode: bool, stdin: Optional[bytes] = None):
+    def __init__(self, stdin: Optional[bytes] = None):
         if stdin is not None:
             assert(isinstance(stdin, bytes))
-            assert(not verification_mode)
-        self.verification_mode = verification_mode
         self.stdin = stdin
     def getStdinReader(self) -> prototype.Reader:
         if self.stdin:
-            assert(not self.verification_mode)
-            return StringReader(self.stdin)
+            return prototype.StringReader(self.stdin)
         return ERROR_READER
 
-def runInternal(line: bytes, options: Options):
-    context = prototype.ScriptContext(prototype.GlobalContext(True, SCRIPT_DIR), __file__.encode('utf8'), line, options.verification_mode)
+def runInternal(line: bytes, verification_mode: bool, options: Options):
+    context = prototype.ScriptContext(prototype.GlobalContext(True, SCRIPT_DIR), __file__.encode('utf8'), line, verification_mode)
 
-    stdout = prototype.newCaptureWriter(options.verification_mode)
-    stderr = prototype.newCaptureWriter(options.verification_mode)
+    stdout = prototype.newCaptureWriter(verification_mode)
+    stderr = prototype.newCaptureWriter(verification_mode)
     nodes, end = parse.parseCommand(line, 0, context.allstringliterals)
     assert(end == len(line))
     assert(len(nodes) > 0)
@@ -62,6 +52,12 @@ class Expect(ABC):
     @abstractmethod
     def verify(self, result, stdout: Union[bytes,prototype.UnknownString], stderr: Union[bytes,prototype.UnknownString], test_line: int):
         pass
+class ExpectVerifyExitCode(Expect):
+    pass
+    def verify(self, result, stdout: Union[bytes,prototype.UnknownString], stderr: Union[bytes,prototype.UnknownString], test_line: int):
+        if (type(result) != prototype.ExitCode and
+            type(result) != prototype.UnknownExitCode):
+            print("{}({}): Error: expected an ExitCode but got {}: {}".format(__file__, test_line, type(result).__name__, result))
 class ExpectExitAndStdout(Expect):
     def __init__(self, exitcode: int, stdout: bytes):
         self.exitcode = exitcode
@@ -90,55 +86,75 @@ class ExpectError(Expect):
             print("actual  : {}".format(result_msg))
             sys.exit(1)
 
-def runTest(src: bytes, expect: Expect, test_line: int, options: Options):
-    context = prototype.ScriptContext(prototype.GlobalContext(True, SCRIPT_DIR), __file__.encode('utf8'), src, options.verification_mode)
-    stdout = prototype.newCaptureWriter(options.verification_mode)
-    stderr = prototype.newCaptureWriter(options.verification_mode)
+def runTest(src: bytes, expect: Expect, test_line: int, options: Options, verification_mode: bool):
+    context = prototype.ScriptContext(prototype.GlobalContext(True, SCRIPT_DIR), __file__.encode('utf8'), src, verification_mode)
+    stdout = prototype.newCaptureWriter(verification_mode)
+    stderr = prototype.newCaptureWriter(verification_mode)
     result: Any = None
     try:
         result = prototype.runScript(context, stdout, stderr, options.getStdinReader())
-    except lex.SyntaxError as e:
+    except SyntaxError as e:
         result = e
     expect.verify(result, prototype.getCaptureWriterOutput(stdout), prototype.getCaptureWriterOutput(stderr), test_line)
 
 def getCallerLine():
     return inspect.getframeinfo(inspect.stack()[2][0]).lineno
 
-def testCommand(src: bytes, exitcode: int, stdout: bytes, options: Options = Options(verification_mode=False)):
+def testCommand(src: bytes, exitcode: int, stdout: bytes, options: Options = Options()):#, verification_mode: bool=False):
     expect = ExpectExitAndStdout(exitcode, stdout)
     print("testCommand({!r}, exitcode={}, stdout{!r}".format(src, exitcode, stdout))
-    runTest(src, expect, getCallerLine(), options)
 
-def testError(src: bytes, error_type, message: str, options: Options = Options(verification_mode=True)):
-    expect = ExpectError(error_type, message)
-    print("testError({!r}, {}, {})".format(src, error_type.__name__, message))
-    runTest(src, expect, getCallerLine(), options)
+    test_line = getCallerLine()
+    runTest(src, ExpectVerifyExitCode(), test_line, options, verification_mode=True)
+    runTest(src, expect,                 test_line, options, verification_mode=False)
+
+def testError(src: bytes, error_type, msg: str, exec_error_type=None, exec_msg: str=None, opt: Options=Options()):
+    print("testError({!r}, {}, {})".format(src, error_type.__name__, msg))
+    test_line = getCallerLine()
+    runTest(src, ExpectError(error_type, msg), test_line, opt, True)
+    if exec_error_type:
+        runTest(src, ExpectError(exec_error_type, exec_msg), test_line, opt, False)
+
+# test an error that only occurs at exec time
+def testExecError(src: bytes, error_type, msg: str, opt: Options=Options()):
+    print("testExecError({!r}, {}, {})".format(src, error_type.__name__, msg))
+    test_line = getCallerLine()
+    runTest(src, ExpectVerifyExitCode(), test_line, opt, True)
+    runTest(src, ExpectError(error_type, msg), test_line, opt, False)
 
 def testSyntaxError(src: bytes, message: str):
-    expect = ExpectError(lex.SyntaxError, message)
-    print("testSyntaxError({!r}, {})".format(src, message))
-    runTest(src, expect, getCallerLine(), Options(verification_mode=True))
+    testError(src, SyntaxError, message)
 
 def testSemanticError(src: bytes, message: str):
-    expect = ExpectError(prototype.SemanticError, message)
-    print("testSemanticError({!r}, {})".format(src, message))
-    runTest(src, expect, getCallerLine(), Options(verification_mode=True))
+    testError(src, SemanticError, message)
 
-def testAssertError(src: bytes, options: Options = Options(verification_mode=True)):
+def testAssertError(src: bytes, options: Options = Options()):
     expect = ExpectError(prototype.AssertError, "@assert failed")
     print("testAssertError({!r})".format(src))
-    runTest(src, expect, getCallerLine(), options)
+    #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    # TODO: run the test in verification mode as well
+    runTest(src, expect, getCallerLine(), options, verification_mode=False)
 
 def testBoolExpression(line: bytes, expected: bool):
     print("testBoolExpression({!r}, {})".format(line, expected))
-    result, stdout, stderr = runInternal(line, Options(verification_mode=False))
+    #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    # TODO: run the test in verification mode as well
+    result, stdout, stderr = runInternal(line, verification_mode=False, options=Options())
     if not isinstance(result, prototype.Bool):
         sys.exit("Error: expected expression to return Bool but got {}: {}".format(type(result).__name__, result))
     assert(expected == result.value)
 
 def testArrayExpression(line: bytes, expected: prototype.Array):
     print("testArrayExpression({!r}, {})".format(line, expected))
-    result, stdout, stderr = runInternal(line, Options(verification_mode=False))
+    #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    # TODO: run the test in verification mode as well
+    result, stdout, stderr = runInternal(line, verification_mode=False, options=Options())
     test_line = getCallerLine()
     if not isinstance(result, prototype.Array):
         sys.exit("Error: expected expression to return Array but got {}: {}".format(type(result).__name__, result))
@@ -322,32 +338,54 @@ def main():
     testSemanticError(b"true @and true", "'@and' does not accept objects of type String")
     testSemanticError(b"(@array) @and @true", "'@and' does not accept objects of type Array")
     testSemanticError(b"@true @and (@array)", "'@and' does not accept objects of type Array")
-    testSemanticError(b"@false @and", "missing operand after '@and'")
+    testError(b"@false @and",
+              SemanticError, "missing operand after '@and'",
+              SemanticError, "unhandled Bool whose value is False")
     testSemanticError(b"(true) @and", "'@and' does not accept objects of type String")
-    testSemanticError(b"(false) @and", "'@and' does not accept objects of type String")
+    testError(b"(false) @and",
+              SemanticError, "'@and' does not accept objects of type String",
+              NonZeroExitCodeError, "command failed with exit code 1")
     testSemanticError(b"false false @or", "unexpected '@or'")
-    testSemanticError(b"(false) @or", "'@or' does not accept objects of type String")
+    testError(b"(false) @or",
+              SemanticError, "'@or' does not accept objects of type String",
+              NonZeroExitCodeError, "command failed with exit code 1")
     testSemanticError(b"(@multiline true) @or", "'@or' does not accept objects of type String")
     testSemanticError(b"(@and)", "unexpected '@and'")
     testSemanticError(b"(@and) @or", "unexpected '@and'")
-    testSemanticError(b"@false @and false false", "'@and' does not accept objects of type String")
-    testSemanticError(b"@false @and @false false", "expected '@and' operator but got token 'false'; commands must be wrapped with (...)")
-    testSemanticError(b"@false @and @false @or @false", "'@and' and '@or' cannot be chained")
+    testError(b"@false @and false false",
+              SemanticError, "'@and' does not accept objects of type String",
+              SemanticError, "unhandled Bool whose value is False")
+    testError(b"@false @and @false false",
+              SemanticError, "expected '@and' operator but got token 'false'; commands must be wrapped with (...)",
+              SemanticError, "unhandled Bool whose value is False")
+    testError(b"@false @and @false @or @false",
+              SemanticError, "'@and' and '@or' cannot be chained",
+              SemanticError, "unhandled Bool whose value is False")
     testSemanticError(b"true @and true", "'@and' does not accept objects of type String")
     testSemanticError(b"@true @and true", "'@and' does not accept objects of type String")
     testSemanticError(b"true @and (true)", "'@and' does not accept objects of type String")
     testSemanticError(b"@false @or @false @and @false", "'@or' and '@and' cannot be chained")
-    testSemanticError(b"@true @or @true @and @true", "'@or' and '@and' cannot be chained")
+    testError(b"@true @or @true @and @true",
+              SemanticError, "'@or' and '@and' cannot be chained",
+              SemanticError, "unhandled Bool whose value is True")
     testSemanticError(b"@true @and @true @or @true", "'@and' and '@or' cannot be chained")
     testSemanticError(b"@false @or @false @or false", "'@or' does not accept objects of type String")
 
     # TODO: implement stderr error messages
     testCommand(b"false", 1, b"")
-    testSemanticError(b"@false @or (false)", "'@or' does not accept objects of type String")
-    testSemanticError(b"(false) @or @false", "'@or' does not accept objects of type String")
-    testSemanticError(b"(false) @or (false)", "'@or' does not accept objects of type String")
+    testError(b"@false @or (false)",
+              SemanticError, "'@or' does not accept objects of type String",
+              NonZeroExitCodeError, "command failed with exit code 1")
+    testError(b"(false) @or @false",
+              SemanticError, "'@or' does not accept objects of type String",
+              NonZeroExitCodeError, "command failed with exit code 1")
+    testError(b"(false) @or (false)",
+              SemanticError, "'@or' does not accept objects of type String",
+              NonZeroExitCodeError, "command failed with exit code 1")
     testSemanticError(b"(true) @or (true)", "'@or' does not accept objects of type String")
-    testSemanticError(b"(false) @or (true)", "'@or' does not accept objects of type String")
+    testError(b"(false) @or (true)",
+              SemanticError, "'@or' does not accept objects of type String",
+              NonZeroExitCodeError, "command failed with exit code 1")
     testBoolExpression(b"(@exitcode false) @or (@exitcode false)", False)
     testBoolExpression(b"(@exitcode false) @or (@exitcode true)", True)
     testBoolExpression(b"@true @or @undefined", True)
@@ -401,7 +439,9 @@ def main():
     testBoolExpression(b"(@echo foo) @eq bar", False)
 
     testSemanticError(b"@assert", "@assert requires at least 1 argument")
-    testSemanticError(b"@assert (@array)", "@assert expects a Bool but got a CommandResult")
+    testError(b"@assert (@array)",
+              SemanticError, "@assert expects a Bool but got a CommandResult",
+              CommandWithNoArgumentsError, "got a command with no arguments")
     testAssertError(b"@assert @false")
     testCommand(b"@assert @true", 0, b"")
     testSemanticError(b"@assert true", "@assert expects a Bool but got a CommandResult")
@@ -409,7 +449,9 @@ def main():
     testSemanticError(b"@not", "@not requires at least 1 argument")
     testSemanticError(b"@not @true @and @false", "got binary expression inside ambiguous operator '@not', wrap inside (..parenthesis..)")
     # TODO: improve this error
-    testSemanticError(b"@not (@array)", "unhandled Bool")
+    testError(b"@not (@array)",
+              SemanticError, "unhandled Bool",
+              CommandWithNoArgumentsError, "got a command with no arguments")
     testBoolExpression(b"@not @false", True)
 
     testSemanticError(b"@if", "@if requires at least 1 argument")
@@ -432,8 +474,7 @@ def main():
     testSemanticError(b"@assert @end", "too many '@end'")
     testSemanticError(b"@not @end", "too many '@end'")
 
-    testError(b"(@array)", prototype.CommandWithNoArgumentsError, "got a command with no arguments",
-              Options(verification_mode=False))
+    testExecError(b"(@array)", CommandWithNoArgumentsError, "got a command with no arguments")
 
     testSemanticError(b"@haveprog", "@haveprog takes 1 argument but got 0")
     testSemanticError(b"@haveprog a b", "@haveprog takes 1 argument but got 2")
@@ -500,7 +541,8 @@ def main():
     testSemanticError(b"@env", "@env takes 1 argument but got 0")
     testSemanticError(b"@env PWD PWD", "@env takes 1 argument but got 2")
     testSemanticError(b"@env @false", "@env requires a String but got Bool")
-    testError(b"@env THIS_IS_NOT_DEFINED", prototype.UndefinedEnvironmentVariableError, "undefined environment variable 'THIS_IS_NOT_DEFINED'", Options(verification_mode=False))
+    testExecError(b"@env THIS_IS_NOT_DEFINED", prototype.UndefinedEnvironmentVariableError,
+                  "undefined environment variable 'THIS_IS_NOT_DEFINED'")
 
     testSemanticError(b"@envdefault", "@envdefault takes 2 arguments but got 0")
     testSemanticError(b"@envdefault foo", "@envdefault takes 2 arguments but got 1")
@@ -521,16 +563,16 @@ def main():
     testSemanticError(b"@unsetenv", "@unsetenv takes 1 argument but got 0")
     testSemanticError(b"@unsetenv PWD PWD", "@unsetenv takes 1 argument but got 2")
     testSemanticError(b"@unsetenv @false", "@unsetenv requires a String but got Bool")
-    testError(b"@unsetenv THIS_IS_NOT_DEFINED", prototype.UndefinedEnvironmentVariableError,
-              "undefined environment variable 'THIS_IS_NOT_DEFINED'", Options(verification_mode=False))
+    testExecError(b"@unsetenv THIS_IS_NOT_DEFINED", UndefinedEnvironmentVariableError,
+                  "undefined environment variable 'THIS_IS_NOT_DEFINED'")
 
-    testError(b"@unsetenv FOO", prototype.UndefinedEnvironmentVariableError,
-              "undefined environment variable 'FOO'", Options(verification_mode=False))
+    testExecError(b"@unsetenv FOO", UndefinedEnvironmentVariableError,
+                  "undefined environment variable 'FOO'")
     testAssertError(b"\n".join([
         b"@setenv FOO bar",
         b"@assert (@env FOO) @eq bar",
         b"@assert @not ((@env FOO) @eq bar)",
-    ]), Options(verification_mode=False))
+    ]))
     # cleanup since environment variables are global right now
     testCommand(b"@unsetenv FOO", 0, b"")
     testCommand(b"\n".join([
@@ -543,11 +585,11 @@ def main():
 
     testSemanticError(b"@call", "@call requires at least one argument")
     testSemanticError(b"@call @false", "@call requires Strings but got Bool")
-    testError(b"@call this-file-does-not-exist", prototype.MissingStitchScript,
-              "stitch script 'this-file-does-not-exist' does not exist", Options(verification_mode=False))
+    testExecError(b"@call this-file-does-not-exist", MissingStitchScriptError,
+                  "stitch script 'this-file-does-not-exist' does not exist")
 
     testSemanticError(b"@cat a b", "'@cat' takes 0 or 1 arguments but got 2")
-    testCommand(b"@cat", 0, b"what", Options(verification_mode=False, stdin=b"what"))
+    testCommand(b"@cat", 0, b"what", Options(stdin=b"what"))
 
     #
     # Arrays
@@ -585,15 +627,44 @@ def main():
     testBadPipeNode("@not", after_only=True)
 
     testSemanticError(b"@not @pipe b", "unexpected '@pipe'")
-    testSemanticError(b"@not (@echo) @pipe (@echo)", "unexpected '@pipe'")
+    testSemanticError(b"@not (@echo) @pipe (@echo)", "@not expects a Bool but got an ExitCode")
     testSemanticError(b"(@echo) @pipe (@echo) @false", "expected '@pipe' but got '@false'")
-    #testSemanticError(b"(@true) @pipe (@echo)", "unexpected Bool within @pipe expression")
+    testSemanticError(b"(@true) @pipe (@echo)", "unexpected Bool within @pipe expression")
     testSemanticError(b"(@echo) @pipe (@true)", "unexpected Bool within @pipe expression")
     testSemanticError(b"(@true @and @true) @pipe (@echo)", "unexpected binary expression within @pipe expression")
+
     testCommand(b"(@echo hello) @pipe (@cat)", 0, b"hello\n")
-    #testSemanticError(b"a @pipe b", "@pipe not impl")
-    #testCommand(b"(@echo hello) @pipe (@echo pipes)", 0, b"pipes")
-    #testCommand(b"@assert (@exitcode (@echo) @pipe (@echo))", 0, b"")
+
+    testSemanticError(b"(@exitcode (@echo hello) @pipe (@cat))", "unhandled Bool")
+    testCommand(b"@assert (@exitcode (@echo hello) @pipe (@cat))", 0, b"hello\n")
+    testSemanticError(b"a @pipe b", "'@pipe' requires an inline command but got 'a'")
+    testCommand(b"(@echo hello) @pipe (@echo pipes)", 0, b"pipes\n")
+    testCommand(b"@assert (@exitcode (@echo) @pipe (@echo))", 0, b"")
+
+    testCommand(b"(@assert (@exitcode @echo)) @pipe (@cat)", 0, b"")
+    testSemanticError(b"(@isfile this_does_not_exist) @pipe (@cat)", "commands with @isfile cannot be piped")
+    testSemanticError(b"(@exitcode @echo hello) @pipe (@cat)", "commands with @exitcode cannot be piped")
+    testSemanticError(b"(@echo hello) @pipe (@exitcode @false)", "unhandled Bool")
+    testSemanticError(b"(@echo hello) @pipe (@exitcode @true @and @true)",
+                      "@exitcode is not compatible with binary expressions")
+    testError(b"(@echo hello) @pipe (@exitcode this_program_does_not_exist)",
+              SemanticError, "unhandled Bool",
+              MissingProgramError, "unable to find program 'this_program_does_not_exist' in PATH")
+    testError(b"(@echo hello) @pipe (@exitcode (@array))",
+              SemanticError, "unhandled Bool",
+              CommandWithNoArgumentsError, "got a command with no arguments")
+    testSemanticError(b"(@echo hello) @pipe (@exitcode @cat)", "unhandled Bool whose value is True")
+    testCommand(b"@assert (@echo hello) @pipe (@exitcode @cat)", 0, b"hello\n")
+    testSemanticError(b"@assert ((@echo hello) @pipe (@exitcode @cat))",
+                      "this inline command captured multiple objects, a Bool and stdout")
+    # TODO: implement captureobj and add this test
+    #       or maybe look into the last command of a pipe chain and limit it somehow?
+    #testCommand(b"@assert (@captureobj (@echo hello) @pipe (@exitcode @cat))", 0, b"hello\n")
+    testCommand(b"@assert (@exitcode (@echo hello) @pipe (@cat))", 0, b"hello\n")
+
+    # TODO: implement PipeWriterToProgram and add this test
+    # TODO: add "cat" program to Windows?  could use stitch interpreter inside a batch script if necessary
+    #testCommand(b"(@echo hello) @pipe (cat)", 0, "hello\n")
 
     runStitchTests()
 
