@@ -545,9 +545,14 @@ config_dir = (@env XDG_CONFIG_HOME)/$prog_name
     # Create configuration directory, if needed
     mkdir -p @callerworkdir/$config_dir
 @end
-#
-#readarray -t ALL_VARIANTS <<< "$(find "$config_dir" -maxdepth 2 -mindepth 2 ! -path "$config_dir/.*" ! -path "$config_dir/*/.config" | sed "s/${config_dir//\//\\\/}\///")"
-#readarray -t ALL_TARGETS <<< "$(find "$config_dir" -maxdepth 1 -type d ! -path "$config_dir" ! -path "$config_dir/.*" | pathname)"
+
+@if @isdir $config_dir
+    (find $config_dir -maxdepth 2 -mindepth 2 ! -path $config_dir/.* ! -path $config_dir/*/.config) @pipe (sed "s/${config_dir//\//\\\/}\///") @pipe (readarray -t ALL_VARIANTS)
+    # NOTE: the awk -F/ '{print $NF}' is in a function named pathname
+    #       do that when I implement @program
+    (find $config_dir -maxdepth 1 -type d ! -path $config_dir ! -path $config_dir/.*) @pipe (awk -F/ "{print $NF}") @pipe (readarray -t ALL_TARGETS)
+@end
+
 #
 ## Process command-line options/arguments
 #while [[ "$1" ]]; do

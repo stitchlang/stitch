@@ -343,8 +343,6 @@ class IncompletePipeWriter(RuntimeWriter):
     @staticmethod
     def descriptor():
         return "incomplete-pipe"
-    #def handleUnknownData(self):
-    #    raise Exception("codebug: cannot write to an incomplete-pipe")
     def handle(self, s: bytes):
         raise Exception("codebug: cannot write to an incomplete-pipe")
 INCOMPLETE_PIPE_WRITER = IncompletePipeWriter()
@@ -353,24 +351,46 @@ class PipeWriter(RuntimeWriter):
     @abstractmethod
     def getPipeReader(self) -> "Reader":
         pass
+    @abstractmethod
+    def close(self):
+        pass
 
 class PipeWriterToBuiltin(PipeWriter):
     def __init__(self):
-        self.data_event: Optional[threading.Event] = threading.Event()
+        self.lock: threading.Lock = threading.Lock()
+        self.data_event: threading.Event = threading.Event()
         self.data_builder = StringBuilder()
+        self.closed = False
     @staticmethod
     def descriptor():
         return "pipe-writer-to-builtin"
     def handle(self, s: bytes):
-        assert(self.data_event is not None)
-        self.data_builder.handle(s)
-        self.data_event.set()
+        with self.lock:
+            assert(not self.closed)
+            self.data_builder.handle(s)
+            self.data_event.set()
     def getPipeReader(self) -> "PipeReaderForBuiltin":
         return PipeReaderForBuiltin(self)
     def close(self):
-        assert(self.data_event is not None)
-        self.data_event.set()
-        self.data_event = None
+        with self.lock:
+            assert(not self.closed)
+            self.closed = True
+            self.data_event.set()
+
+class PipeWriterToExternalProgram(PipeWriter):
+    def __init__(self, popen: subprocess.Popen):
+        self.popen = popen
+    @staticmethod
+    def descriptor():
+        return "pipe-writer-to-program"
+    def handle(self, s: bytes):
+        #print("DEBUG: PipeWriterToExternalProgram: writing {} bytes...".format(len(s)))
+        self.popen.stdin.write(s)
+    def getPipeReader(self) -> "PipeReaderForExternalProgram":
+        return PipeReaderForExternalProgram(self.popen)
+    def close(self):
+        #print("DEBUG: PipeWriterToExternalProgram: close")
+        self.popen.stdin.close()
 
 class VerifyWriter(Writer):
     def __init__(self, builder: Optional[StringBuilder], for_pipe: bool):
@@ -431,19 +451,38 @@ class PipeReaderForBuiltin(Reader):
         return "pipe-reader-for-builtin"
     def read(self) -> Optional[bytes]:
         while True:
-            if not self.writer.data_event:
-                break
+            with self.writer.lock:
+                if self.writer.closed:
+                    break
             self.writer.data_event.wait()
-            output = self.writer.data_builder.output
-            if len(output) > 0:
-                self.writer.data_builder.output = b""
-                return output
+            with self.writer.lock:
+                output = self.writer.data_builder.output
+                if len(output) > 0:
+                    self.writer.data_builder.output = b""
+                    return output
 
+        # no need to lock because writer is closed
         output = self.writer.data_builder.output
         if len(output) > 0:
             self.writer.data_builder.output = b""
             return output
         return None
+
+class PipeReaderForExternalProgram(Reader):
+    def __init__(self, popen: subprocess.Popen):
+        self.popen = popen
+    @staticmethod
+    def descriptor():
+        return "pipe-reader-for-program"
+    def read(self) -> Optional[bytes]:
+        #print("DEBUG: PipeReaderForExternalProgram: read...")
+        # TODO: handle stderr as well
+        result = self.popen.stdout.read()
+        #print("DEBUG: PipeReaderForExternalProgram: read returned {}".format(result))
+        assert(isinstance(result, bytes))
+        if len(result) == 0:
+            return None
+        return result
 
 class Capture:
     def __init__(self, exitcode: bool, stdout: Writer, stderr: Writer, stdin: Optional[Reader]):
@@ -873,7 +912,7 @@ binary_evaluators = {
     BinaryOpKind.LT: CompareEvaluator(BinaryOpKind.LT, CompareOp.lt),
 }
 
-def which(name):
+def which(name: bytes) -> Optional[bytes]:
     extensions = [b""] if (os.name != "nt") else [e.encode('utf8') for e in os.environ["PATHEXT"].split(";")]
     for path in os.environ["PATH"].split(os.pathsep):
         path_bytes = path.encode('utf8')
@@ -1090,23 +1129,79 @@ def runAssign(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> Union[Error,E
     cmd_ctx.var_map[varname.value] = value
     return UnknownExitCode() if is_unknown_value else ExitCode(0)
 
-class CommandThread(Thread):
-    def __init__(self, cmd_ctx: CommandContext, nodes: List[parse.Node]):
-        super().__init__()
+class PipeCommand(ABC):
+    def __init__(self, cmd_ctx: CommandContext):
         self.cmd_ctx = cmd_ctx
+    @abstractmethod
+    def prepare(self) -> Optional[Error]:
+        # NOTE: this is not called at verify time
+        pass
+    @abstractmethod
+    def getPipeWriter(self) -> PipeWriter:
+        pass
+    @abstractmethod
+    def run(self):
+        pass
+class PipeCommandBuiltin(PipeCommand):
+    def __init__(self, cmd_ctx: CommandContext, builtin: Builtin, nodes: List[parse.Node]):
+        super().__init__(cmd_ctx)
+        self.builtin = builtin
         self.nodes = nodes
+    def prepare(self) -> Optional[Error]:
+        return None
+    def getPipeWriter(self) -> PipeWriter:
+        return PipeWriterToBuiltin()
+    def run(self):
+        return runBuiltin(self.cmd_ctx, self.builtin, self.nodes)
+class PipeCommandExternalProgram(PipeCommand):
+    def __init__(self, cmd_ctx: CommandContext, args: List[bytes], unknown_args: UnknownArray, pipe_stdout: bool):
+        assert(len(args) > 0)
+        super().__init__(cmd_ctx)
+        self.args = args
+        self.unknown_args = unknown_args
+        self.pipe_stdout = pipe_stdout
+        self.popen: Optional[subprocess.Popen] = None
+    def prepare(self) -> Optional[Error]:
+        assert(not self.cmd_ctx.script.verification_mode)
+        assert(self.unknown_args.empty())
+        assert(self.popen is None)
+        if len(self.args) == 0:
+            return CommandWithNoArgumentsError()
+        prog = resolveExternalProgram(self.args[0])
+        if isinstance(prog, Error):
+            return prog
+        stdout = subprocess.PIPE if self.pipe_stdout else None
+        # TODO: stderr?
+        args = [prog] + self.args[1:]
+        #print(" ".join([a.decode('utf8') for a in args]))
+        self.popen = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=stdout)
+        return None
+    def getPipeWriter(self) -> PipeWriter:
+        assert(self.popen is not None)
+        return PipeWriterToExternalProgram(self.popen)
+    def run(self):
+        if self.cmd_ctx.script.verification_mode:
+            return UnknownExitCode()
+        if self.pipe_stdout:
+            while True:
+                result = self.popen.stdout.read()
+                assert(isinstance(result, bytes))
+                if len(result) == 0:
+                    break
+                self.cmd_ctx.capture.stdout.handle(result)
+        result = self.popen.wait()
+        assert(isinstance(result, int))
+        return ExitCode(result)
+
+class CommandThread(Thread):
+    def __init__(self, pipe_cmd: PipeCommand):
+        super().__init__()
+        self.pipe_cmd = pipe_cmd
         self.return_value: Optional[Union[Error,Bool,ExitCode,UnknownBool,UnknownExitCode]] = None
     def run(self):
-        self.return_value = runCommandNodes(self.cmd_ctx, self.nodes)
-        if isinstance(self.cmd_ctx.capture.stdout, PipeWriterToBuiltin):
-            self.cmd_ctx.capture.stdout.close()
-
-def nextPipeWriter(next_kind: CommandKind) -> PipeWriter:
-    if isinstance(next_kind, CommandKinds.Builtin):
-        return PipeWriterToBuiltin()
-    assert(isinstance(next_kind, CommandKinds.ExternalProgram))
-    raise Exception("PipeWriterToProgram not impl")
-    #return PipeWriterToProgram()
+        self.return_value = self.pipe_cmd.run()
+        if isinstance(self.pipe_cmd.cmd_ctx.capture.stdout, PipeWriter):
+            self.pipe_cmd.cmd_ctx.capture.stdout.close()
 
 ExpressionResult = Union[Error,ExitCode,Bool,String,Array,UnknownExitCode,UnknownBool,UnknownString,UnknownArray]
 
@@ -1132,11 +1227,15 @@ def runPipe(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> ExpressionResul
         if not isinstance(next_op, parse.NodeBinaryOp):
             return SemanticError("expected '@pipe' but got '{}'".format(next_op.userString(cmd_ctx.script.src)))
 
-    context_list: List[CommandContext] = []
-    inline_cmd_kinds: List[Union[CommandKinds.Builtin,CommandKinds.ExternalProgram]] = []
+    if isinstance(cmd_ctx.capture.stdout, ConsoleWriter):
+        pipe_last_command = False
+    else:
+        assert(isinstance(cmd_ctx.capture.stdout, StringBuilder) or isinstance(cmd_ctx.capture.stdout, VerifyWriter))
+        pipe_last_command = True
+
+    inline_cmds: List[PipeCommand] = []
     for i, inline_cmd_node in enumerate(inline_cmd_nodes):
         inline_cmd_ctx = cmd_ctx.createPipeChild()
-        context_list.append(inline_cmd_ctx)
         cmd_kind = getCommandKind(inline_cmd_ctx, inline_cmd_node.nodes)
         if isinstance(cmd_kind, Error):
             return cmd_kind
@@ -1144,24 +1243,34 @@ def runPipe(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> ExpressionResul
             return SemanticError("unexpected binary expression within @pipe expression")
         if isinstance(cmd_kind, CommandKinds.Bool):
             return SemanticError("unexpected Bool within @pipe expression")
-        assert(isinstance(cmd_kind, CommandKinds.Builtin) or
-               isinstance(cmd_kind, CommandKinds.ExternalProgram))
-        inline_cmd_kinds.append(cmd_kind)
+
+        if isinstance(cmd_kind, CommandKinds.Builtin):
+            inline_cmds.append(PipeCommandBuiltin(inline_cmd_ctx, cmd_kind.builtin, inline_cmd_node.nodes[1:]))
+        else:
+            assert(isinstance(cmd_kind, CommandKinds.ExternalProgram))
+            unknown_args = UnknownArray(0, 0)
+            args = nodesToArgs(cmd_ctx, inline_cmd_node.nodes, unknown_args, ExpandNodeErrorContext())
+            if isinstance(args, Error):
+                return args
+            if len(args) == 0 and unknown_args.empty():
+                return CommandWithNoArgumentsError()
+            pipe_stdout = ((i+1) < len(inline_cmd_nodes)) or pipe_last_command
+            inline_cmds.append(PipeCommandExternalProgram(inline_cmd_ctx, args, unknown_args, pipe_stdout))
 
     if cmd_ctx.script.verification_mode:
-        context_list[0].capture.stdin = None
+        inline_cmds[0].cmd_ctx.capture.stdin = None
         i = 0
         while True:
             on_last = ((i + 1) == len(inline_cmd_nodes))
             if on_last:
-                context_list[i].capture.stdout = cmd_ctx.capture.stdout
+                inline_cmds[i].cmd_ctx.capture.stdout = cmd_ctx.capture.stdout
             else:
-                context_list[i].capture.stdout = VerifyWriter(StringBuilder(), for_pipe=True)
+                inline_cmds[i].cmd_ctx.capture.stdout = VerifyWriter(StringBuilder(), for_pipe=True)
 
-            result = runCommandNodes(context_list[i], inline_cmd_nodes[i].nodes)
+            result = inline_cmds[i].run()
             stdout = None
             if not on_last:
-                writer = context_list[i].capture.stdout
+                writer = inline_cmds[i].cmd_ctx.capture.stdout
                 assert(isinstance(writer, VerifyWriter))
                 if writer.builder:
                     stdout = writer.builder.output
@@ -1179,9 +1288,9 @@ def runPipe(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> ExpressionResul
             if on_last:
                 # we don't combine with the context output because stdout was set to the parent
                 # context and stderr is currently never captured, so in both cases they should be null
-                #return combineRunResultWithOutputs(context_list[i], result)
-                assert(context_list[i].capture.stdout == cmd_ctx.capture.stdout)
-                assert(context_list[i].capture.stderr == cmd_ctx.capture.stderr)
+                #return combineRunResultWithOutputs(inline_cmds[i].cmd_ctx, result)
+                assert(inline_cmds[i].cmd_ctx.capture.stdout == cmd_ctx.capture.stdout)
+                assert(inline_cmds[i].cmd_ctx.capture.stderr == cmd_ctx.capture.stderr)
                 assert(isinstance(result, Error) or
                        isinstance(result, ExitCode) or
                        isinstance(result, String) or
@@ -1189,7 +1298,7 @@ def runPipe(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> ExpressionResul
                        isinstance(result, UnknownExitCode) or
                        isinstance(result, UnknownString) or
                        isinstance(result, UnknownBool))
-                if context_list[i].capture.exitcode:
+                if inline_cmds[i].cmd_ctx.capture.exitcode:
                     if isinstance(result, ExitCode):
                         return BOOL_TRUE if (result.value == 0) else BOOL_FALSE
                     assert(isinstance(result, UnknownExitCode))
@@ -1198,27 +1307,34 @@ def runPipe(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> ExpressionResul
 
             i += 1
             if stdout:
-                context_list[i].capture.stdin = StringReader(stdout)
+                inline_cmds[i].cmd_ctx.capture.stdin = StringReader(stdout)
             else:
-                context_list[i].capture.stdin = None
+                inline_cmds[i].cmd_ctx.capture.stdin = None
 
-    next_stdin: Optional[Reader] = cmd_ctx.capture.stdin
-    next_stdout: Writer = nextPipeWriter(inline_cmd_kinds[1])
-    for i, inline_cmd_node in enumerate(inline_cmd_nodes):
-        context_list[i].capture.stdin = next_stdin
-        context_list[i].capture.stdout = next_stdout
-        if i + 1 < len(inline_cmd_nodes):
-            assert(isinstance(next_stdout, PipeWriter))
-            next_stdin = next_stdout.getPipeReader()
-            if i + 2 == len(inline_cmd_nodes):
-                next_stdout = cmd_ctx.capture.stdout
-            else:
-                next_stdout = nextPipeWriter(inline_cmd_kinds[i+2])
+    for inline_cmd in inline_cmds:
+        inline_cmd.prepare()
 
+    last_stdout = inline_cmds[1].getPipeWriter()
+    inline_cmds[0].cmd_ctx.capture.stdout = last_stdout
+    i = 1
+    while True:
+        inline_cmds[i].cmd_ctx.capture.stdin = last_stdout.getPipeReader()
+        if (i+1) == len(inline_cmds):
+            break
+        last_stdout = inline_cmds[i+1].getPipeWriter()
+        inline_cmds[i].cmd_ctx.capture.stdout = last_stdout
+        i += 1
+
+    inline_cmds[ 0].cmd_ctx.capture.stdin  = cmd_ctx.capture.stdin
+    inline_cmds[-1].cmd_ctx.capture.stdout = cmd_ctx.capture.stdout
+
+    # NOTE: currently I'm using threads to execute each command in the pipe, but
+    #       the final implementation will not be using threads.  It will probably
+    #       use some form of multiplexed IO.
     threads: List[CommandThread] = []
     for i, inline_cmd_node in enumerate(inline_cmd_nodes):
         #print("DEBUG: start thread {}".format(i))
-        thread = CommandThread(context_list[i], inline_cmd_node.nodes)
+        thread = CommandThread(inline_cmds[i])
         thread.start()
         threads.append(thread)
 
@@ -1230,8 +1346,8 @@ def runPipe(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> ExpressionResul
             inline_cmd_results.append(threads[i].return_value)
         else:
             # assert that our context has no output that we need to return
-            assert(context_list[i].capture.stdout == cmd_ctx.capture.stdout)
-            assert(context_list[i].capture.stderr == cmd_ctx.capture.stderr)
+            assert(inline_cmds[i].cmd_ctx.capture.stdout == cmd_ctx.capture.stdout)
+            assert(inline_cmds[i].cmd_ctx.capture.stderr == cmd_ctx.capture.stderr)
             last_result = threads[i].return_value
 
     for inline_cmd_result in inline_cmd_results:
@@ -1245,7 +1361,7 @@ def runPipe(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> ExpressionResul
 
     if isinstance(last_result, Error):
         return last_result
-    if context_list[-1].capture.exitcode:
+    if inline_cmds[-1].cmd_ctx.capture.exitcode:
         assert(isinstance(last_result, ExitCode))
         return BOOL_TRUE if (last_result.value == 0) else BOOL_FALSE
     if (isinstance(last_result, ExitCode) or
@@ -1346,17 +1462,26 @@ def objectToArgs(obj: StitchObject, args: List[bytes], unknown_args: UnknownArra
 
     return SemanticError("TODO: implement objectToArgs for type {} ({})".format(type(obj), obj))
 
+def resolveExternalProgram(prog: bytes) -> Union[Error,bytes]:
+    if os.name == "nt":
+        if b"/" in prog or b"\\" in prog:
+            return prog
+    else:
+        if b"/" in prog:
+            return prog
+    prog_filename = which(prog)
+    if not prog_filename:
+        return MissingProgramError(prog)
+    return prog_filename
+
 def runExternalProgram(stdout: RuntimeWriter, stderr: RuntimeWriter, args: List[bytes]) -> Union[Error,ExitCode]:
     if len(args) == 0:
         return CommandWithNoArgumentsError()
-    prog = args[0]
 
-    if not b"/" in prog:
-        prog_filename = which(prog)
-        if not prog_filename:
-            return MissingProgramError(prog)
-        # TODO: on linux we can specify a program file, and not modify args
-        args[0] = prog_filename
+    prog = resolveExternalProgram(args[0])
+    if isinstance(prog, Error):
+        return prog
+    args[0] = prog
 
     stdout_option = None if isinstance(stdout, ConsoleWriter) else subprocess.PIPE
     stderr_option = None if isinstance(stderr, ConsoleWriter) else subprocess.PIPE

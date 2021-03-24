@@ -109,12 +109,14 @@ def testCommand(src: bytes, exitcode: int, stdout: bytes, options: Options = Opt
     runTest(src, ExpectVerifyExitCode(), test_line, options, verification_mode=True)
     runTest(src, expect,                 test_line, options, verification_mode=False)
 
-def testError(src: bytes, error_type, msg: str, exec_error_type=None, exec_msg: str=None, opt: Options=Options()):
+def testErrorCommon(src: bytes, error_type, msg: str, test_line: int, exec_error_type=None, exec_msg: str=None, opt: Options=Options()):
     print("testError({!r}, {}, {})".format(src, error_type.__name__, msg))
-    test_line = getCallerLine()
     runTest(src, ExpectError(error_type, msg), test_line, opt, True)
     if exec_error_type:
         runTest(src, ExpectError(exec_error_type, exec_msg), test_line, opt, False)
+
+def testError(src: bytes, error_type, msg: str, exec_error_type=None, exec_msg: str=None, opt: Options=Options()):
+    testErrorCommon(src, error_type, msg, getCallerLine(), exec_error_type, exec_msg, opt)
 
 # test an error that only occurs at exec time
 def testExecError(src: bytes, error_type, msg: str, opt: Options=Options()):
@@ -124,10 +126,10 @@ def testExecError(src: bytes, error_type, msg: str, opt: Options=Options()):
     runTest(src, ExpectError(error_type, msg), test_line, opt, False)
 
 def testSyntaxError(src: bytes, message: str):
-    testError(src, SyntaxError, message)
+    testErrorCommon(src, SyntaxError, message, getCallerLine())
 
 def testSemanticError(src: bytes, message: str):
-    testError(src, SemanticError, message)
+    testErrorCommon(src, SemanticError, message, getCallerLine())
 
 def testAssertError(src: bytes, options: Options = Options()):
     expect = ExpectError(prototype.AssertError, "@assert failed")
@@ -664,6 +666,8 @@ def main():
     testSemanticError(b"(@true) @pipe (@echo)", "unexpected Bool within @pipe expression")
     testSemanticError(b"(@echo) @pipe (@true)", "unexpected Bool within @pipe expression")
     testSemanticError(b"(@true @and @true) @pipe (@echo)", "unexpected binary expression within @pipe expression")
+    testError(b"((@array)) @pipe (@echo)", CommandWithNoArgumentsError, "got a command with no arguments")
+    testError(b"(@echo) @pipe ((@array))", CommandWithNoArgumentsError, "got a command with no arguments")
 
     testCommand(b"(@echo hello) @pipe (@cat)", 0, b"hello\n")
 
@@ -694,10 +698,13 @@ def main():
     #testCommand(b"@assert (@captureobj (@echo hello) @pipe (@exitcode @cat))", 0, b"hello\n")
     testCommand(b"@assert (@exitcode (@echo hello) @pipe (@cat))", 0, b"hello\n")
 
-    # TODO: implement PipeWriterToProgram and add this test
-    # TODO: add "cat" program to Windows?  could use stitch interpreter inside a batch script if necessary
     testCommand(b"cat @callerworkdir/assetsfortest/hellomsg", 0, b"Hello Stitch!\n")
-    #testCommand(b"(@echo hello) @pipe (cat)", 0, "hello\n")
+    testCommand(b"(@echo hello) @pipe (cat)", 0, b"hello\n")
+    testCommand(b"(@echo hello) @pipe (@cat) @pipe (@cat)", 0, b"hello\n")
+    testCommand(b"(@echo hello) @pipe (@cat) @pipe (cat)", 0, b"hello\n")
+    testCommand(b"(@echo hello) @pipe (cat) @pipe (@cat)", 0, b"hello\n")
+    testCommand(b"(@echo hello) @pipe (cat) @pipe (cat)", 0, b"hello\n")
+    testCommand(b"(@echo hello) @pipe (cat) @pipe (cat) @pipe (@cat) @pipe (cat) @pipe (@cat)", 0, b"hello\n")
 
     runStitchTests()
 
