@@ -47,6 +47,7 @@ class BuiltinReturnType(Enum):
     ExitCode = 0
     Bool = 1
     Array = 2
+    NoReturn = 3
 
 class Builtin(StitchObject):
     def __init__(self, python_name_str: str, expand_type: BuiltinExpandType, return_type: BuiltinReturnType, arg_count: Optional[int] = None):
@@ -75,6 +76,12 @@ class Array(StitchObject):
     @staticmethod
     def userTypeDescriptor():
         return "Array"
+
+class NoReturn(StitchObject):
+    @staticmethod
+    def userTypeDescriptor():
+        return "NoReturn"
+NO_RETURN = NoReturn()
 
 # an unknown value, this is used during verification
 class Unknown(StitchObject):
@@ -834,6 +841,29 @@ class BuiltinMethods:
                 return UnknownArray(0, None)
         assert(len(args) == 1)
         return Array(args[0].splitlines())
+    @staticmethod
+    def exit(cmd_ctx: CommandContext, args: List[bytes], unknown_args: UnknownArray):
+        if cmd_ctx.script.verification_mode:
+            assertArgCount(1, len(args), unknown_args)
+            if len(args) > 0:
+                try:
+                    int(args[0])
+                except ValueError:
+                    return SemanticError("@exit requires an integer but got '{}'".format(args[0].decode('utf8')))
+            return NO_RETURN
+        assert(len(args) == 1)
+        sys.exit(int(args[0]))
+    @staticmethod
+    def getuid(cmd_ctx: CommandContext, nodes: List[parse.Node]):
+        assert(len(nodes) == 0)
+        if os.name == "nt":
+            return SemanticError("@getuid not supported on Windows")
+        if cmd_ctx.script.verification_mode:
+            assert(isinstance(cmd_ctx.capture.stdout, VerifyWriter))
+            cmd_ctx.capture.stdout.handleUnknownData()
+            return UnknownExitCode()
+        cmd_ctx.capture.stdout.handle(str(os.getuid()).encode('ascii'))
+        return ExitCode(0)
 
 def opInvalidTypeError(op: BinaryEvaluator, operand: StitchObject):
     #raise Exception("'{}' does not accept objects of type {}".format(op, operand.userTypeDescriptor()))
@@ -911,6 +941,8 @@ builtin_objects = {
     b"isdir": Builtin("isdir", BuiltinExpandType.Strings, BuiltinReturnType.Bool, arg_count=1),
     b"array": Builtin("array", BuiltinExpandType.Strings, BuiltinReturnType.Array),
     b"lines2array": Builtin("lines2array", BuiltinExpandType.Strings, BuiltinReturnType.Array, arg_count=1),
+    b"exit": Builtin("exit", BuiltinExpandType.Strings, BuiltinReturnType.NoReturn, arg_count=1),
+    b"getuid": Builtin("getuid", BuiltinExpandType.ParseNodes, BuiltinReturnType.ExitCode, arg_count=0),
 }
 
 binary_evaluators = {
@@ -1752,15 +1784,19 @@ def runScript(script_ctx: ScriptContext, stdout: Writer, stderr: Writer, stdin: 
             return result
         if isinstance(result, Bool):
             return SemanticError("unhandled Bool whose value is {}".format(result.value))
-        if isinstance(result, UnknownBool):
-            return SemanticError("unhandled Bool".format())
-
         if isinstance(result, ExitCode):
             if result.value != 0:
                 return result
         else:
-            assert(isinstance(result, UnknownExitCode))
             assert(script_ctx.verification_mode)
+            if isinstance(result, NoReturn):
+                # TODO: mark the current block as NoReturn and assert errors if there
+                #       are more commands in this block
+                pass
+            elif isinstance(result, UnknownBool):
+                return SemanticError("unhandled Bool".format())
+            else:
+                assert(isinstance(result, UnknownExitCode))
 
     if len(script_ctx.blockStack) != 1:
         return SemanticError("need more '@end'")

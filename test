@@ -227,6 +227,10 @@ def runStitchTests():
     stdout, stderr = runSubProcessTest(1, STITCH_INTERP_ARGS + ["-c", "\n\n @!"])
     expectMatches(stderr, [b"(line 3 column 2) unrecognized character sequence '@!'"])
 
+    stdout, stderr = runSubProcessTest(0, STITCH_INTERP_ARGS + ["-c", "@exit 0"])
+    stdout, stderr = runSubProcessTest(1, STITCH_INTERP_ARGS + ["-c", "@exit 1"])
+    stdout, stderr = runSubProcessTest(123, STITCH_INTERP_ARGS + ["-c", "@exit 123"])
+
     result = subprocess.run(STITCH_INTERP_ARGS + ["stitch-tests"])
     if result.returncode != 0:
         sys.exit(result.returncode)
@@ -708,6 +712,17 @@ def main():
     testCommand(b"(@echo hello) @pipe (cat) @pipe (cat) @pipe (@cat) @pipe (cat) @pipe (@cat)", 0, b"hello\n")
 
     testExecError(b"@unreachable", UnreachableError, "reached @unreachable")
+
+    if os.name == "nt":
+        testSemanticError(b"@getuid", "@getuid not supported on Windows")
+    else:
+        testSemanticError(b"@getuid a", "@getuid takes 0 arguments but got 1")
+        testCommand(b"@getuid", 0, str(os.getuid()).encode('ascii'))
+
+    testSemanticError(b"@exit", "@exit takes 1 argument but got 0")
+    testSemanticError(b"@exit foo", "@exit requires an integer but got 'foo'")
+    # TODO: this should be an error because @exit returns NoReturn
+    #testSemanticError(b"@exit 0\n@echo foo", "")
 
     runStitchTests()
 
