@@ -124,10 +124,42 @@ foo = 8
 Bash Pitfall #8: grep foo bar | while read -r; do ((count++)); done
 --------------------------------------------------------------------------------
 we don't have loops yet, but the underlying problem is that `count++` is
-executed in a subshell, however, this script doesn't do that so it shouldn't
-be a pitfall
+executed in a subshell, however, stitch doesn't execute inline-commands in subshells
+so this pitfall should be avoided.
 '''
 
 
+
+@note '''
+--------------------------------------------------------------------------------
+Bash Pitfall #9: if [grep foo myfile]
+--------------------------------------------------------------------------------
+The pitfall here is that '[' looks like it's part of the "if" syntax but it's not.
+In stitch the command `@if [grep foo myfile]` would cause a runtime error saying
+unable to find program "[grep". The correct syntax would be:
+
+    @if grep foo @callerworkdir/myfile
+
+The problem BASH has is that the '['square brackets']' are necessary for many kinds
+of conditional statements which increases the odds that a programmer will use them
+incorrectly in this use case.  This is not a problem with BASH but instead with the
+'[' program.  This means stitch scripts that make use of `[` are susceptible
+to the same pitfall. However, stitch scripts have alternatives to `[` that make it
+unnecessary and its use is discouraged to avoid its pitfals.
+'''
+touch @scriptdir/scratch/myfile
+@if grep foo @scriptdir/scratch/myfile
+    @unreachable
+@end
+
+# TODO: implement file redirection instead of using "tee"
+(@echo foo) @pipe (tee @scriptdir/scratch/myfile)
+@if @not grep foo @scriptdir/scratch/myfile
+    @unreachable
+@end
+
+
+
+
 @note cleaning up
-rm -rf scratch
+rm -rf @scriptdir/scratch

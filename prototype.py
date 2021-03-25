@@ -267,6 +267,9 @@ class UndefinedEnvironmentVariableError(Error):
     def __init__(self, name_str: str):
         Error.__init__(self, "undefined environment variable '{}'".format(name_str))
         self.name_str = name_str
+class UnreachableError(Error):
+    def __init__(self):
+        super().__init__("reached @unreachable")
 
 # These ExitCode and UnknownExitCode types are currently only used internally
 class ExitCode:
@@ -756,6 +759,11 @@ class BuiltinMethods:
             return AssertError(nodes)
         return ExitCode(0)
     @staticmethod
+    def unreachable(cmd_ctx: CommandContext, nodes: List[parse.Node]):
+        if cmd_ctx.script.verification_mode:
+            return UnknownExitCode()
+        return UnreachableError()
+    @staticmethod
     def if_(cmd_ctx: CommandContext, nodes: List[parse.Node]):
         result = expandNodesToBool(cmd_ctx.nextBuiltin(ambiguous_op=None), nodes, "@if", True)
         if isinstance(result, Error):
@@ -887,6 +895,7 @@ builtin_objects = {
     b"exitcode": Builtin("exitcode", BuiltinExpandType.ParseNodes, BuiltinReturnType.Bool),
     b"call": Builtin("call", BuiltinExpandType.Strings, BuiltinReturnType.ExitCode),
     b"assert": Builtin("assert_", BuiltinExpandType.ParseNodes, BuiltinReturnType.ExitCode),
+    b"unreachable": Builtin("unreachable", BuiltinExpandType.ParseNodes, BuiltinReturnType.ExitCode),
     b"if": Builtin("if_", BuiltinExpandType.ParseNodes, BuiltinReturnType.ExitCode),
     b"end": Builtin("end", BuiltinExpandType.ParseNodes, BuiltinReturnType.ExitCode, arg_count=0),
     b"haveprog": Builtin("haveprog", BuiltinExpandType.Strings, BuiltinReturnType.Bool, arg_count=1),

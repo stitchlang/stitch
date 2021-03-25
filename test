@@ -11,7 +11,8 @@ from lex import SyntaxError
 import parse
 import prototype
 from prototype import (SemanticError, NonZeroExitCodeError, CommandWithNoArgumentsError,
-                       MissingStitchScriptError, MissingProgramError, UndefinedEnvironmentVariableError)
+                       MissingStitchScriptError, MissingProgramError, UndefinedEnvironmentVariableError,
+                       UnreachableError)
 
 SCRIPT_DIR_STR = os.path.dirname(__file__)
 SCRIPT_DIR = SCRIPT_DIR_STR.encode('utf8')
@@ -705,6 +706,8 @@ def main():
     testCommand(b"(@echo hello) @pipe (cat) @pipe (@cat)", 0, b"hello\n")
     testCommand(b"(@echo hello) @pipe (cat) @pipe (cat)", 0, b"hello\n")
     testCommand(b"(@echo hello) @pipe (cat) @pipe (cat) @pipe (@cat) @pipe (cat) @pipe (@cat)", 0, b"hello\n")
+
+    testExecError(b"@unreachable", UnreachableError, "reached @unreachable")
 
     runStitchTests()
 
