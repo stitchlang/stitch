@@ -253,13 +253,10 @@ def windowsEscapeArg(arg):
         return '"' + arg.replace('"', r'\"') + '"'
     return arg
 
-def windowsSetup():
+def windowsSetup(outdir):
     path = os.path.join(SCRIPT_DIR_STR, "assetsfortest", "missing_windows_programs")
     os.environ["PATH"] = path + ";" + os.environ["PATH"]
     # generate stitch scripts for other missing programs
-    outdir = os.path.join(SCRIPT_DIR_STR, "out")
-    if not os.path.exists(outdir):
-        os.mkdir(outdir)
     winprogdir = os.path.join(outdir, "missing_windows_programs")
     if not os.path.exists(winprogdir):
         os.mkdir(winprogdir)
@@ -269,8 +266,12 @@ def windowsSetup():
     os.environ["PATH"] = winprogdir + ";" + os.environ["PATH"]
 
 def main():
+    outdir = os.path.join(SCRIPT_DIR_STR, "out")
+    if not os.path.exists(outdir):
+        os.mkdir(outdir)
+
     if os.name == "nt":
-        windowsSetup()
+        windowsSetup(outdir)
 
     testSyntaxError(b"(", "missing close paren for: (")
     testSyntaxError(b"(foo", "missing close paren for: (foo")
@@ -723,6 +724,22 @@ def main():
     testSemanticError(b"@exit foo", "@exit requires an integer but got 'foo'")
     # TODO: this should be an error because @exit returns NoReturn
     #testSemanticError(b"@exit 0\n@echo foo", "")
+
+    testSemanticError(b"@stdin2file", "@stdin2file takes 1 argument but got 0")
+    testSemanticError(b"@stdin2file a b", "@stdin2file takes 1 argument but got 2")
+
+    def verifyAndRemoveFile(filename, content: bytes):
+        with open(filename, "rb") as file:
+            expectMatch(file.read(), content)
+        os.remove(filename)
+
+    testfile = os.path.join(outdir, "testfile")
+    testCommand(b"@stdin2file @callerworkdir/out/testfile", 0, b"", Options(stdin=b"what"))
+    verifyAndRemoveFile(testfile, b"what")
+    testCommand(b"(@echo another) @pipe (@stdin2file @callerworkdir/out/testfile)", 0, b"")
+    verifyAndRemoveFile(testfile, b"another\n")
+
+    testCommand(b"@stdin2file @callerworkdir/this-dir-does-not-exist/foo", 1, b"", Options(stdin=b"what"))
 
     runStitchTests()
 

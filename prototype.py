@@ -608,6 +608,29 @@ class BuiltinMethods:
             return ExitCode(0)
 
         return SemanticError("'@cat' takes 0 or 1 arguments but got {}".format(len(args)))
+    @staticmethod
+    def stdin2file(cmd_ctx: CommandContext, args: List[bytes], unknown_args: UnknownArray):
+        if cmd_ctx.script.verification_mode:
+            assertArgCount(1, len(args), unknown_args)
+            return UnknownExitCode()
+        assert(len(args) == 1)
+
+        file = None
+        try:
+            try:
+                file = open(args[0], "wb")
+            except FileNotFoundError:
+                cmd_ctx.capture.stderr.handle("error: file not found '{}'".format(args[0].decode('utf8')).encode('utf8'))
+                return ExitCode(1)
+            while True:
+                data = cmd_ctx.capture.stdin.read()
+                if data is None:
+                    return ExitCode(0)
+                file.write(data)
+        finally:
+            if file is not None:
+                file.close()
+
     # TODO: maybe remove this?  Maybe @pushscope/@popscope?
     @staticmethod
     def settmp(cmd_ctx: CommandContext, nodes: List[parse.Node]):
@@ -920,6 +943,7 @@ builtin_objects = {
     b"note": Builtin("note", BuiltinExpandType.ParseNodes, BuiltinReturnType.ExitCode),
     b"echo": Builtin("echo", BuiltinExpandType.Strings, BuiltinReturnType.ExitCode),
     b"cat": Builtin("cat", BuiltinExpandType.Strings, BuiltinReturnType.ExitCode),
+    b"stdin2file": Builtin("stdin2file", BuiltinExpandType.Strings, BuiltinReturnType.ExitCode, arg_count=1),
     b"settmp": Builtin("settmp", BuiltinExpandType.ParseNodes, BuiltinReturnType.ExitCode),
     b"multiline": Builtin("multiline", BuiltinExpandType.ParseNodes, BuiltinReturnType.ExitCode),
     b"exitcode": Builtin("exitcode", BuiltinExpandType.ParseNodes, BuiltinReturnType.Bool),

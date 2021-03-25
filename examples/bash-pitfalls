@@ -152,8 +152,7 @@ touch @scriptdir/scratch/myfile
     @unreachable
 @end
 
-# TODO: implement file redirection instead of using "tee"
-(@echo foo) @pipe (tee @scriptdir/scratch/myfile)
+(@echo foo) @pipe (@stdin2file @scriptdir/scratch/myfile)
 @if @not grep foo @scriptdir/scratch/myfile
     @unreachable
 @end
