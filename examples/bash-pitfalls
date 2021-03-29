@@ -5,6 +5,32 @@
 # These pitfalls are taken from https://mywiki.wooledge.org/BashPitfalls
 #
 @note '''
+
+Summary
+--------------------------------------------------------------------------------
+
+# | Example                                 | Stitch Result
+--|-----------------------------------------|-----------------------------------
+1 | for f in $(ls *.mp3)                    | loops not implemented yet
+2 | cp $file $target                        | fixed
+3 | Filenames with leading dashes           | mitigated
+4 | [ $foo = "bar" ]                        | fixed
+5 | cd $(dirname "$f")                      | fixed
+6 | [ "$foo" = bar && "$bar" = foo ]        | fixed
+7 | [[ $foo > 7 ]]                          | fixed
+8 | grep foo bar | while read -r; do ((count++)); done | loops not implemented yet
+9 | if [grep foo myfile]                    | fixed
+10| if [bar="$foo"]; then ...               | fixed
+11| if [ [ a = b ] && [ c = d ] ]; then ... | fixed
+12| read $foo                               | fixed
+13| cat file | sed s/foo/bar/ > file        | not fixed
+
+> NOTE: some of these pitfalls are only fixed so long as stitch scripts avoid use
+of the '[' and '[[' programs.
+
+'''
+
+@note '''
 --------------------------------------------------------------------------------
 Bash Pitfall #1: for f in $(ls *.mp3)
 --------------------------------------------------------------------------------
@@ -37,6 +63,9 @@ Bash Pitfall #3: Filenames with leading dashes
 --------------------------------------------------------------------------------
 this isn't a problem with Bash, it's just a problem with command-line interfaces
 in general that scripting languages are vulnerable to.
+
+That being said, this issue is mitigated because currently stitch pathnaes are
+absolute for the most part, although, this is subject to change.
 '''
 
 @note '''
@@ -95,12 +124,10 @@ Bash Pitfall #6: [ "$foo" = bar && "$bar" = foo ]
 --------------------------------------------------------------------------------
 In stitch the equivalent command would be:
 
-    [ (($foo @eq bar) @and ($bar @eq foo)) ]
+    ($foo @eq bar) @and ($bar @eq foo)
 
-However, in stitch this is a semantic type error, becuase the result of the @and binary
-operator is a Bool object, which cannot be passed to the external "[" (aka. "test")
-program. Instead, stitch provides its own builtins for handling Bool objects, in
-this case we can use @assert.
+Stitch discourages use of `[` and `[[` which solves one of the problem with this.
+Since stitch also doesn't have a `&&` operator, it avoid the other issue with this.
 '''
 foo = bar
 bar = foo
@@ -158,6 +185,61 @@ touch @scriptdir/scratch/myfile
 @end
 
 
+@note '''
+--------------------------------------------------------------------------------
+Bash Pitfall #10: if [bar="$foo"]; then ...
+--------------------------------------------------------------------------------
+Problem fixed by avoiding the '[' program
+'''
+@if $bar @eq $foo
+    @echo success
+@end
+
+@note '''
+--------------------------------------------------------------------------------
+Bash Pitfall #11: if [ [ a = b ] && [ c = d ] ]; then ...
+--------------------------------------------------------------------------------
+Problem fixed by avoiding the '[' program
+'''
+
+@if (a @eq b) @and (c @eq d)
+    @echo here
+@end
+
+@note '''
+--------------------------------------------------------------------------------
+Bash Pitfall #12: read $foo
+--------------------------------------------------------------------------------
+stitch doesn't have a read builtin so this pitfall is avoided.  The equivalent
+here would be:
+
+foo = (cat)
+'''
+
+foo = ((@echo the foo value) @pipe (cat))
+@assert $foo @eq "the foo value"
+
+@note '''
+--------------------------------------------------------------------------------
+Bash Pitfall #13: cat file | sed s/foo/bar/ > file
+--------------------------------------------------------------------------------
+This one is still a problem in stitch.  Stitch doesn't protect the programmer
+from reading a file and writing to the same file being read from.  The equivalent
+command for this right now would be:
+
+(cat @callerworkdir/file) @pipe (sed s/foo/bar/) @pipe (@stdin2file @callerworkdir/file)
+
+The corrected version would be:
+
+(cat @callerworkdir/file) @pipe (sed s/foo/bar/) @pipe (@stdin2file @callerworkdir/filetmp)
+mv @callerworkdir/filetmp @callerworkdir/file
+'''
+(@echo foo bar baz) @pipe (@stdin2file @scriptdir/scratch/file)
+
+(cat @scriptdir/scratch/file) @pipe (sed s/foo/bar/) @pipe (@stdin2file @scriptdir/scratch/filetmp)
+mv @scriptdir/scratch/filetmp @scriptdir/scratch/file
+
+@assert (cat @scriptdir/scratch/file) @eq "bar bar baz"
 
 
 @note cleaning up
