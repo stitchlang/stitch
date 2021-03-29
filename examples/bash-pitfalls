@@ -24,9 +24,15 @@ Summary
 11| if [ [ a = b ] && [ c = d ] ]; then ... | fixed
 12| read $foo                               | fixed
 13| cat file | sed s/foo/bar/ > file        | not fixed
+14| echo $foo                               | fixed
+15| $foo=bar                                | mitigated
+16| foo = bar                               | fixed
+17| echo <<EOF                              | fixed
+18| su -c 'some command'                    | not fixed (problem with 'su' not BASH)
 
-> NOTE: some of these pitfalls are only fixed so long as stitch scripts avoid use
-of the '[' and '[[' programs.
+Note that if a "pitfall" still applies to stitch, but is caught at verify time, I consider the issue "fixed".   For example, in stitch the `=` operator requires spaces between it, but if they are omitted then it results in a syntax error at verify time, so this pitfall is considered "fixed" by the virtue that it would be caught before the script is executed.
+
+> NOTE: some of these pitfalls are only fixed so long as stitch scripts avoid use of the '[' and '[[' programs.
 
 '''
 
@@ -241,6 +247,86 @@ mv @scriptdir/scratch/filetmp @scriptdir/scratch/file
 
 @assert (cat @scriptdir/scratch/file) @eq "bar bar baz"
 
+@note '''
+--------------------------------------------------------------------------------
+Bash Pitfall #14: echo $foo
+--------------------------------------------------------------------------------
+This command is correct in stitch:
 
+    @echo $foo
+
+Stitch doesn't have the problems that BASH has with this when it performs
+WordSplitting and file globbing.
+'''
+
+msg = "Please enter the file name of the form *.zip"
+@echo $msg
+
+
+
+@note '''
+--------------------------------------------------------------------------------
+Bash Pitfall #15: $foo=bar
+--------------------------------------------------------------------------------
+The equivalent mistake in stitch would be:
+
+    $foo = bar
+
+This problem is mitigated in stitch because if $foo is undefined here, then a
+SemanticError should be asserted a "verify time".  Even if $foo was defined, it
+would only pass verification if it was a string that happened to be a valid
+variable name and was known at verification time.  If any of these weren't true
+then it would result in a semantic error.
+'''
+
+badcode = '''
+$foo = bar
+'''
+# TODO: verify the error output
+#error_output = (@stderr @stitch -c $badcode)
+
+@note '''
+--------------------------------------------------------------------------------
+Bash Pitfall #16: foo = bar
+--------------------------------------------------------------------------------
+In stitch spaces are "required" between the '=' operator.  Removing the spaces
+results in a synatx error.
+'''
+
+foo = bar
+@assert $foo @eq bar
+
+badcode = '''
+foo=bar
+'''
+# TODO: verify the error output
+#error_output = (@stderr @stitch -c $badcode)
+
+
+@note '''
+--------------------------------------------------------------------------------
+Bash Pitfall #17: echo <<EOF
+--------------------------------------------------------------------------------
+stitch doesn't have a <<EOF herdoc syntax.  Instead it has multiline strings,
+so the equivalent of the example in the pitfall would be correct.
+'''
+
+@echo '''
+Hello world
+How's it going?
+'''
+
+@note '''
+--------------------------------------------------------------------------------
+Bash Pitfall #18: su -c 'some command'
+--------------------------------------------------------------------------------
+This is a problem with the 'su' command, not BASH.
+'''
+
+
+
+################################################################################
+# Cleanup
+################################################################################
 @note cleaning up
 rm -rf @scriptdir/scratch
