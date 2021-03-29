@@ -741,6 +741,8 @@ def main():
 
     testCommand(b"@stdin2file @callerworkdir/this-dir-does-not-exist/foo", 1, b"", Options(stdin=b"what"))
 
+    testSemanticError(b"foo = (uname)\n$foo = baz", "variable names must be known at verification time")
+
     runStitchTests()
 
     print("test: success")

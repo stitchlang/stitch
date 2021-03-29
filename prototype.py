@@ -1179,7 +1179,7 @@ def runAssign(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> Union[Error,E
     if isinstance(varname, UnknownString):
         # this allow stitch to check more things like undefined variables and type errors with
         # user variables at verification time
-        return SemanticError("for now, stitch requires variable names to be known at verification time")
+        return SemanticError("variable names must be known at verification time")
     elif not isinstance(varname, String):
         return SemanticError("expected a String before '=' but got {}".format(varname.userTypeDescriptor()))
     value = expandNode(cmd_ctx, nodes[2], ExpandNodeErrorContext())
