@@ -188,11 +188,11 @@ def expectMatches(output: bytes, matches: List[bytes]):
             print("--------------------------------------------------------------------------------")
             sys.exit(1)
 
-def expectMatch(actual: str, expected: str):
+def expectMatch(actual: bytes, expected: bytes):
     if actual != expected:
         print("Error: unexpectd output:")
-        print("Expected: '{}'".format(expected))
-        print("Actual: '{}'".format(actual))
+        print("Expected: {!r}".format(expected))
+        print("Actual: {!r}".format(actual))
         sys.exit(1)
 
 def runSubProcessTest(exit_code: int, args: List[str]):

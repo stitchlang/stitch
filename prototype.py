@@ -622,11 +622,12 @@ class BuiltinMethods:
             except FileNotFoundError:
                 cmd_ctx.capture.stderr.handle("error: file not found '{}'".format(args[0].decode('utf8')).encode('utf8'))
                 return ExitCode(1)
-            while True:
-                data = cmd_ctx.capture.stdin.read()
-                if data is None:
-                    return ExitCode(0)
-                file.write(data)
+            if cmd_ctx.capture.stdin:
+                while True:
+                    data = cmd_ctx.capture.stdin.read()
+                    if data is None:
+                        return ExitCode(0)
+                    file.write(data)
         finally:
             if file is not None:
                 file.close()
