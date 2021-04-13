@@ -205,6 +205,8 @@ Like other features, this syntax is subject to change.  I'm opting to implement 
 ```
 files = (@array a b c)
 
+@assert (@len $files) @eq 3
+
 ls (@index files 0)
 # same as: ls a
 

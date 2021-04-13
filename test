@@ -649,6 +649,16 @@ def main():
     testCommand(b'@assert "a b c" @eq (@echo (@array a b c))', 0, b"")
     testCommand(b"@echo foo(@array bar baz)buz", 0, b"foobarbazbuz\n")
 
+    testSemanticError(b"@len", "@len takes 1 argument but got 0")
+    testSemanticError(b"@len a", "@len requires an Array but got 'String'")
+    testSemanticError(b"@len @array", "@len requires an Array but got 'Builtin'")
+    testCommand(b"@len (@array)", 0, b"0")
+    testCommand(b"@len (@array a)", 0, b"1")
+    testCommand(b"a = (@array)\n@len $a", 0, b"0")
+    testCommand(b"a = (@array a b c)\n@len $a", 0, b"3")
+    testCommand(b"a = (@array a b c)\n@assert (@len $a) @eq 3", 0, b"")
+    testCommand(b"a = (@array a b c)\n@assert (@len (@array 1 2 3 4)) @eq 4", 0, b"")
+
     #
     # Pipes
     #

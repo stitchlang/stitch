@@ -2,6 +2,7 @@
 empty = (@array)
 @echo $empty
 @assert "" @eq (@echo $empty)
+@assert (@len $empty) @eq 0
 
 abc = (@array a b c)
 @assert "a b c" @eq (@echo $abc)

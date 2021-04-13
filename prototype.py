@@ -866,6 +866,20 @@ class BuiltinMethods:
         assert(len(args) == 1)
         return Array(args[0].splitlines())
     @staticmethod
+    def len_(cmd_ctx: CommandContext, args: List[StitchObject], unknown_args: UnknownArray):
+        if cmd_ctx.script.verification_mode:
+            assertArgCount(1, len(args), unknown_args)
+            if not unknown_args.empty():
+                cmd_ctx.capture.stdout.handleUnknownData()
+                return UnknownExitCode()
+
+        assert(len(args) == 1)
+        array_arg = args[0]
+        if not isinstance(array_arg, Array):
+            return SemanticError("@len requires an Array but got '{}'".format(array_arg.userTypeDescriptor()))
+        cmd_ctx.capture.stdout.handle(bytes(str(len(array_arg.elements)), 'ascii'))
+        return ExitCode(0)
+    @staticmethod
     def exit(cmd_ctx: CommandContext, args: List[bytes], unknown_args: UnknownArray):
         if cmd_ctx.script.verification_mode:
             assertArgCount(1, len(args), unknown_args)
@@ -966,6 +980,7 @@ builtin_objects = {
     b"isdir": Builtin("isdir", BuiltinExpandType.Strings, BuiltinReturnType.Bool, arg_count=1),
     b"array": Builtin("array", BuiltinExpandType.Strings, BuiltinReturnType.Array),
     b"lines2array": Builtin("lines2array", BuiltinExpandType.Strings, BuiltinReturnType.Array, arg_count=1),
+    b"len": Builtin("len_", BuiltinExpandType.Objects, BuiltinReturnType.ExitCode, arg_count=1),
     b"exit": Builtin("exit", BuiltinExpandType.Strings, BuiltinReturnType.NoReturn, arg_count=1),
     b"getuid": Builtin("getuid", BuiltinExpandType.ParseNodes, BuiltinReturnType.ExitCode, arg_count=0),
 }
@@ -1143,6 +1158,24 @@ def runBuiltin(cmd_ctx: CommandContext, builtin: Builtin, nodes: List[parse.Node
         if error:
             return error
         return func(cmd_ctx, nodes)
+    if builtin.expand_type == BuiltinExpandType.Objects:
+
+        objects: List[StitchObject] = []
+
+        # NOTE: if we support inline binary expressions here then
+        #       things like @assert may be able to use this?
+        for node in nodes:
+            obj = expandNode(cmd_ctx, node, ExpandNodeErrorContext())
+            if isinstance(obj, Error):
+                return obj
+            objects.append(obj)
+
+        unknown_args = UnknownArray(0, 0)
+        error = enforceBuiltinArgCount(builtin, len(objects), unknown_args)
+        if error:
+            return error
+        return func(cmd_ctx, objects, unknown_args)
+
     if builtin.expand_type == BuiltinExpandType.Strings:
         unknown_args = UnknownArray(0, 0)
         args = nodesToArgs(cmd_ctx, nodes, unknown_args, ExpandNodeErrorContext())
@@ -1436,7 +1469,7 @@ def runPipe(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> ExpressionResul
         return last_result
     raise Exception("unhandled result type {} for last pipe command".format(type(last_result).__name__))
 
-RunCommandsResult = Union[Error,String,Bool,ExitCode,CommandResult,UnknownString,UnknownBool,UnknownExitCode,UnknownCommandResult]
+RunCommandsResult = Union[Error,String,Bool,Array,ExitCode,CommandResult,UnknownString,UnknownBool,UnknownArray,UnknownExitCode,UnknownCommandResult]
 
 def runCommandNodes(cmd_ctx: CommandContext, nodes: List[parse.Node]) -> RunCommandsResult:
     assert(len(nodes) > 0)
@@ -1558,13 +1591,14 @@ def runExternalProgram(stdout: RuntimeWriter, stderr: RuntimeWriter, args: List[
         stderr.handle(result.stderr)
     return ExitCode(result.returncode)
 
-def tryLookupCommandVar(cmd_ctx: CommandContext, name: bytes):
+def tryLookupCommandVar(cmd_ctx: CommandContext, name: bytes) -> Optional[StitchObject]:
     ctx: Optional[CommandContext] = cmd_ctx
     while ctx:
         obj = ctx.var_map.get(name)
         if obj:
             return obj
         ctx = ctx.parent
+    return None
 
 def tryLookupUserVar(cmd_ctx: CommandContext, name: bytes) -> Optional[StitchObject]:
     cmd_obj = tryLookupCommandVar(cmd_ctx, name)
@@ -1674,12 +1708,10 @@ def combineRunResultWithOutputs(cmd_ctx: CommandContext, result: RunCommandsResu
 
     raise Exception("expected an ExitCode, Bool or Array but got {}".format(result.userTypeDescriptor()))
 
-
 # returns an array of strings and builtin objects
 def expandNode(cmd_ctx: CommandContext, node: parse.Node, error_ctx: ExpandNodeErrorContext) -> Union[Error,StitchObject,UnknownString]:
     if isinstance(node, parse.NodeToken):
         return String(node.s)
-
     if isinstance(node, parse.NodeVariable):
         if node.is_at:
             obj = tryLookupBuiltinVar(cmd_ctx.script, node.id)
@@ -1688,15 +1720,12 @@ def expandNode(cmd_ctx: CommandContext, node: parse.Node, error_ctx: ExpandNodeE
         if not obj:
             return SemanticError("'{}' is undefined".format(cmd_ctx.script.src[node.pos:node.end].decode('utf8')))
         return obj
-
     if isinstance(node, parse.NodeBinaryOp):
         return SemanticError("unexpected '{}'".format(parse.binaryOpUserString(node.kind)))
-
     if isinstance(node, parse.NodeInlineCommand):
         inline_cmd_ctx = cmd_ctx.createChild()
         result = runCommandNodes(inline_cmd_ctx, node.nodes)
         return combineRunResultWithOutputs(inline_cmd_ctx, result)
-
     if isinstance(node, parse.NodeMultiple):
         unknown_args = UnknownArray(0, 0)
         args = nodesToArgs(cmd_ctx, node.nodes, unknown_args, ExpandNodeErrorContext(inside_multiple=True))
