@@ -3,9 +3,10 @@
 # Example ported from: https://www.linode.com/docs/guides/solving-real-world-problems-with-bash-scripts-a-tutorial/
 #
 
-# a couple of lines I added to setup a scratch dir
+# a couple of lines I added to setup a scratch dir and the log file
 rm -rf @scriptdir/scratch
 mkdir @scriptdir/scratch
+truncate -s 2049 @scriptdir/scratch/log
 
 #$set f /home/mtsouk/connections.data
 f = @scriptdir/scratch/log
@@ -16,24 +17,17 @@ f = @scriptdir/scratch/log
 @end
 
 touch $f
-maxsize = (expr 4096 * 1024)
+maxsize = (expr 2 * 1024)
 
-@echo DEBUG: "maxsize="$maxsize
-
-# TODO: need piping
-#size=`du -b ${f} | tr -s '\t' ' ' | cut -d' ' -f1`
-size = (du -b $f)
-@echo DEBUG: A: "size="$size
-#size = (tr -s '\t' ' ' $size)
-#@echo DEBUG: B: "size="$size
-
-
-# NOTE: for now just hardcode the size until piping is implemented
-size = (expr 4096 * 1025)
+size = ((du -b $f) @pipe (tr -s \t " ") @pipe (cut "-d " -f1))
 
 @if $size @gt $maxsize
-    @echo Rotating!
+    @echo Rotating! log is $size bytes and max is $maxsize
     timestamp = (date +%s)
     mv $f $f$.$timestamp
     touch $f
 @end
+
+
+# extra cleanup code
+rm -rf @scriptdir/scratch
