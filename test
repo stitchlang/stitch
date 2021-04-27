@@ -659,6 +659,18 @@ def main():
     testCommand(b"a = (@array a b c)\n@assert (@len $a) @eq 3", 0, b"")
     testCommand(b"a = (@array a b c)\n@assert (@len (@array 1 2 3 4)) @eq 4", 0, b"")
 
+    testSemanticError(b"@index", "@index takes 2 arguments but got 0")
+    testSemanticError(b"@index a", "@index takes 2 arguments but got 1")
+    testSemanticError(b"@index a b c", "@index takes 2 arguments but got 3")
+    testSemanticError(b"@index a 0", "@index requires an Array for argument 1 but got 'String'")
+    testSemanticError(b"@index (@array) @true", "@index requires a number String for argument 2 but got 'Bool'")
+    testSemanticError(b"@index (@array) a", "@index requires a number for argument 2 but got 'a'")
+    testSemanticError(b"@index (@array) -1", "@index -1 cannot be negative")
+    testSemanticError(b"@index (@array) 0", "@index 0 is out of bounds (length=0)")
+    testSemanticError(b"@index (@array a) 4", "@index 4 is out of bounds (length=1)")
+    testCommand(b"@index (@array a) 0", 0, b"a")
+    testCommand(b"@index (@array a b c d e f g) 3", 0, b"d")
+
     #
     # Pipes
     #

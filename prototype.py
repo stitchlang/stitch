@@ -868,6 +868,7 @@ class BuiltinMethods:
     @staticmethod
     def len_(cmd_ctx: CommandContext, args: List[StitchObject], unknown_args: UnknownArray):
         if cmd_ctx.script.verification_mode:
+            assert(isinstance(cmd_ctx.capture.stdout, VerifyWriter))
             assertArgCount(1, len(args), unknown_args)
             if not unknown_args.empty():
                 cmd_ctx.capture.stdout.handleUnknownData()
@@ -878,6 +879,32 @@ class BuiltinMethods:
         if not isinstance(array_arg, Array):
             return SemanticError("@len requires an Array but got '{}'".format(array_arg.userTypeDescriptor()))
         cmd_ctx.capture.stdout.handle(bytes(str(len(array_arg.elements)), 'ascii'))
+        return ExitCode(0)
+    @staticmethod
+    def index(cmd_ctx: CommandContext, args: List[StitchObject], unknown_args: UnknownArray):
+        if cmd_ctx.script.verification_mode:
+            assert(isinstance(cmd_ctx.capture.stdout, VerifyWriter))
+            assertArgCount(2, len(args), unknown_args)
+            if not unknown_args.empty():
+                cmd_ctx.capture.stdout.handleUnknownData()
+                return UnknownExitCode()
+
+        assert(len(args) == 2)
+        array_arg = args[0]
+        index_arg = args[1]
+        if not isinstance(array_arg, Array):
+            return SemanticError("@index requires an Array for argument 1 but got '{}'".format(array_arg.userTypeDescriptor()))
+        if not isinstance(index_arg, String):
+            return SemanticError("@index requires a number String for argument 2 but got '{}'".format(index_arg.userTypeDescriptor()))
+        try:
+            index_int = int(index_arg.value)
+        except ValueError:
+            return SemanticError("@index requires a number for argument 2 but got '{}'".format(index_arg.value.decode('utf8')))
+        if index_int < 0:
+            return SemanticError("@index {} cannot be negative".format(index_int))
+        if index_int >= len(array_arg.elements):
+            return SemanticError("@index {} is out of bounds (length={})".format(index_int, len(array_arg.elements)))
+        cmd_ctx.capture.stdout.handle(array_arg.elements[index_int])
         return ExitCode(0)
     @staticmethod
     def exit(cmd_ctx: CommandContext, args: List[bytes], unknown_args: UnknownArray):
@@ -981,6 +1008,7 @@ builtin_objects = {
     b"array": Builtin("array", BuiltinExpandType.Strings, BuiltinReturnType.Array),
     b"lines2array": Builtin("lines2array", BuiltinExpandType.Strings, BuiltinReturnType.Array, arg_count=1),
     b"len": Builtin("len_", BuiltinExpandType.Objects, BuiltinReturnType.ExitCode, arg_count=1),
+    b"index": Builtin("index", BuiltinExpandType.Objects, BuiltinReturnType.ExitCode, arg_count=2),
     b"exit": Builtin("exit", BuiltinExpandType.Strings, BuiltinReturnType.NoReturn, arg_count=1),
     b"getuid": Builtin("getuid", BuiltinExpandType.ParseNodes, BuiltinReturnType.ExitCode, arg_count=0),
 }
@@ -1642,7 +1670,7 @@ def getCaptureWriterOutput(writer: Writer) -> Union[bytes,UnknownString]:
 def isCaptured(s: Optional[Union[bytes,UnknownString]]):
     return s != None
 
-CombineResult = Union[Error,String,Bool,CommandResult,UnknownString,UnknownBool,UnknownCommandResult]
+CombineResult = Union[Error,String,Array,Bool,CommandResult,UnknownString,UnknownArray,UnknownBool,UnknownCommandResult]
 
 def combineRunResultWithOutputs(cmd_ctx: CommandContext, result: RunCommandsResult) -> CombineResult:
     if isinstance(result, Error):

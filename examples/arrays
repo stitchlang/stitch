@@ -6,6 +6,9 @@ empty = (@array)
 
 abc = (@array a b c)
 @assert "a b c" @eq (@echo $abc)
+@assert a @eq (@index $abc 0)
+@assert b @eq (@index $abc 1)
+@assert c @eq (@index $abc 2)
 
 cmd = (@array true)
 $cmd
