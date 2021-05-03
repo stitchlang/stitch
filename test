@@ -37,7 +37,7 @@ class Options:
         return ERROR_READER
 
 def runInternal(line: bytes, verification_mode: bool, options: Options):
-    context = prototype.ScriptContext(prototype.GlobalContext(True, SCRIPT_DIR), __file__.encode('utf8'), line, verification_mode)
+    context = prototype.ScriptContext(prototype.GlobalContext(True, SCRIPT_DIR), __file__.encode('utf8'), line, verification_mode, None if verification_mode else [])
 
     stdout = prototype.newCaptureWriter(verification_mode)
     stderr = prototype.newCaptureWriter(verification_mode)
@@ -89,7 +89,7 @@ class ExpectError(Expect):
             sys.exit(1)
 
 def runTest(src: bytes, expect: Expect, test_line: int, options: Options, verification_mode: bool):
-    context = prototype.ScriptContext(prototype.GlobalContext(True, SCRIPT_DIR), __file__.encode('utf8'), src, verification_mode)
+    context = prototype.ScriptContext(prototype.GlobalContext(True, SCRIPT_DIR), __file__.encode('utf8'), src, verification_mode, None if verification_mode else [])
     stdout = prototype.newCaptureWriter(verification_mode)
     stderr = prototype.newCaptureWriter(verification_mode)
     result: Any = None

@@ -228,7 +228,14 @@ UNKNOWN_COMMAND_RESULT = UnknownCommandResult()
 
 # TODO: not sure if the Error types will be exposed to stitch yet, or if they
 #       are just an internal detail
-class Error:
+class ExitScript:
+    pass
+
+class ExitBuiltinResult(ExitScript):
+    def __init__(self, exitcode):
+        self.exitcode = exitcode
+
+class Error(ExitScript):
     def __init__(self, message):
         self.message = message
     def __repr__(self):
@@ -300,11 +307,18 @@ class ScriptContext:
             self.enabled = enabled
 
     # TODO: add fields for logging/tracing options?
-    def __init__(self, global_ctx: GlobalContext, scriptfile: Optional[bytes], src: bytes, verification_mode: bool):
+    def __init__(self, global_ctx: GlobalContext, scriptfile: Optional[bytes], src: bytes, verification_mode: bool, argv: Optional[List[bytes]]):
         assert((scriptfile is None) or (type(scriptfile) == bytes))
+        if verification_mode:
+            assert(argv is None)
+            argv_var: Union[Array,UnknownArray] = UnknownArray(0, None)
+        else:
+            assert(isinstance(argv, List))
+            argv_var = Array(argv)
         self.global_ctx = global_ctx
         self.src = src
         self.script_specific_builtin_objects = {
+            b"argv": argv_var,
             b"scriptfile": String(scriptfile if scriptfile else b"<the -c command>"),
             b"scriptdir": String(os.path.dirname(scriptfile) if scriptfile else b"<the -c command>"),
             # NOTE: callerworkdir will need to be forwarded to any sub-scripts
@@ -824,8 +838,6 @@ class BuiltinMethods:
         if len(args) == 0:
             return SemanticError("@call requires at least one argument")
         program_file = args[0]
-        if len(args) > 1:
-            sys.exit("Error: @call with more than just a program not implemented")
         if cmd_ctx.script.verification_mode:
             return UnknownExitCode()
         # TODO: should I be caching files?
@@ -840,9 +852,12 @@ class BuiltinMethods:
                          src,
                          cmd_ctx.capture.stdout,
                          cmd_ctx.capture.stderr,
-                         cmd_ctx.capture.stdin)
+                         cmd_ctx.capture.stdin,
+                         args[1:])
         if isinstance(result, Error):
             return result
+        if isinstance(result, ExitBuiltinResult):
+            return ExitCode(result.exitcode)
         assert(isinstance(result, ExitCode))
         return result
 
@@ -870,7 +885,7 @@ class BuiltinMethods:
         if cmd_ctx.script.verification_mode:
             assert(isinstance(cmd_ctx.capture.stdout, VerifyWriter))
             assertArgCount(1, len(args), unknown_args)
-            if not unknown_args.empty():
+            if not unknown_args.empty() or isinstance(args[0], UnknownArray):
                 cmd_ctx.capture.stdout.handleUnknownData()
                 return UnknownExitCode()
 
@@ -885,7 +900,8 @@ class BuiltinMethods:
         if cmd_ctx.script.verification_mode:
             assert(isinstance(cmd_ctx.capture.stdout, VerifyWriter))
             assertArgCount(2, len(args), unknown_args)
-            if not unknown_args.empty():
+            # TODO: we should be verifyin the index argument is a number as well
+            if not unknown_args.empty() or isinstance(args[0], UnknownArray):
                 cmd_ctx.capture.stdout.handleUnknownData()
                 return UnknownExitCode()
 
@@ -917,7 +933,7 @@ class BuiltinMethods:
                     return SemanticError("@exit requires an integer but got '{}'".format(args[0].decode('utf8')))
             return NO_RETURN
         assert(len(args) == 1)
-        sys.exit(int(args[0]))
+        return ExitBuiltinResult(int(args[0]))
     @staticmethod
     def getuid(cmd_ctx: CommandContext, nodes: List[parse.Node]):
         assert(len(nodes) == 0)
@@ -1862,7 +1878,7 @@ def runScript(script_ctx: ScriptContext, stdout: Writer, stderr: Writer, stdin: 
             builtin_prefix_count=0,
             ambiguous_op=None
         ), nodes)
-        if isinstance(result, Error):
+        if isinstance(result, ExitScript):
             return result
         if isinstance(result, Bool):
             return SemanticError("unhandled Bool whose value is {}".format(result.value))
@@ -1889,7 +1905,7 @@ def normalizeFilename(filename):
     return filename
 
 def runFile(global_ctx: GlobalContext, full_filename: Optional[bytes], src: bytes,
-            stdout: Writer, stderr: Writer, stdin: Optional[Reader]) -> Union[Error,ExitCode]:
+            stdout: Writer, stderr: Writer, stdin: Optional[Reader], argv: List[bytes]) -> Union[Error,ExitCode]:
     assert((full_filename is None) or isinstance(full_filename, bytes))
     assert(isinstance(src, bytes))
 
@@ -1906,7 +1922,7 @@ def runFile(global_ctx: GlobalContext, full_filename: Optional[bytes], src: byte
                 eprint("stitch: DEBUG: verifying '{}'".format(full_filename_str))
                 stdout_verifier = VerifyWriter(None, for_pipe=False)
                 stderr_verifier = VerifyWriter(None, for_pipe=False)
-                script_ctx = ScriptContext(global_ctx, full_filename, src, verification_mode=True)
+                script_ctx = ScriptContext(global_ctx, full_filename, src, verification_mode=True, argv=None)
                 result = runScript(script_ctx, stdout_verifier, stderr_verifier, None)
                 if isinstance(result, Error):
                     ## This can happen if the arguments of an assert are known at "verification time"
@@ -1921,7 +1937,7 @@ def runFile(global_ctx: GlobalContext, full_filename: Optional[bytes], src: byte
                     #sys.exit("something printed to stderr during verification mode???")
                 eprint("stitch: DEBUG: verification done on '{}'".format(full_filename_str))
 
-        script_ctx = ScriptContext(global_ctx, full_filename, src, verification_mode=False)
+        script_ctx = ScriptContext(global_ctx, full_filename, src, verification_mode=False, argv=argv)
         return runScript(script_ctx, stdout, stderr, stdin)
     except lex.SyntaxError as lex_syntax_err:
         return SyntaxError(full_filename_str, src, lex_syntax_err)
@@ -1996,7 +2012,7 @@ def sandboxCallerWorkdir() -> Tuple[str,str]:
 def main():
     cmd_args = sys.argv[1:]
     if len(cmd_args) == 0:
-        sys.exit("Usage: stitch FILE")
+        sys.exit("Usage: stitch FILE ARGS...")
         sys.exit("       stitch -c COMMAND (this is only 1 argument)")
 
     doverify = True
@@ -2009,9 +2025,9 @@ def main():
         filename_str = "<the -c command>"
         full_filename = None
         src = cmd_args[0].encode('utf8')
+        script_argv = []
     else:
-        if len(cmd_args) > 0:
-            sys.exit("Error: too many command-line arguments")
+        script_argv = [arg.encode('utf8') for arg in cmd_args]
         filename_str = first_arg
         full_filename = os.path.abspath(first_arg).encode('utf8')
         with open(first_arg, "rb") as file:
@@ -2021,8 +2037,10 @@ def main():
 
     sandbox_path, callerworkdir = sandboxCallerWorkdir()
     global_ctx = GlobalContext(doverify, callerworkdir.encode('utf8'))
-    result = runFile(global_ctx, full_filename, src, CONSOLE_WRITER, CONSOLE_WRITER, CONSOLE_READER)
+    result = runFile(global_ctx, full_filename, src, CONSOLE_WRITER, CONSOLE_WRITER, CONSOLE_READER, script_argv)
     sandbox_clean_count = cleanSandboxDir(sandbox_path, before_execution=False)
+    if isinstance(result, ExitBuiltinResult):
+        sys.exit(result.exitcode)
     if isinstance(result, Error):
         prefix = "Semantic" if isinstance(result, SemanticError) else ""
         eprint("stitch: {}: {}Error: {}".format(filename_str, prefix, result.message))

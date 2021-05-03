@@ -1,0 +1,21 @@
+#!/usr/bin/env stitch
+
+# NOTE: this is a silly implementation of this mechanism, its just
+#       to test various aspects of the language
+
+@if (@len @argv) @lt 1
+    @exit 0
+@end
+
+@echo (@index @argv 0)
+@if (@len @argv) @lt 2
+    @exit 0
+@end
+
+@echo (@index @argv 1)
+@if (@len @argv) @lt 3
+    @exit 0
+@end
+
+@note this many arguments is not implemented
+@unreachable

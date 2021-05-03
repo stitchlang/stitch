@@ -1,0 +1,6 @@
+@assert "" @eq (@call @scriptdir/argv-to-lines)
+@assert "a" @eq (@call @scriptdir/argv-to-lines a)
+@assert '''
+a
+b
+''' @eq (@multiline @call @scriptdir/argv-to-lines a b)
