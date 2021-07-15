@@ -1,7 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
 
-const TokenKind = enum {
+pub const TokenKind = enum {
     inline_whitespace,
     builtin_id,
     user_id,
@@ -17,7 +17,7 @@ const TokenKind = enum {
 };
 const token_count = @typeInfo(TokenKind).Enum.fields.len;
 
-fn lexInlineWhitespace(text: [*]const u8, limit: [*]const u8) [*]const u8 {
+pub fn lexInlineWhitespace(text: [*]const u8, limit: [*]const u8) [*]const u8 {
     std.debug.assert(@ptrToInt(limit) > @ptrToInt(text));
     var next = text;
     while (true) {
@@ -194,7 +194,7 @@ fn lexEscape(text: [*]const u8, limit: [*]const u8) [*]const u8 {
     return text;
 }
 
-fn lex(text: [*]const u8, limit: [*]const u8, inout_kind: *TokenKind) [*]const u8 {
+pub fn lex(text: [*]const u8, limit: [*]const u8, inout_kind: *TokenKind) [*]const u8 {
     std.debug.assert(@ptrToInt(limit) > @ptrToInt(text));
     var i = @enumToInt(inout_kind.*);
     while (i < token_count) : (i += 1) {
@@ -220,6 +220,14 @@ fn lex(text: [*]const u8, limit: [*]const u8, inout_kind: *TokenKind) [*]const u
     return text; // no match
 }
 
+pub fn assertNoMatchAfter(src: [*]const u8, limit: [*]const u8, kind: TokenKind) void {
+    const next_kind = @enumToInt(kind) + 1;
+    if (next_kind < token_count) {
+        var kind_for_lex = @intToEnum(TokenKind, next_kind);
+        std.debug.assert(src == lex(src, limit, &kind_for_lex));
+    }
+}
+
 fn testLex(src: []const u8, expected_len: usize, expected_kind: TokenKind) !void {
     var kind: TokenKind = @intToEnum(TokenKind, 0);
     const end = lex(src.ptr, src.ptr + src.len, &kind);
@@ -228,13 +236,7 @@ fn testLex(src: []const u8, expected_len: usize, expected_kind: TokenKind) !void
 
     if (len > 0) {
         try testing.expectEqual(expected_kind, kind);
-
-        // ensure there are no other tokens that match
-        const next_kind = @enumToInt(kind) + 1;
-        if (next_kind < token_count) {
-            kind = @intToEnum(TokenKind, next_kind);
-            try testing.expectEqual(src.ptr, lex(src.ptr, src.ptr + src.len, &kind));
-        }
+        assertNoMatchAfter(src.ptr, src.ptr + src.len, kind);
     }
 }
 
@@ -296,7 +298,6 @@ test "ensure all 1-char strings match single token" {
     {
         var c: u8 = 0;
         while (true) : (c += 1) {
-            std.debug.print("testing 0x{x}\n", .{c});
             const buf = [1]u8 {c};
             if (c == '"' or c == '$' or c == '\'' or c == '@') {
                 try testLex(&buf, 0, undefined);
