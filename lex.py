@@ -82,7 +82,10 @@ def lex(text: StringPtr, limit: StringPtr, pattern_index_ref: Ref[int]) -> int:
             return match_length
     return 0
 
-def afterLexVerifyOnlyOneMatch(text: StringPtr, limit: StringPtr, pattern_index: int) -> None:
+def verifyNoMatches(src: bytes, pos: int, pattern_index: int) -> None:
+    text = StringPtr(src, pos)
+    limit = StringPtr(src, len(src))
+
     other_pattern_index_obj = Ref(pattern_index + 1)
     match_length = lex(text, limit, other_pattern_index_obj)
     if match_length > 0:
@@ -94,6 +97,7 @@ class ScanResult:
         self.pattern_kind = pattern_kind
         self.len = len
 
+
 # NOTE: verify_one_match verifies that only 1 lexer pattern is matching the next string.
 #       I think that maintaining this property on my lexer means that all the patterns
 #       combined form a "regular language".  This means I could represent the entire
@@ -104,7 +108,7 @@ class ScanResult:
 #       I think we take about a 10% hit to performance when verify_one_match is enabled.
 #
 # TODO: remove this verify_one_match argument when I know my combined lex patterns are regular
-def scan(src: bytes, pos: int, verify_one_match: bool = True) -> Optional[ScanResult]:
+def scan(src: bytes, pos: int) -> Optional[ScanResult]:
     assert(type(src) == bytes)
     if pos == len(src):
         return None
@@ -114,8 +118,6 @@ def scan(src: bytes, pos: int, verify_one_match: bool = True) -> Optional[ScanRe
     match_pattern_index_obj = Ref(0)
     match_length = lex(next, limit, match_pattern_index_obj)
     if match_length > 0:
-        if verify_one_match:
-            afterLexVerifyOnlyOneMatch(next, limit, match_pattern_index_obj.value)
         return ScanResult(match_pattern_index_obj.value, match_length)
 
     # time to try to figure out what went wrong
@@ -129,7 +131,7 @@ def scan(src: bytes, pos: int, verify_one_match: bool = True) -> Optional[ScanRe
         if next_str.startswith(seq):
             phrase = "single-quote" if (len(seq) == 1) else "{} single-quote sequence".format(len(seq))
             raise SyntaxError(pos, "missing {} to close: {}".format(phrase, previewStringPtr(next, limit, 30)))
-    
+
     # I think we need at most 2 characters to see what went wrong
     bad_str = next_str[:min(limit.subtract(next), 2)]
     raise SyntaxError(pos, "unrecognized character sequence '{}'".format(bad_str.decode('ascii')))
@@ -141,8 +143,8 @@ class Token:
         self.end = pos + scan_result.len
         self.pattern_kind = scan_result.pattern_kind
 
-def scanSkipInlineWhitespace(src: bytes, pos: int, verify_one_match: bool = True) -> Optional[Token]:
-    result = scan(src, pos, verify_one_match)
+def scanSkipInlineWhitespace(src: bytes, pos: int) -> Optional[Token]:
+    result = scan(src, pos)
     if not result:
         return None
     assert(result.len > 0)

@@ -12,6 +12,9 @@ import tokens
 from lex import TokenKind, Token, SyntaxError
 import lex
 
+# TODO: expose this as an option or something?
+verify_one_match = True
+
 class Node(ABC):
     def __init__(self, pos: int, end: int):
         self.pos = pos
@@ -166,6 +169,8 @@ def parseNode(src: bytes, token: Token, allstringliterals: bool) -> Tuple[Node, 
         scan_result = lex.scan(src, node.end)
         if not scan_result:
             return node, None
+        if verify_one_match:
+            lex.verifyNoMatches(src, node.end, scan_result.pattern_kind)
         token = Token(node.end, scan_result)
         if (token.pattern_kind == TokenKind.INLINE_WHITESPACE or
             token.pattern_kind == TokenKind.COMMENT or
@@ -179,6 +184,10 @@ def parseCommand(src: bytes, cmd_start: int, allstringliterals: bool) -> Tuple[L
     token = lex.scanSkipInlineWhitespace(src, cmd_start)
     if not token:
         return nodes, cmd_start
+    if verify_one_match:
+        lex.verifyNoMatches(src, cmd_start, token.pattern_kind)
+
+    # TODO: make
     while True:
         if token.pattern_kind == TokenKind.COMMENT or token.pattern_kind == TokenKind.NEWLINE:
             return nodes, token.end
@@ -194,6 +203,8 @@ def parseCommand(src: bytes, cmd_start: int, allstringliterals: bool) -> Tuple[L
             if not scan_result:
                 return nodes, token.pos
             assert(scan_result.pattern_kind != TokenKind.INLINE_WHITESPACE)
+            if verify_one_match:
+                lex.verifyNoMatches(src, token.end, scan_result.pattern_kind)
             token = Token(token.end, scan_result)
         else:
             assert(token.pattern_kind == TokenKind.COMMENT or
