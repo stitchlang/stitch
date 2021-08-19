@@ -11,7 +11,7 @@ const LexResult = struct {
 };
 fn scan(text: [*]const u8, limit: [*]const u8) !LexResult {
     std.debug.assert(@ptrToInt(text) < @ptrToInt(limit));
-    var kind = @intToEnum(lex.TokenKind, 0);
+    var kind = lex.token0;
     const end = lex.lex(text, limit, &kind);
     if (end == text)
         return error.UnknownToken;
@@ -66,7 +66,7 @@ const NodeKind = enum {
 // TODO: I could probably make this struct much smaller
 const Node = struct {
     pos: [*]const u8,
-    end: [*]const u8,
+    //end: [*]const u8,
     data: union(enum) {
         arg: void,
         assign: void,
@@ -85,13 +85,13 @@ const Node = struct {
         };
     }
 
-    pub fn getIdSlice(self: Node) []const u8 {
+    pub fn getIdSlice(self: Node, end: [*]const u8) []const u8 {
         const delim = @as(u8, switch (self.data) {
             .builtin_id, .binary_op => '@',
             .user_id => '$',
             else => unreachable,
         });
-        const id_limit = self.end - @as(u1, if ((self.end-1)[0] == delim) 1 else 0);
+        const id_limit = end - @as(u1, if ((end-1)[0] == delim) 1 else 0);
         return self.pos[1 .. @ptrToInt(id_limit) - @ptrToInt(self.pos)];
     }
 
@@ -105,83 +105,154 @@ const Node = struct {
     }
 };
 
+// Command Memory Layout
+//
+// every node has a Xbit (16?) offset into the command string that points
+// to the START of the first token of the node.  This is important because
+// each node will have access to both it's start and the start of the next token.
+// NOTE: this could be usize to support any size of platform?
+//
+// string (tokens: arg, double_quoted_string, single_quoted_string, escape_sequence)
+// id (tokens: builtin_id, user_id)
+// binary_op (tokens: assign, builtin_id)
+// inline_cmd_start (token: open_paren)
+// inline_cmd_end (token: close_paren)
+// arg_separator (token: inline_whitespace)
+//
+//
+const Node2Kind = enum {
+    string, id, binary_op, inline_cmd_start, inline_cmd_end, arg_separator,
+};
+const CmdOffset = u16;
+const Node2 = struct {
+    //token_start: CmdOffset,
+    token_start: [*]const u8,
+    kind: Node2Kind,
+};
 
-fn parseOneNode(src: [*]const u8, token: LexResult, allstringliterals: bool) !Node {
+
+//// TODO: move this somewhere else
+//fn SliceView(comptime T: type) type {
+//    return struct {
+//        const Self = @This();
+//
+//        slice: []T,
+//        len: usize = 0,
+//
+//        pub fn ensureUnusedCapacity(self: Self, additional_count: usize) !void {
+//            if (self.len + additional_count > self.slice.len) {
+//                return error.Overflow;
+//            }
+//        }
+//
+//        pub fn addOneAssumeCapacity(self: *Self) *T {
+//            assert(self.len < capacity);
+//            self.len += 1;
+//            return &self.slice()[self.len - 1];
+//        }
+//
+//        pub fn addOne(self: *Self) !*T {
+//            try self.ensureUnusedCapacity(1);
+//            return self.addOneAssumeCapacity();
+//        }
+//
+//        pub fn append(self: *Self, item: T) !void {
+//            const new_item_ptr = try self.addOne();
+//            new_item_ptr.* = item;
+//        }
+//    };
+//}
+//
+
+const NodeBuilder = @import("block_list.zig").BlockList(Node, .{});
+
+fn parseOneNode(src: [*]const u8, token: LexResult, allstringliterals: bool) Node {
     _ = allstringliterals;
     switch (token.kind) {
         .inline_whitespace, .comment, .newline, .close_paren => unreachable,
         .builtin_id => {
-            var node = Node { .pos = src, .end = token.end, .data = .builtin_id };
-            const id = node.getIdSlice();
+            var node = Node { .pos = src, //.end = token.end,
+                .data = .builtin_id };
+            const id = node.getIdSlice(token.end);
             if (binary_builtin_id_map.get(id)) |binary_op_kind| {
                 node.data = .{ .binary_op = binary_op_kind };
             }
             return node;
         },
-        .user_id => return Node { .pos = src, .end = token.end, .data = .user_id },
-        .arg => return Node { .pos = src, .end = token.end, .data = .arg },
-        .assign_op => return Node { .pos = src, .end = token.end, .data = .assign },
-        .double_quoted_string => return Node { .pos = src, .end = token.end, .data = .double_quoted_string },
+        .user_id => return Node { .pos = src, //.end = token.end,
+            .data = .user_id },
+        .arg => return Node { .pos = src, //.end = token.end,
+            .data = .arg },
+        .assign_op => return Node { .pos = src, //.end = token.end,
+            .data = .assign },
+        .double_quoted_string => return Node { .pos = src, //.end = token.end,
+            .data = .double_quoted_string },
         .open_paren => @panic("parseOneNode open_paren not impl"),
         .single_quoted_string => @panic("parseOneNode single_quoted_string not impl"),
-        .escape_sequence => return Node { .pos = src, .end = token.end, .data = .escape_sequence },
+        .escape_sequence => return Node { .pos = src, //.end = token.end,
+            .data = .escape_sequence },
     }
 }
 
 test "parseOneNode" {
     {
         const src: []const u8 = "@a";
-        const result = try parseOneNode(src.ptr, .{.kind = .builtin_id, .end = src.ptr + src.len}, true);
-        try testing.expectEqual(src[1..], result.getIdSlice());
+        const result = parseOneNode(src.ptr, .{.kind = .builtin_id, .end = src.ptr + src.len}, true);
+        //try testing.expectEqual(src[1..], result.getIdSlice());
         try testing.expectEqual(NodeKind.id, result.getKind());
     }
-    {
-        const src: []const u8 = "@a@";
-        const result = try parseOneNode(src.ptr, .{.kind = .builtin_id, .end = src.ptr + src.len}, true);
-        try testing.expectEqual(@as([]const u8, src[1..2]), result.getIdSlice());
-    }
-    {
-        const src: []const u8 = "@pipe";
-        const result = try parseOneNode(src.ptr, .{.kind = .builtin_id, .end = src.ptr + src.len}, true);
-        try testing.expectEqual(BinaryOpKind.pipe, result.data.binary_op);
-    }
-    {
-        const src: []const u8 = "$a";
-        const result = try parseOneNode(src.ptr, .{.kind = .user_id, .end = src.ptr + src.len}, true);
-        try testing.expectEqual(src[1..], result.getIdSlice());
-    }
-    {
-        const src: []const u8 = "$a$";
-        const result = try parseOneNode(src.ptr, .{.kind = .user_id, .end = src.ptr + src.len}, true);
-        try testing.expectEqual(@as([]const u8, src[1..2]), result.getIdSlice());
-    }
-    {
-        const src: []const u8 = "a";
-        _ = try parseOneNode(src.ptr, .{.kind = .arg, .end = src.ptr + src.len}, true);
-    }
-    {
-        const src: []const u8 = "=";
-        _ = try parseOneNode(src.ptr, .{.kind = .assign_op, .end = src.ptr + src.len}, true);
-    }
-    {
-        const src: []const u8 = "\"a\"";
-        const result = try parseOneNode(src.ptr, .{.kind = .double_quoted_string, .end = src.ptr + src.len}, true);
-        try testing.expect(std.mem.eql(u8, "a", result.getStringData()));
-    }
-    {
-        const src: []const u8 = "@@";
-        _ = try parseOneNode(src.ptr, .{.kind = .escape_sequence, .end = src.ptr + src.len}, true);
-    }
+//    {
+//        const src: []const u8 = "@a@";
+//        const result = try parseOneNode(src.ptr, .{.kind = .builtin_id, .end = src.ptr + src.len}, true);
+//        try testing.expectEqual(@as([]const u8, src[1..2]), result.getIdSlice());
+//    }
+//    {
+//        const src: []const u8 = "@pipe";
+//        const result = try parseOneNode(src.ptr, .{.kind = .builtin_id, .end = src.ptr + src.len}, true);
+//        try testing.expectEqual(BinaryOpKind.pipe, result.data.binary_op);
+//    }
+//    {
+//        const src: []const u8 = "$a";
+//        const result = try parseOneNode(src.ptr, .{.kind = .user_id, .end = src.ptr + src.len}, true);
+//        try testing.expectEqual(src[1..], result.getIdSlice());
+//    }
+//    {
+//        const src: []const u8 = "$a$";
+//        const result = try parseOneNode(src.ptr, .{.kind = .user_id, .end = src.ptr + src.len}, true);
+//        try testing.expectEqual(@as([]const u8, src[1..2]), result.getIdSlice());
+//    }
+//    {
+//        const src: []const u8 = "a";
+//        _ = try parseOneNode(src.ptr, .{.kind = .arg, .end = src.ptr + src.len}, true);
+//    }
+//    {
+//        const src: []const u8 = "=";
+//        _ = try parseOneNode(src.ptr, .{.kind = .assign_op, .end = src.ptr + src.len}, true);
+//    }
+//    {
+//        const src: []const u8 = "\"a\"";
+//        const result = try parseOneNode(src.ptr, .{.kind = .double_quoted_string, .end = src.ptr + src.len}, true);
+//        try testing.expect(std.mem.eql(u8, "a", result.getStringData()));
+//    }
+//    {
+//        const src: []const u8 = "@@";
+//        _ = try parseOneNode(src.ptr, .{.kind = .escape_sequence, .end = src.ptr + src.len}, true);
+//    }
 }
-
-const NodeList = std.ArrayList(Node);
 
 const ParseNodeResult = struct {
     node: Node,
     token: ?LexResult,
 };
 
-fn parseNode(src: [*]const u8, limit: [*]const u8, token: LexResult, allstringliterals: bool) !ParseNodeResult {
+fn parseNode(
+    node_builder: *NodeBuilder,
+    src: [*]const u8,
+    limit: [*]const u8,
+    token: LexResult,
+    allstringliterals: bool,
+) !ParseNodeResult {
+
     std.debug.assert(@ptrToInt(token.end) > @ptrToInt(src));
     switch (token.kind) {
         .inline_whitespace, .comment, .newline, .close_paren => unreachable,
@@ -190,9 +261,8 @@ fn parseNode(src: [*]const u8, limit: [*]const u8, token: LexResult, allstringli
     var next = src;
     var next_token = token;
 
-    var opt_node: ?Node = null;
-
     while (true) {
+        _ = node_builder; // TODO: remove this!!!
         {
             //std.debug.print("calling parseOneNode with '{s}'...\n", .{
             //    next[0 .. @ptrToInt(next_token.end) - @ptrToInt(next)]});
@@ -229,29 +299,50 @@ fn parseNode(src: [*]const u8, limit: [*]const u8, token: LexResult, allstringli
 }
 
 test "parseNode" {
+    var node_builder = NodeBuilder { .allocator = std.testing.allocator };
+    node_builder.deinit();
     {
-        const src: []const u8 = "a";
-        _ = try parseNode(src.ptr, src.ptr + src.len, .{ .kind = .arg, .end = src.ptr + src.len}, true);
+//        const src: []const u8 = "a";
+//        _ = try parseNode(&node_builder, src.ptr, src.ptr + src.len, .{ .kind = .arg, .end = src.ptr + src.len}, true);
     }
 }
 
-// need a NodeBuilder
-pub fn parseCommand(nodes: *NodeList, src: [*]const u8, limit: [*]const u8, allstringliterals: bool) ![*]const u8 {
-    _ = nodes;
+
+pub fn parseCommand(node_builder: *NodeBuilder, src: [*]const u8, limit: [*]const u8, allstringliterals: bool) ![*]const u8 {
+    _ = node_builder;
     _ = allstringliterals;
 
     var next = lex.lexInlineWhitespace(src, limit);
+    if (next == limit)
+        return next;
     const token = try scan(next, limit);
-    if (token.end == next)
-        return src;
+    if (@ptrToInt(token.end) <= @ptrToInt(next)) unreachable;
+
     if (assert_one_match)
-        lex.assertNoMatchAfter(src, limit, token.kind);
+        lex.assertNoMatchAfter(next, limit, token.kind);
 
     while (true) {
-        if (token.kind == .comment or token.kind == .newline)
-            return token.end;
-        if (token.kind == .close_paren)
-            return next; // token.pos
+        switch (token.kind) {
+            .inline_whitespace => unreachable,
+            .comment, .newline => return token.end,
+            .close_paren => return next,
+            .assign_op => {
+                try node_builder.append(.{
+                    .pos = next,
+                    .data = .assign,
+                });
+            },
+            .builtin_id, .user_id, .arg,
+            .double_quoted_string, .single_quoted_string,
+            .escape_sequence => {
+                //try node_builder.append(parseOneNode(
+                @panic("not impl");
+
+            },
+            .open_paren => {
+                @panic("not impl");
+            },
+        }
         //const result = try parseNode(next, limit, allstringliterals);
         //_ = result;
         @panic("not impl");
@@ -259,11 +350,13 @@ pub fn parseCommand(nodes: *NodeList, src: [*]const u8, limit: [*]const u8, alls
 }
 
 fn testParseCommand(src: []const u8) !void {
-    var nodes = NodeList.init(std.testing.allocator);
-    defer nodes.deinit();
-    _ = try parseCommand(&nodes, src.ptr, src.ptr + src.len, true);
+    var node_builder = NodeBuilder { .allocator = std.testing.allocator };
+    node_builder.deinit();
+    _ = try parseCommand(&node_builder, src.ptr, src.ptr + src.len, true);
 }
 
 test "parseCommand" {
+    try testParseCommand(" ");
+    try testParseCommand("\t  \t");
     //try testParseCommand("a");
 }

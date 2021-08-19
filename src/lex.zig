@@ -15,6 +15,7 @@ pub const TokenKind = enum {
     single_quoted_string,
     escape_sequence,
 };
+pub const token0 = @intToEnum(TokenKind, 0);
 const token_count = @typeInfo(TokenKind).Enum.fields.len;
 
 pub fn lexInlineWhitespace(text: [*]const u8, limit: [*]const u8) [*]const u8 {
