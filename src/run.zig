@@ -1,4 +1,5 @@
 const std = @import("std");
+const testing = std.testing;
 const ArrayList = std.ArrayList;
 const ArrayListUnmanaged = std.ArrayListUnmanaged;
 
@@ -10,21 +11,42 @@ const SyntaxError = error {
     UnknownToken,
 };
 
+const OutKind = enum { out, err };
+
 const RunHooks = struct {
     allocator: *std.mem.Allocator,
-    onSyntaxError: fn(err: SyntaxError, pos: [*]const u8) void,
+    onSyntaxError: fn(base: *RunHooks, err: SyntaxError, pos: [*]const u8) void,
+    onWrite: fn(base: *RunHooks, kind: OutKind, bytes: []const u8) WriteError!usize,
+
+    const WriteError = error {OutOfMemory};
+    const WriterContext = struct {
+        hooks: *RunHooks,
+        kind: OutKind,
+        fn write(self: WriterContext, bytes: []const u8) WriteError!usize {
+            return self.hooks.onWrite(self.hooks, self.kind, bytes);
+        }
+    };
+    pub const Writer = std.io.Writer(WriterContext, WriteError, WriterContext.write);
+    fn print(self: *RunHooks, out_kind: OutKind, comptime fmt: []const u8, args: anytype) !void {
+        return std.fmt.format(Writer {
+            .context = .{
+                .hooks = self,
+                .kind = out_kind,
+            },
+        }, fmt, args);
+    }
 };
 
 const LexResult = struct {
     kind: lex.TokenKind,
     end: [*]const u8,
 };
-fn scan(hooks: RunHooks, text: [*]const u8, limit: [*]const u8) RunFailedError!LexResult {
+fn scan(hooks: *RunHooks, text: [*]const u8, limit: [*]const u8) RunFailedError!LexResult {
     std.debug.assert(@ptrToInt(text) < @ptrToInt(limit));
     var kind = lex.token0;
     const end = lex.lex(text, limit, &kind);
     if (end == text) {
-        hooks.onSyntaxError(SyntaxError.UnknownToken, text);
+        hooks.onSyntaxError(hooks, SyntaxError.UnknownToken, text);
         return error.RunFailed;
     }
     if (assert_one_match)
@@ -33,10 +55,10 @@ fn scan(hooks: RunHooks, text: [*]const u8, limit: [*]const u8) RunFailedError!L
 }
 
 const RunFailedError = error { RunFailed } || std.mem.Allocator.Error;
-pub fn runSlice(hooks: RunHooks, s: []const u8) RunFailedError![*]const u8 {
+pub fn runSlice(hooks: *RunHooks, s: []const u8) RunFailedError![*]const u8 {
     return run(hooks, s.ptr, s.ptr + s.len);
 }
-pub fn run(hooks: RunHooks, start: [*]const u8, limit: [*]const u8) RunFailedError![*]const u8 {
+pub fn run(hooks: *RunHooks, start: [*]const u8, limit: [*]const u8) RunFailedError![*]const u8 {
     var next = lex.lexInlineWhitespace(start, limit);
     if (next == limit)
         return limit;
@@ -55,7 +77,7 @@ pub fn run(hooks: RunHooks, start: [*]const u8, limit: [*]const u8) RunFailedErr
 }
 
 fn runBuiltin(
-    hooks: RunHooks,
+    hooks: *RunHooks,
     builtin_start: [*]const u8,
     builtin_end: [*]const u8,
     limit: [*]const u8
@@ -82,14 +104,13 @@ fn runBuiltin(
     const end = try allocArgStrings(hooks, &args, builtin_end, limit);
     
     if (std.mem.eql(u8, builtin_id, "echo")) {
-        std.debug.print("[DEBUG-ECHO-OUTPUT] ", .{});
         if (args.items.len == 0) {
-            std.debug.print("\n", .{});
+            try hooks.print(.out, "\n", .{});
         } else {
             for (args.items[0 .. args.items.len - 1]) |arg| {
-                std.debug.print("{s} ", .{arg});
+                try hooks.print(.out, "{s}", .{arg});
             }
-            std.debug.print("{s}\n", .{args.items[args.items.len-1]});
+            try hooks.print(.out, "{s}\n", .{args.items[args.items.len-1]});
         }
         return end;
     } else {
@@ -153,7 +174,7 @@ const ArgBuilder = struct {
     }
 };
 
-fn allocArgStrings(hooks: RunHooks, args: *ArrayList([]const u8), start: [*]const u8, limit: [*]const u8) RunFailedError![*]const u8 {
+fn allocArgStrings(hooks: *RunHooks, args: *ArrayList([]const u8), start: [*]const u8, limit: [*]const u8) RunFailedError![*]const u8 {
     if (start == limit) return limit;
     var next = lex.lexInlineWhitespace(start, limit);
 
@@ -192,7 +213,7 @@ fn allocArgStrings(hooks: RunHooks, args: *ArrayList([]const u8), start: [*]cons
             },
             .single_quoted_string,
             .escape_sequence => {
-                @panic("not impl");
+               try arg_builder.add(hooks.allocator, next[1..2]);
             },
             .open_paren => {
                 @panic("not impl");
@@ -202,20 +223,82 @@ fn allocArgStrings(hooks: RunHooks, args: *ArrayList([]const u8), start: [*]cons
     }
 }
 
-fn testOnSyntaxError(err: SyntaxError, pos: [*]const u8) void {
-    _ = pos;
-    std.debug.print("got syntax error {} (TODO: print more info based on pos)\n", .{err});
+const TestConfig = struct {
+    exit: u8 = 0,
+    stdout: ?[]const u8 = null,
+    stderr: ?[]const u8 = null,
+    stdin: ?[]const u8 = null,
+};
+
+const TestHooks = struct {
+    hooks: RunHooks,
+    stdout: ArrayList(u8),
+    stderr: ArrayList(u8),
+
+    pub fn init() TestHooks {
+        return .{
+            .hooks = .{
+                .allocator = testing.allocator,
+                .onWrite = onWrite,
+                .onSyntaxError = onSyntaxError,
+            },
+            .stdout = ArrayList(u8).init(testing.allocator),
+            .stderr = ArrayList(u8).init(testing.allocator),
+        };
+    }
+
+    pub fn deinit(self: *TestHooks) void {
+        self.stdout.deinit();
+        self.stderr.deinit();
+    }
+
+    fn onWrite(base: *RunHooks, out_kind: OutKind, bytes: []const u8) RunHooks.WriteError!usize {
+        const self = @fieldParentPtr(TestHooks, "hooks", base);
+        const out = switch (out_kind) { .out => &self.stdout, .err => &self.stderr };
+        try out.appendSlice(bytes);
+        return bytes.len;
+    }
+
+    fn onSyntaxError(base: *RunHooks, err: SyntaxError, pos: [*]const u8) void {
+        _ = base;
+        _ = pos;
+        std.debug.print("got syntax error {} (TODO: print more info based on pos)\n", .{err});
+    }
+};
+
+fn runTest(src: []const u8, config: TestConfig) !void {
+    var hooks = TestHooks.init();
+    defer hooks.deinit();
+    const end = runSlice(&hooks.hooks, src) catch |e| switch (e) {
+        error.RunFailed => {
+            @panic("not impl");
+        },
+        error.OutOfMemory => {
+            @panic("not impl");
+        },
+    };
+    _ = end;
+    if (config.exit == 0) {
+    }
+
+    if (config.stdout) |stdout| {
+        if (!std.mem.eql(u8, stdout, hooks.stdout.items)) {
+            std.debug.print("\nError: stdout mismatch\nexpected: '{s}'\nactual  : '{s}'\n", .{stdout, hooks.stdout.items});
+            return error.TestUnexpectedResult;
+        }
+    } else {
+        try testing.expect(hooks.stdout.items.len == 0);
+    }
 }
 
+
 test {
-    const hooks = RunHooks {
-        .allocator = std.testing.allocator,
-        .onSyntaxError = testOnSyntaxError,
-    };
-    _ = try runSlice(hooks, "@echo");
-    _ = try runSlice(hooks, "@echo@");
-    _ = try runSlice(hooks, "@echo \"hey this is a string!\"");
-    _ = try runSlice(hooks, "@echo \"hey this is a string and an \"arg\" put together\"");
-    _ = try runSlice(hooks, "@echo@ hello");
-    _ = try runSlice(hooks, "@echo hello");
+    try runTest("@echo", .{.stdout = "\n"});
+    try runTest("@echo@", .{.stdout = "\n"});
+    try runTest("@echo hello", .{.stdout = "hello\n"});
+    try runTest("@echo@ hello", .{.stdout = "hello\n"});
+    try runTest("@echo \"a string!\"", .{.stdout = "a string!\n"});
+    try runTest("@echo \"string and \"arg\" put together\"", .{.stdout = "string and arg put together\n"});
+    try runTest("@echo @@", .{.stdout = "@\n"});
+    try runTest("@echo @(", .{.stdout = "(\n"});
 }
