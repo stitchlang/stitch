@@ -7,15 +7,11 @@ const lex = @import("lex.zig");
 
 const assert_one_match = true;
 
-const SyntaxError = error {
-    UnknownToken,
-};
-
 const OutKind = enum { out, err };
 
 const RunHooks = struct {
     allocator: *std.mem.Allocator,
-    onSyntaxError: fn(base: *RunHooks, err: SyntaxError, pos: [*]const u8) void,
+    onError: fn(base: *RunHooks, pos: [*]const u8, msg: []const u8) void,
     onWrite: fn(base: *RunHooks, kind: OutKind, bytes: []const u8) WriteError!usize,
 
     const WriteError = error {OutOfMemory};
@@ -35,6 +31,19 @@ const RunHooks = struct {
             },
         }, fmt, args);
     }
+
+    fn reportError(self: *RunHooks, pos: [*]const u8, comptime fmt: []const u8, args: anytype) void {
+        var msg_buf: [200]u8 = undefined;
+        var fbs = std.io.fixedBufferStream(&msg_buf);
+        std.fmt.format(fbs.writer(), fmt, args) catch |e| switch (e) {
+            error.NoSpaceLeft => {
+                //std.debug.panic("error message exceeded {} bytes", .{msg_buf.len});
+                self.onError(self, pos, "error message too long");
+                return;
+            },
+        };
+        self.onError(self, pos, fbs.getWritten());
+    }
 };
 
 const LexResult = struct {
@@ -45,13 +54,44 @@ fn scan(hooks: *RunHooks, text: [*]const u8, limit: [*]const u8) RunFailedError!
     std.debug.assert(@ptrToInt(text) < @ptrToInt(limit));
     var kind = lex.token0;
     const end = lex.lex(text, limit, &kind);
-    if (end == text) {
-        hooks.onSyntaxError(hooks, SyntaxError.UnknownToken, text);
-        return error.RunFailed;
+    if (end != text) {
+        if (assert_one_match)
+            lex.assertNoMatchAfter(text, limit, kind);
+        return LexResult { .kind = kind, .end = end };
     }
-    if (assert_one_match)
-        lex.assertNoMatchAfter(text, limit, kind);
-    return LexResult { .kind = kind, .end = end };
+
+    // figure out what went wrong
+//    # time to try to figure out what went wrong
+//    c = next.charAt(0)
+//    if c == ord('('):
+//        raise SyntaxError(pos, "missing close paren for: {}".format(previewStringPtr(next, limit, 30)))
+//    if c == ord('"'):
+//        raise SyntaxError(pos, "missing double-quote to close: {}".format(previewStringPtr(next, limit, 30)))
+//    next_str = next.toStringWithLimit(limit)
+//    for seq in (b"''''''", b"'''''", b"''''", b"'''", b"''", b"'"):
+//        if next_str.startswith(seq):
+//            phrase = "single-quote" if (len(seq) == 1) else "{} single-quote sequence".format(len(seq))
+//            raise SyntaxError(pos, "missing {} to close: {}".format(phrase, previewStringPtr(next, limit, 30)))
+//
+//    # I think we need at most 2 characters to see what went wrong
+//    bad_str = next_str[:min(limit.subtract(next), 2)]
+//    raise SyntaxError(pos, "unrecognized character sequence '{}'".format(bad_str.decode('ascii')))
+//
+    if (text[0] == '(') {
+//        //hooks.onSyntaxError("missing close paren for: {}", .{previewStringPtr(text, limit, 30)});
+//        hooks.onSyntaxError(SyntaxError.MissingCloseParen
+        @panic("here");
+    }
+    if (text[0] == '"') {
+        @panic("here");
+    }
+    if (text[0] == '\'') {
+        @panic("here");
+    }
+
+    const bad_str = text[0..std.math.min(2, @ptrToInt(limit)-@ptrToInt(text))];
+    hooks.reportError(text, "unrecognized character sequence '{s}'", .{bad_str});
+    return error.RunFailed;
 }
 
 const RunFailedError = error { RunFailed } || std.mem.Allocator.Error;
@@ -223,33 +263,54 @@ fn allocArgStrings(hooks: *RunHooks, args: *ArrayList([]const u8), start: [*]con
     }
 }
 
-const TestConfig = struct {
-    exit: u8 = 0,
-    stdout: ?[]const u8 = null,
-    stderr: ?[]const u8 = null,
-    stdin: ?[]const u8 = null,
-};
-
 const TestHooks = struct {
     hooks: RunHooks,
     stdout: ArrayList(u8),
     stderr: ArrayList(u8),
 
+    result: union(enum) {
+        none: void,
+          err: struct {
+              pos: [*]const u8,
+              msg: []const u8,
+          },
+    },
+
     pub fn init() TestHooks {
         return .{
             .hooks = .{
                 .allocator = testing.allocator,
+                .onError = onError,
                 .onWrite = onWrite,
-                .onSyntaxError = onSyntaxError,
             },
             .stdout = ArrayList(u8).init(testing.allocator),
             .stderr = ArrayList(u8).init(testing.allocator),
+            .result = .none,
         };
     }
 
     pub fn deinit(self: *TestHooks) void {
         self.stdout.deinit();
         self.stderr.deinit();
+        switch (self.result) {
+            .none => {},
+            .err => |err| {
+                self.hooks.allocator.free(err.msg);
+            },
+        }
+    }
+
+    fn onError(base: *RunHooks, pos: [*]const u8, msg: []const u8) void {
+        const self = @fieldParentPtr(TestHooks, "hooks", base);
+        std.debug.assert(self.result == .none);
+        self.result = .{ .err = .{
+            .pos = pos,
+            .msg = self.hooks.allocator.dupe(u8, msg) catch |e| switch (e) {
+                error.OutOfMemory => {
+                    std.debug.panic("failed to allocate memory for the error message '{s}'", .{msg});
+                },
+            },
+        }};
     }
 
     fn onWrite(base: *RunHooks, out_kind: OutKind, bytes: []const u8) RunHooks.WriteError!usize {
@@ -258,36 +319,75 @@ const TestHooks = struct {
         try out.appendSlice(bytes);
         return bytes.len;
     }
+};
 
-    fn onSyntaxError(base: *RunHooks, err: SyntaxError, pos: [*]const u8) void {
-        _ = base;
-        _ = pos;
-        std.debug.print("got syntax error {} (TODO: print more info based on pos)\n", .{err});
-    }
+const TestConfig = struct {
+    err: ?[]const u8 = null,
+    stdout: ?[]const u8 = null,
+    stderr: ?[]const u8 = null,
+    stdin: ?[]const u8 = null,
 };
 
 fn runTest(src: []const u8, config: TestConfig) !void {
     var hooks = TestHooks.init();
     defer hooks.deinit();
+
+    if (config.stdin) |stdin| {
+        _ = stdin;
+        @panic("not impl");
+    }
     const end = runSlice(&hooks.hooks, src) catch |e| switch (e) {
+        error.OutOfMemory => return e,
         error.RunFailed => {
-            @panic("not impl");
-        },
-        error.OutOfMemory => {
-            @panic("not impl");
+            const err = switch (hooks.result) {
+                .none => @panic("RunFailed but no error was reported, this should be impossible"),
+                .err => |err| err,
+            };
+            if (config.err) |expected_error| {
+                if (!std.mem.eql(u8, expected_error, err.msg)) {
+                    std.debug.print("\nerror: error message mismatch\nexpected: '{s}'\nactual  : '{s}'\n", .{expected_error, err.msg});
+                    return error.TestUnexpectedResult;
+                }
+            } else {
+                std.debug.print("error: unexpected failure: {s}\n", .{err.msg});
+                return error.TestUnexpectedResult;
+            }
+
+            if (config.stdout) |stdout| {
+                _ = stdout;
+                @panic("not impl");
+            }
+            if (config.stderr) |stderr| {
+                if (!std.mem.eql(u8, stderr, hooks.stderr.items)) {
+                    std.debug.print("\nerror: stderr mismatch\nexpected: '{s}'\nactual  : '{s}'\n", .{stderr, hooks.stderr.items});
+                    return error.TestUnexpectedResult;
+                }
+            }
+            //@panic("not impl");
+            return;
         },
     };
     _ = end;
-    if (config.exit == 0) {
+
+    if (config.err) |err| {
+        std.debug.print("\ndid not get expected error '{s}'\n", .{err});
+        return error.TestUnexpectedResult;
     }
 
     if (config.stdout) |stdout| {
         if (!std.mem.eql(u8, stdout, hooks.stdout.items)) {
-            std.debug.print("\nError: stdout mismatch\nexpected: '{s}'\nactual  : '{s}'\n", .{stdout, hooks.stdout.items});
+            std.debug.print("\nerror: stdout mismatch\nexpected: '{s}'\nactual  : '{s}'\n", .{stdout, hooks.stdout.items});
             return error.TestUnexpectedResult;
         }
     } else {
         try testing.expect(hooks.stdout.items.len == 0);
+    }
+
+    if (config.stderr) |stderr| {
+        _ = stderr;
+        @panic("todo");
+    } else if (hooks.stderr.items.len > 0) {
+        @panic("todo");
     }
 }
 
@@ -301,4 +401,6 @@ test {
     try runTest("@echo \"string and \"arg\" put together\"", .{.stdout = "string and arg put together\n"});
     try runTest("@echo @@", .{.stdout = "@\n"});
     try runTest("@echo @(", .{.stdout = "(\n"});
+
+    try runTest("$$", .{.err = "unrecognized character sequence '$$'"});
 }
