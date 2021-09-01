@@ -47,12 +47,12 @@ Have not implemented any looping yet
 --------------------------------------------------------------------------------
 Bash Pitfall #2: cp $file $target
 --------------------------------------------------------------------------------
- In stitch this example is correct because:
-     - variables can have whitespace and are still treated as single arguments
-     - there's no $IFS
-     - variables can have wildcards
-     - there's no wordsplitting
-     - there's no pathname expansion
+In stitch this example is correct because:
+    - variables can have whitespace and are still treated as single arguments
+    - there's no $IFS
+    - variables can have wildcards
+    - there's no wordsplitting
+    - there's no pathname expansion
 '''
 
 rm -rf @scriptdir/scratch
@@ -67,10 +67,10 @@ cp $file $target
 --------------------------------------------------------------------------------
 Bash Pitfall #3: Filenames with leading dashes
 --------------------------------------------------------------------------------
-this isn't a problem with Bash, it's just a problem with command-line interfaces
+This isn't a problem with Bash, it's a problem with command-line interfaces
 in general that scripting languages are vulnerable to.
 
-That being said, this issue is mitigated because currently stitch pathnaes are
+That being said, this issue is mitigated because currently stitch pathnames are
 absolute for the most part, although, this is subject to change.
 '''
 
@@ -132,8 +132,8 @@ In stitch the equivalent command would be:
 
     ($foo @eq bar) @and ($bar @eq foo)
 
-Stitch discourages use of `[` and `[[` which solves one of the problem with this.
-Since stitch also doesn't have a `&&` operator, it avoid the other issue with this.
+Stitch discourages use of `[` and `[[` which solves one of the problems with this.
+Since stitch also doesn't have a `&&` operator, it avoids the other issue with this.
 '''
 foo = bar
 bar = foo
@@ -195,7 +195,7 @@ touch @scriptdir/scratch/myfile
 --------------------------------------------------------------------------------
 Bash Pitfall #10: if [bar="$foo"]; then ...
 --------------------------------------------------------------------------------
-Problem fixed by avoiding the '[' program
+Problem fixed by avoiding the '[' program.
 '''
 @if $bar @eq $foo
     @echo success
@@ -216,7 +216,7 @@ Problem fixed by avoiding the '[' program
 --------------------------------------------------------------------------------
 Bash Pitfall #12: read $foo
 --------------------------------------------------------------------------------
-stitch doesn't have a read builtin so this pitfall is avoided.  The equivalent
+Stitch doesn't have a read builtin so this pitfall is avoided.  The equivalent
 here would be:
 
 foo = (cat)
@@ -273,7 +273,7 @@ The equivalent mistake in stitch would be:
     $foo = bar
 
 This problem is mitigated in stitch because if $foo is undefined here, then a
-SemanticError should be asserted a "verify time".  Even if $foo was defined, it
+SemanticError should be asserted at "verify time".  Even if $foo was defined, it
 would only pass verification if it was a string that happened to be a valid
 variable name and was known at verification time.  If any of these weren't true
 then it would result in a semantic error.
