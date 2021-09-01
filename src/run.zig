@@ -2,8 +2,10 @@ const std = @import("std");
 const testing = std.testing;
 const ArrayList = std.ArrayList;
 const ArrayListUnmanaged = std.ArrayListUnmanaged;
+const StringHashMapUnmanaged = std.StringHashMapUnmanaged;
 
 const lex = @import("lex.zig");
+const parse = @import("parse.zig");
 
 const assert_one_match = true;
 
@@ -13,6 +15,24 @@ const RunHooks = struct {
     allocator: *std.mem.Allocator,
     onError: fn(base: *RunHooks, pos: [*]const u8, msg: []const u8) void,
     onWrite: fn(base: *RunHooks, kind: OutKind, bytes: []const u8) WriteError!usize,
+    builtin_map: StringHashMapUnmanaged(StitchObj),
+
+    pub fn init(
+        allocator: *std.mem.Allocator,
+        onError: fn(base: *RunHooks, pos: [*]const u8, msg: []const u8) void,
+        onWrite: fn(base: *RunHooks, kind: OutKind, bytes: []const u8) WriteError!usize,
+    ) RunHooks {
+        return .{
+            .allocator = allocator,
+            .onError = onError,
+            .onWrite = onWrite,
+            .builtin_map = StringHashMapUnmanaged(StitchObj) { },
+        };
+    }
+
+    pub fn deinit(self: *RunHooks) void {
+        self.builtin_map.deinit(self.allocator);
+    }
 
     const WriteError = error {OutOfMemory};
     const WriterContext = struct {
@@ -46,19 +66,17 @@ const RunHooks = struct {
     }
 };
 
-const LexResult = struct {
-    kind: lex.TokenKind,
-    end: [*]const u8,
+const ScriptContext = struct {
+    var_map: StringHashMapUnmanaged(StitchObj) = .{},
 };
-fn scan(hooks: *RunHooks, text: [*]const u8, limit: [*]const u8) RunFailedError!LexResult {
-    std.debug.assert(@ptrToInt(text) < @ptrToInt(limit));
-    var kind = lex.token0;
-    const end = lex.lex(text, limit, &kind);
-    if (end != text) {
-        if (assert_one_match)
-            lex.assertNoMatchAfter(text, limit, kind);
-        return LexResult { .kind = kind, .end = end };
-    }
+const CommandContext = struct {
+    hooks: *RunHooks,
+    script_ctx: *ScriptContext,
+    builtin_prefix_count: u16 = 0,
+    depth: u16 = 0,
+};
+
+fn reportUnknownToken(hooks: *RunHooks, pos: [*]const u8, limit: [*]const u8) void {
 
     // figure out what went wrong
 //    # time to try to figure out what went wrong
@@ -77,98 +95,176 @@ fn scan(hooks: *RunHooks, text: [*]const u8, limit: [*]const u8) RunFailedError!
 //    bad_str = next_str[:min(limit.subtract(next), 2)]
 //    raise SyntaxError(pos, "unrecognized character sequence '{}'".format(bad_str.decode('ascii')))
 //
-    if (text[0] == '(') {
-//        //hooks.onSyntaxError("missing close paren for: {}", .{previewStringPtr(text, limit, 30)});
+    if (pos[0] == '(') {
+//        //hooks.onSyntaxError("missing close paren for: {}", .{previewStringPtr(pos, limit, 30)});
 //        hooks.onSyntaxError(SyntaxError.MissingCloseParen
         @panic("here");
     }
-    if (text[0] == '"') {
+    if (pos[0] == '"') {
         @panic("here");
     }
-    if (text[0] == '\'') {
+    if (pos[0] == '\'') {
         @panic("here");
     }
 
-    const bad_str = text[0..std.math.min(2, @ptrToInt(limit)-@ptrToInt(text))];
-    hooks.reportError(text, "unrecognized character sequence '{s}'", .{bad_str});
-    return error.RunFailed;
+    const bad_str = pos[0..std.math.min(2, @ptrToInt(limit)-@ptrToInt(pos))];
+    hooks.reportError(pos, "unrecognized character sequence '{s}'", .{bad_str});
 }
 
 const RunFailedError = error { RunFailed } || std.mem.Allocator.Error;
-pub fn runSlice(hooks: *RunHooks, s: []const u8) RunFailedError![*]const u8 {
-    return run(hooks, s.ptr, s.ptr + s.len);
+pub fn runSlice(ctx: *CommandContext, s: []const u8) RunFailedError![*]const u8 {
+    return runLimitSlice(ctx, s.ptr, s.ptr + s.len);
 }
-pub fn run(hooks: *RunHooks, start: [*]const u8, limit: [*]const u8) RunFailedError![*]const u8 {
-    var next = lex.lexInlineWhitespace(start, limit);
-    if (next == limit)
-        return limit;
+pub fn runLimitSlice(ctx: *CommandContext, start: [*]const u8, limit: [*]const u8) RunFailedError![*]const u8 {
+    std.debug.print("[DEBUG] run '{s}'\n", .{start[0..@ptrToInt(limit)-@ptrToInt(start)]});
 
-    const first_token = try scan(hooks, next, limit);
+    // Here we parse the command into a list of nodes.
+    // This requires allocating space for the node data, however, this
+    // also makes the code simpler because it provides a clean separation
+    // between the parsing stage and the interpretation stage.
+    var nodes = parse.NodeBuilder { .allocator = ctx.hooks.allocator };
+    defer nodes.deinit();
 
-    if (first_token.kind == .builtin_id) {
-        return runBuiltin(hooks, next, first_token.end, limit);
+    // TODO: make this overrideable (probably in hooks somewhere)
+    const allstringliterals = false;
+    const cmd_end = blk: {
+        switch (parse.parseCommand(&nodes, start, limit, allstringliterals)) {
+            .success => |end| break :blk end,
+            .unknown_token => |pos| {
+                reportUnknownToken(ctx.hooks, pos, limit);
+                return error.RunFailed;
+            },
+            .err => |e| return e,
+        }
+    };
+    var it = nodes.iterator();
+    try runNodes(ctx, &it, limit);
+    return cmd_end;
+}
+
+pub fn runNodes(ctx: *CommandContext, nodes: *parse.NodeBuilder.Iterator,
+    limit: [*]const u8, // TODO: this might be removed, for now it's used to find out which strings are inside the script source memory
+) RunFailedError!void {
+    const first_node = nodes.next() orelse return;
+    switch (first_node.data) {
+        .builtin_id => {
+            // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+            // TODO: ensure that we aren't joining to the next node
+            // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+            return runBuiltin(ctx, first_node.getIdSlice(), nodes, limit);
+        },
+        else => {},
     }
-    _ = first_token;
+    {
+        var nodes2 = nodes.*;
+        if (nodes2.next()) |second_node| {
+            switch (second_node.data) {
+                .assign => return runAssign(ctx, first_node, second_node, &nodes2),
+                .binary_op => return runBinaryExpression(ctx, first_node, second_node, &nodes2),
+                else => {},
+            }
+        }
+    }
 
-    //@panic("here");
-    return next;
-    //while (true) {
-    //}
+    ctx.hooks.reportError(first_node.pos, "have not implemented a first token kind of {s} with no binary operator", .{@tagName(first_node.data)});
+    return RunFailedError.RunFailed;
 }
 
 
-//const StitchObj = union(enum) {
-//    bool: bool,
-//};
-//const RunBuiltinResult = struct {
-//    end: [*]const u8,
-//    return_obj: StitchObj,
-//};
+fn builtinIdFromToken(start: [*]const u8, end: [*]const u8) []const u8 {
+    std.debug.assert(start[0] == '@');
+    var len = @ptrToInt(end) - @ptrToInt(start);
+    if (@intToPtr([*]const u8, @ptrToInt(end) - 1)[0] == '@') {
+        len -= 1;
+    }
+    return start[1..len];
+}
+
+const StitchObj = union(enum) {
+    bool: bool,
+};
+
+
 fn runBuiltin(
-    hooks: *RunHooks,
-    builtin_start: [*]const u8,
-    builtin_end: [*]const u8,
-    limit: [*]const u8
-) RunFailedError![*]const u8 {
-    std.debug.assert(builtin_start[0] == '@');
-    var builtin_id_len = @ptrToInt(builtin_end) - @ptrToInt(builtin_start);
-    if (@intToPtr([*]const u8, @ptrToInt(builtin_end) - 1)[0] == '@') {
-        builtin_id_len -= 1;
-    }
-    
-    const builtin_id = builtin_start[1.. builtin_id_len];
-
-    //if (std.mem.eql(u8, builtin_id, "false")) {
-    //    !
-    //}
-
-
+    ctx: *CommandContext,
+    builtin_id: []const u8,
+    nodes: *parse.NodeBuilder.Iterator,
+    limit: [*]const u8, // might be removed, used to find out which strings are within script source memory
+) RunFailedError!void {
     // for now we'll assume all builtins just take string arguments
-    var args = ArrayList([]const u8).init(hooks.allocator);
+    var args = ArrayList([]const u8).init(ctx.hooks.allocator);
     defer {
         for (args.items) |arg| {
-            if (!ptrIntersects(arg.ptr, builtin_end, limit)) {
-                hooks.allocator.free(arg);
+            if (!ptrIntersects(arg.ptr, builtin_id.ptr, limit)) {
+                ctx.hooks.allocator.free(arg);
             }
         }
         args.deinit();
     }
 
-    const end = try allocArgStrings(hooks, &args, builtin_end, limit);
-    
+    try allocArgStrings(ctx, &args, nodes);
+
     if (std.mem.eql(u8, builtin_id, "echo")) {
         if (args.items.len == 0) {
-            try hooks.print(.out, "\n", .{});
+            try ctx.hooks.print(.out, "\n", .{});
         } else {
             for (args.items[0 .. args.items.len - 1]) |arg| {
-                try hooks.print(.out, "{s}", .{arg});
+                try ctx.hooks.print(.out, "{s}", .{arg});
             }
-            try hooks.print(.out, "{s}\n", .{args.items[args.items.len-1]});
+            try ctx.hooks.print(.out, "{s}\n", .{args.items[args.items.len-1]});
         }
-        return end;
     } else {
         std.debug.panic("builtin '@{s}' not impl", .{builtin_id});
     }
+}
+
+fn runBinaryExpression(
+    ctx: *CommandContext,
+    first_node: parse.Node,
+    op_node: parse.Node,
+    nodes: *parse.NodeBuilder.Iterator,
+) RunFailedError!void {
+    _ = first_node;
+    _ = op_node;
+    _ = nodes;
+    ctx.hooks.reportError(first_node.pos, "runBinaryExpression op={s} not implemented", .{@tagName(op_node.data)});
+    return RunFailedError.RunFailed;
+}
+
+fn runAssign(
+    ctx: *CommandContext,
+    first_node: parse.Node,
+    op_node: parse.Node,
+    nodes: *parse.NodeBuilder.Iterator,
+) RunFailedError!void {
+
+    std.debug.assert(op_node.data == .assign);
+    // TODO: test this!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    if (ctx.builtin_prefix_count > 0) {
+        ctx.hooks.reportError(op_node.pos, "unexpected '='", .{});
+        return RunFailedError.RunFailed;
+    }
+    // TODO: test this!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    if (ctx.depth > 0) {
+        ctx.hooks.reportError(op_node.pos, "assignment '=' is forbidden inside an inline command", .{});
+        return RunFailedError.RunFailed;
+    }
+
+
+    _ = first_node;
+    _ = op_node;
+    _ = nodes;
+
+//    var nodes: [1]Node = undefined;
+//    const nodes_len = parseNodes(next, limit, &nodes) catch |e| switch (e) {
+//        error.RunFailed, error.OutOfMemory => |e2| return e2,
+//        error.TooManyNodes => {
+//           @panic("here");
+//        }
+//    };
+//    _ = nodes_len;
+    ctx.hooks.reportError(first_node.pos, "runAssign not implemented", .{});
+    return RunFailedError.RunFailed;
 }
 
 fn ptrIntersects(s: [*]const u8, start: [*]const u8, limit: [*]const u8) bool {
@@ -227,53 +323,29 @@ const ArgBuilder = struct {
     }
 };
 
-fn allocArgStrings(hooks: *RunHooks, args: *ArrayList([]const u8), start: [*]const u8, limit: [*]const u8) RunFailedError![*]const u8 {
-    if (start == limit) return limit;
-    var next = lex.lexInlineWhitespace(start, limit);
-
+fn allocArgStrings(ctx: *CommandContext, args: *ArrayList([]const u8), nodes: *parse.NodeBuilder.Iterator) RunFailedError!void {
     var arg_builder = ArgBuilder { };
-    errdefer arg_builder.errDeinit(hooks.allocator);
-    
-    while (true) {
-        if (next == limit) {
-            try arg_builder.flush(hooks.allocator, args);
-            return limit;
+    errdefer arg_builder.errDeinit(ctx.hooks.allocator);
+
+    while (nodes.next()) |node| {
+        if (!node.join_prev) {
+            try arg_builder.flush(ctx.hooks.allocator, args);
         }
-        const token = try scan(hooks, next, limit);
-        switch (token.kind) {
-            .inline_whitespace => {
-                try arg_builder.flush(hooks.allocator, args);
-            },
-            .comment, .newline => {
-                try arg_builder.flush(hooks.allocator, args);
-                return token.end;
-            },
-            .close_paren => {
-                try arg_builder.flush(hooks.allocator, args);
-                return next;
-             },
-            .assign_op => {
-                @panic("not impl");
-            },
-            .arg => {
-                try arg_builder.add(hooks.allocator, next[0 .. @ptrToInt(token.end) - @ptrToInt(next)]);
-            },
-            .builtin_id, .user_id => {
-                @panic("not impl");
-            },
-            .double_quoted_string => {
-                try arg_builder.add(hooks.allocator, next[1 .. @ptrToInt(token.end) - @ptrToInt(next) - 1]);
-            },
-            .single_quoted_string,
-            .escape_sequence => {
-               try arg_builder.add(hooks.allocator, next[1..2]);
-            },
-            .open_paren => {
-                @panic("not impl");
-            },
+        switch (node.data) {
+            //.arg_sep => try arg_builder.flush(ctx.hooks.allocator, args),
+            .arg => |end| try arg_builder.add(ctx.hooks.allocator, node.pos[0 ..  @ptrToInt(end) - @ptrToInt(node.pos)]),
+            .assign => @panic("not impl"),
+            .user_id => @panic("not impl"),
+            .builtin_id => @panic("not impl"),
+            .binary_op => @panic("not impl"),
+            .double_quoted_string => |end|
+                try arg_builder.add(ctx.hooks.allocator, node.pos[1 .. @ptrToInt(end) - @ptrToInt(node.pos) - 1]),
+            .single_quoted_string => @panic("not impl"),
+            .escape_sequence => try arg_builder.add(ctx.hooks.allocator, node.pos[1..2]),
         }
-        next = token.end;
     }
+
+    try arg_builder.flush(ctx.hooks.allocator, args);
 }
 
 const TestHooks = struct {
@@ -291,11 +363,7 @@ const TestHooks = struct {
 
     pub fn init() TestHooks {
         return .{
-            .hooks = .{
-                .allocator = testing.allocator,
-                .onError = onError,
-                .onWrite = onWrite,
-            },
+            .hooks = RunHooks.init(testing.allocator, onError, onWrite),
             .stdout = ArrayList(u8).init(testing.allocator),
             .stderr = ArrayList(u8).init(testing.allocator),
             .result = .none,
@@ -344,12 +412,17 @@ const TestConfig = struct {
 fn runTest(src: []const u8, config: TestConfig) !void {
     var hooks = TestHooks.init();
     defer hooks.deinit();
+    var script_ctx = ScriptContext { };
+    var ctx = CommandContext {
+        .hooks = &hooks.hooks,
+        .script_ctx = &script_ctx,
+    };
 
     if (config.stdin) |stdin| {
         _ = stdin;
         @panic("not impl");
     }
-    const end = runSlice(&hooks.hooks, src) catch |e| switch (e) {
+    const end = runSlice(&ctx, src) catch |e| switch (e) {
         error.OutOfMemory => return e,
         error.RunFailed => {
             const err = switch (hooks.result) {
@@ -493,11 +566,12 @@ test "ported from python test" {
 //    # should be a syntax error because there are no quotes!
 //    testSyntaxError(b"@echo 'foo'", "got a single-quote string literal without double-quotes nor newlines, use double quotes instead or invoke @allstringliterals")
 //    testCommand(b"@allstringliterals\n@echo 'foo'", 0, b"foo\n")
-//    testCommand(b"\n".join([
-//        b"name = joe",
-//        b"age = 64",
-//        b"@echo '''\nhello '''$name''', you're\n64!!!'''"]
-//    ), 0, b"hello joe, you're\n64!!!\n")
+    //try runTest(
+    //    \\name = joe
+    //    \\age = 64
+    //    \\@echo '''\nhello '''$name''', you're\n64!!!'''
+    //    , .{ .stdout = "hello joe, you're\n64!!!\n" }
+    //);
 //
 //    #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 //    #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!

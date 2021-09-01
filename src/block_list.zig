@@ -76,7 +76,11 @@ pub fn BlockList(comptime T: type, comptime options: struct {
             elements[0] = first_element;
             self.block_queue.append(block_node);
         }
-    
+
+        pub fn isEmpty(self: @This()) bool {
+            return self.block_queue.len == 0;
+        }
+
         pub fn append(self: *@This(), element: T) !void {
             if (self.block_queue.last) |last| {
                 const elements = getElementSlice(last);
