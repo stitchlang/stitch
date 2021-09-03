@@ -96,29 +96,46 @@ pub fn BlockList(comptime T: type, comptime options: struct {
         }
     
         pub fn iterator(self: *const @This()) Iterator {
-            return Iterator { .block_node = self.block_queue.first };
+            return Iterator.init(self.block_queue.first);
         }
 
         pub const Iterator = struct {
             block_node: ?*BlockNode,
-            next_index: usize = 0,
+            index: usize = 0,
 
+            pub fn init(first_block_node: ?*BlockNode) Iterator {
+                var result = Iterator { .block_node = first_block_node };
+                result.toNextNode();
+                return result;
+            }
+            fn toNextNode(it: *Iterator) void {
+                while (true) {
+                    const block_node = it.block_node orelse return;
+                    if (it.index < block_node.data.element_count) {
+                        return;
+                    }
+                    it.block_node = block_node.next;
+                    it.index = 0;
+                }
+            }
+            pub fn front(it: *Iterator) ?T {
+                if (it.block_node) |block_node| {
+                    std.debug.assert(it.index < block_node.data.element_count);
+                    return getElementSlice(block_node)[it.index];
+                }
+                return null;
+            }
             pub fn next(it: *Iterator) ?T {
-                if (it.block_node) |first_block_node| {
-                    if (it.next_index < first_block_node.data.element_count) {
-                        const i = it.next_index;
-                        it.next_index += 1;
-                        return getElementSlice(first_block_node)[i];
+                if (it.block_node) |block_node| {
+                    std.debug.assert(it.index < block_node.data.element_count);
+                    var result = getElementSlice(block_node)[it.index];
+                    it.index += 1;
+                    if (it.index >= block_node.data.element_count) {
+                        it.block_node = block_node.next;
+                        it.index = 0;
+                        it.toNextNode();
                     }
-                    it.block_node = first_block_node.next;
-                    it.next_index = 0;
-                    if (it.block_node) |next_block_node| {
-                        if (next_block_node.data.element_count > 0) {
-                            it.next_index = 1;
-                            return getElementSlice(next_block_node)[0];
-                        }
-                        std.debug.assert(next_block_node.next == null);
-                    }
+                    return result;
                 }
                 return null;
             }
@@ -141,8 +158,10 @@ test {
             var it = b.iterator();
             i = 0;
             while (i < 100) : (i += 1) {
+                try std.testing.expectEqual(i, it.front().?);
                 try std.testing.expectEqual(i, it.next().?);
             }
+            try std.testing.expectEqual(@as(?usize, null), it.front());
             try std.testing.expectEqual(@as(?usize, null), it.next());
         }
     }

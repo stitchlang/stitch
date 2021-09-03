@@ -72,8 +72,8 @@ const ScriptContext = struct {
 const CommandContext = struct {
     hooks: *RunHooks,
     script_ctx: *ScriptContext,
-    builtin_prefix_count: u16 = 0,
-    depth: u16 = 0,
+    builtin_prefix_count: u16,
+    inline_cmd_depth: u16,
 };
 
 fn reportUnknownToken(hooks: *RunHooks, pos: [*]const u8, limit: [*]const u8) void {
@@ -142,16 +142,21 @@ pub fn runLimitSlice(ctx: *CommandContext, start: [*]const u8, limit: [*]const u
     return cmd_end;
 }
 
-pub fn runNodes(ctx: *CommandContext, nodes: *parse.NodeBuilder.Iterator,
+fn firstNodeJoinPrev(nodes: *const parse.NodeBuilder.Iterator) bool {
+    var nodes_it = nodes.*;
+    return if (nodes_it.next()) |next| next.join_prev else false;
+}
+
+pub fn runNodes(
+    ctx: *CommandContext,
+    nodes: *parse.NodeBuilder.Iterator,
     limit: [*]const u8, // TODO: this might be removed, for now it's used to find out which strings are inside the script source memory
 ) RunFailedError!void {
     const first_node = nodes.next() orelse return;
     switch (first_node.data) {
         .builtin_id => {
-            // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-            // TODO: ensure that we aren't joining to the next node
-            // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-            return runBuiltin(ctx, first_node.getIdSlice(), nodes, limit);
+            if (!firstNodeJoinPrev(nodes))
+                return runBuiltin(ctx, first_node.getIdSlice(), nodes, limit);
         },
         else => {},
     }
@@ -191,28 +196,29 @@ fn runBuiltin(
     nodes: *parse.NodeBuilder.Iterator,
     limit: [*]const u8, // might be removed, used to find out which strings are within script source memory
 ) RunFailedError!void {
-    // for now we'll assume all builtins just take string arguments
-    var args = ArrayList([]const u8).init(ctx.hooks.allocator);
-    defer {
-        for (args.items) |arg| {
-            if (!ptrIntersects(arg.ptr, builtin_id.ptr, limit)) {
-                ctx.hooks.allocator.free(arg);
-            }
-        }
-        args.deinit();
-    }
-
-    try allocArgStrings(ctx, &args, nodes);
 
     if (std.mem.eql(u8, builtin_id, "echo")) {
-        if (args.items.len == 0) {
+        var args = try ArgStrings.init(ctx, nodes, limit);
+        defer args.deinit(ctx, builtin_id.ptr, limit);
+
+        if (args.al.items.len == 0) {
             try ctx.hooks.print(.out, "\n", .{});
         } else {
-            for (args.items[0 .. args.items.len - 1]) |arg| {
+            for (args.al.items[0 .. args.al.items.len - 1]) |arg| {
                 try ctx.hooks.print(.out, "{s}", .{arg});
             }
-            try ctx.hooks.print(.out, "{s}\n", .{args.items[args.items.len-1]});
+            try ctx.hooks.print(.out, "{s}\n", .{args.al.items[args.al.items.len-1]});
         }
+
+    // @noop is a temporary builtin for initial development
+    } else if (std.mem.eql(u8, builtin_id, "noop")) {
+        var next_ctx = CommandContext {
+            .hooks = ctx.hooks,
+            .script_ctx = ctx.script_ctx,
+            .inline_cmd_depth = ctx.inline_cmd_depth,
+            .builtin_prefix_count = ctx.builtin_prefix_count + 1,
+        };
+        return runNodes(&next_ctx, nodes, limit);
     } else {
         std.debug.panic("builtin '@{s}' not impl", .{builtin_id});
     }
@@ -245,7 +251,7 @@ fn runAssign(
         return RunFailedError.RunFailed;
     }
     // TODO: test this!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    if (ctx.depth > 0) {
+    if (ctx.inline_cmd_depth > 0) {
         ctx.hooks.reportError(op_node.pos, "assignment '=' is forbidden inside an inline command", .{});
         return RunFailedError.RunFailed;
     }
@@ -285,17 +291,17 @@ const ArgBuilder = struct {
             .building => |*b| b.deinit(allocator),
         }
     }
-    pub fn flush(self: *ArgBuilder, allocator: *std.mem.Allocator, args: *ArrayList([]const u8)) !void {
+    pub fn flush(self: *ArgBuilder, allocator: *std.mem.Allocator, args: *ArrayListUnmanaged([]const u8)) !void {
         switch (self.state) {
             .empty => {},
             .source => |s| {
-                try args.append(s);
+                try args.append(allocator, s);
                 self.state = .empty;
             },
             .building => |al| {
                 const result = allocator.shrink(al.items.ptr[0..al.capacity], al.items.len);
                 std.debug.assert(result.len == al.items.len);
-                try args.append(result);
+                try args.append(allocator, result);
                 self.state = .empty;
             },
         }
@@ -323,7 +329,27 @@ const ArgBuilder = struct {
     }
 };
 
-fn allocArgStrings(ctx: *CommandContext, args: *ArrayList([]const u8), nodes: *parse.NodeBuilder.Iterator) RunFailedError!void {
+const ArgStrings = struct {
+    al: ArrayListUnmanaged([]const u8),
+    pub fn init(ctx: *CommandContext, nodes: *parse.NodeBuilder.Iterator, src_limit: [*]const u8) RunFailedError!ArgStrings {
+        var result = ArgStrings { .al = .{} };
+        const first_node = nodes.front() orelse return result;
+        const start = first_node.pos;
+        errdefer result.deinit(ctx, start, src_limit);
+        try allocArgStrings(ctx, &result.al, nodes);
+        return result;
+    }
+    pub fn deinit(self: *ArgStrings, ctx: *CommandContext, src_start: [*]const u8, src_limit: [*]const u8) void {
+        for (self.al.items) |arg| {
+            if (!ptrIntersects(arg.ptr, src_start, src_limit)) {
+                ctx.hooks.allocator.free(arg);
+            }
+        }
+        self.al.deinit(ctx.hooks.allocator);
+    }
+};
+
+fn allocArgStrings(ctx: *CommandContext, args: *ArrayListUnmanaged([]const u8), nodes: *parse.NodeBuilder.Iterator) RunFailedError!void {
     var arg_builder = ArgBuilder { };
     errdefer arg_builder.errDeinit(ctx.hooks.allocator);
 
@@ -416,6 +442,8 @@ fn runTest(src: []const u8, config: TestConfig) !void {
     var ctx = CommandContext {
         .hooks = &hooks.hooks,
         .script_ctx = &script_ctx,
+        .inline_cmd_depth = 0,
+        .builtin_prefix_count = 0,
     };
 
     if (config.stdin) |stdin| {
@@ -485,6 +513,9 @@ test {
     try runTest("@echo@ hello", .{.stdout = "hello\n"});
     try runTest("@echo \"a string!\"", .{.stdout = "a string!\n"});
     try runTest("@echo \"string and \"arg\" put together\"", .{.stdout = "string and arg put together\n"});
+
+    try runTest("@noop @echo hello", .{.stdout = "hello\n"});
+    //try runTest("@echo@hello", .{});
 }
 
 test "ported from python test" {
