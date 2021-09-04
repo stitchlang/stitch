@@ -72,9 +72,26 @@ const ScriptContext = struct {
 const CommandContext = struct {
     hooks: *RunHooks,
     script_ctx: *ScriptContext,
-    builtin_prefix_count: u16,
+    builtin_program_prefix_count: u16,
     inline_cmd_depth: u16,
+
 };
+
+const universal_builtin_map = std.ComptimeStringMap(StitchObj, .{
+   .{ "false", .{ .bool = false } },
+   .{ "true", .{ .bool = true } },
+   .{ "echo", .builtin_program },
+   .{ "noop", .builtin_program },
+});
+
+fn lookupBuiltin(ctx: *CommandContext, name: []const u8) ?StitchObj {
+    _ = ctx;
+    //if (ctx.script_ctx.script_specific_builtin_objects.get(name)) |obj|
+    //    return obj;
+    if (universal_builtin_map.get(name)) |obj|
+        return obj;
+    return null;
+}
 
 fn reportUnknownToken(hooks: *RunHooks, pos: [*]const u8, limit: [*]const u8) void {
 
@@ -155,8 +172,17 @@ pub fn runNodes(
     const first_node = nodes.next() orelse return;
     switch (first_node.data) {
         .builtin_id => {
-            if (!firstNodeJoinPrev(nodes))
-                return runBuiltin(ctx, first_node.getIdSlice(), nodes, limit);
+            if (!firstNodeJoinPrev(nodes)) {
+                if (lookupBuiltin(ctx, first_node.getIdSlice())) |builtin| {
+                    switch (builtin) {
+                        .builtin_program => |prog| {
+                            _ = prog; // TODO: pass this
+                            return runBuiltinProgram(ctx, first_node.getIdSlice(), nodes, limit);
+                        },
+                        else => {},
+                    }
+                }
+            }
         },
         else => {},
     }
@@ -187,10 +213,22 @@ fn builtinIdFromToken(start: [*]const u8, end: [*]const u8) []const u8 {
 
 const StitchObj = union(enum) {
     bool: bool,
+    string: void,//parse.Node,
+    builtin_program: void,
+    array: void,
+
+    pub fn userTypeDescription(self: StitchObj) []const u8 {
+        return switch (self) {
+            .bool => "Bool",
+            .string => "String",
+            .builtin_program => "BuiltinProgram",
+            .array => "Array",
+        };
+    }
 };
 
 
-fn runBuiltin(
+fn runBuiltinProgram(
     ctx: *CommandContext,
     builtin_id: []const u8,
     nodes: *parse.NodeBuilder.Iterator,
@@ -216,7 +254,7 @@ fn runBuiltin(
             .hooks = ctx.hooks,
             .script_ctx = ctx.script_ctx,
             .inline_cmd_depth = ctx.inline_cmd_depth,
-            .builtin_prefix_count = ctx.builtin_prefix_count + 1,
+            .builtin_program_prefix_count = ctx.builtin_program_prefix_count + 1,
         };
         return runNodes(&next_ctx, nodes, limit);
     } else {
@@ -245,8 +283,7 @@ fn runAssign(
 ) RunFailedError!void {
 
     std.debug.assert(op_node.data == .assign);
-    // TODO: test this!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    if (ctx.builtin_prefix_count > 0) {
+    if (ctx.builtin_program_prefix_count > 0) {
         ctx.hooks.reportError(op_node.pos, "unexpected '='", .{});
         return RunFailedError.RunFailed;
     }
@@ -256,8 +293,19 @@ fn runAssign(
         return RunFailedError.RunFailed;
     }
 
+    var stitch_objects = ArrayListUnmanaged(StitchObj) { };
+    defer stitch_objects.deinit(ctx.hooks.allocator);
 
-    _ = first_node;
+    const first_obj = try expandNode(ctx, first_node);
+    switch (first_obj) {
+        .string => {},
+        else => {
+            ctx.hooks.reportError(first_node.pos, "expected a String before '=' but got {s}", .{first_obj.userTypeDescription()});
+            return RunFailedError.RunFailed;
+        },
+    }
+
+
     _ = op_node;
     _ = nodes;
 
@@ -271,6 +319,32 @@ fn runAssign(
 //    _ = nodes_len;
     ctx.hooks.reportError(first_node.pos, "runAssign not implemented", .{});
     return RunFailedError.RunFailed;
+}
+
+fn expandNode(
+    ctx: *CommandContext,
+    node: parse.Node,
+    //objects: *ArrayListUnmanaged(StitchObj),
+    // we might need an ExpandNodeErrorContext for better error messages
+) RunFailedError!StitchObj {
+    switch (node.getKind()) {
+        .string => {
+            return StitchObj.string;
+        },
+        .id => switch (node.data) {
+            .user_id => @panic("user_id not impl"),
+            .builtin_id => {
+                const id = node.getIdSlice();
+                if (lookupBuiltin(ctx, id)) |obj| {
+                    return obj;
+                }
+                ctx.hooks.reportError(node.pos, "'@{s}' is undefined", .{id});
+                return RunFailedError.RunFailed;
+            },
+            else => unreachable,
+        },
+        else => std.debug.panic("expandNode kind '{}' not implemented", .{node.getKind()}),
+    }
 }
 
 fn ptrIntersects(s: [*]const u8, start: [*]const u8, limit: [*]const u8) bool {
@@ -443,7 +517,7 @@ fn runTest(src: []const u8, config: TestConfig) !void {
         .hooks = &hooks.hooks,
         .script_ctx = &script_ctx,
         .inline_cmd_depth = 0,
-        .builtin_prefix_count = 0,
+        .builtin_program_prefix_count = 0,
     };
 
     if (config.stdin) |stdin| {
@@ -515,6 +589,8 @@ test {
     try runTest("@echo \"string and \"arg\" put together\"", .{.stdout = "string and arg put together\n"});
 
     try runTest("@noop @echo hello", .{.stdout = "hello\n"});
+    try runTest("@noop a = b", .{.err = "unexpected '='"});
+
     //try runTest("@echo@hello", .{});
 }
 
@@ -597,6 +673,7 @@ test "ported from python test" {
 //    # should be a syntax error because there are no quotes!
 //    testSyntaxError(b"@echo 'foo'", "got a single-quote string literal without double-quotes nor newlines, use double quotes instead or invoke @allstringliterals")
 //    testCommand(b"@allstringliterals\n@echo 'foo'", 0, b"foo\n")
+    //try runTest("foo = bar", .{});
     //try runTest(
     //    \\name = joe
     //    \\age = 64
@@ -783,8 +860,8 @@ test "ported from python test" {
 //    testSemanticError(b"@not = bar", "unexpected '='")
 //    testSemanticError(b"@echo =", "unexpected '='")
 //    testSemanticError(b"foo = @not", "expected a String, Bool or Array after '=' but got Builtin")
-//    testSemanticError(b"@true = bar", "expected a String before '=' but got Bool")
-//    testSemanticError(b"@missing = bar", "'@missing' is undefined")
+    try runTest("@true = bar", .{.err = "expected a String before '=' but got Bool"});
+    try runTest("@missing = bar", .{.err = "'@missing' is undefined"});
 //    testSemanticError(b"foo = @missing", "'@missing' is undefined")
 //    testSemanticError(b"@not foo = bat", "unexpected '='")
 //    testSemanticError(b"(foo = bar)", "assignment '=' is not allowed inside an inline command")

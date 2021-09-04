@@ -83,7 +83,6 @@ pub const Node = struct {
     },
     pub fn getKind(self: Node) NodeKind {
         return switch (self.data) {
-            .arg_sep => .arg_sep,
             .arg, .double_quoted_string, .single_quoted_string, .escape_sequence => .string,
             .assign, .binary_op => .binary_op,
             .user_id, .builtin_id => .id,
