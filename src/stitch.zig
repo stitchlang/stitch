@@ -1,8 +1,8 @@
+const builtin = @import("builtin");
 const std = @import("std");
-const builtin = std.builtin;
 
 fn nextArg(it: *std.process.ArgIterator) ?[:0]const u8 {
-    return (if (builtin.os.tag != .windows) it.nextPosix()
+    return (if (builtin.os.tag != .windows) it.next()
         else @compileError("not impl"));
 }
 
